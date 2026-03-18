@@ -3,12 +3,17 @@ package com.example.frontend.controller;
 import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardInfoDto;
 import com.example.dto.dashboard.DashboardPanelDto;
+import com.example.dto.dashboard.DashboardRefreshDto;
+import com.example.dto.dashboard.NetworkTrafficDto;
 import com.example.frontend.controller.dashboard.DashboardCanvasModule;
 import com.example.frontend.controller.dashboard.DashboardClassroomModule;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
+import com.example.frontend.controller.dashboard.DashboardUIService;
+import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
 import com.example.frontend.controller.panel.NetworkPanelController;
+import com.example.frontend.service.DashboardDataService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -80,6 +85,8 @@ public class DashboardController {
     private DashboardManagementModule managementModule;
     private DashboardRealtimeModule realtimeModule;
     private DashboardWidgetModule widgetModule;
+    private DashboardViewModel dashboardViewModel;
+    private DashboardUIService dashboardUIService;
 
     private Pane classroomContainer;
     private ScrollPane dashboardScrollPane;
@@ -108,6 +115,7 @@ public class DashboardController {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final DashboardService dashboardService = new DashboardService();
+    private final DashboardDataService dashboardDataService = new DashboardDataService();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final Preferences preferences = Preferences.userNodeForPackage(DashboardController.class);
 
@@ -127,8 +135,11 @@ public class DashboardController {
 
     @FXML
     public void initialize() {
-        zoomScale = preferences.getDouble("dashboard.zoomScale", 1.0);
-        snapToGrid = preferences.getBoolean("dashboard.snapToGrid", true);
+        dashboardViewModel = new DashboardViewModel();
+        zoomScale = dashboardViewModel.getZoomScale();
+        snapToGrid = dashboardViewModel.isSnapToGrid();
+        layoutLocked = dashboardViewModel.isLayoutLocked();
+        dashboardOnlyMode = dashboardViewModel.isDashboardOnlyMode();
 
         if (rootVBox == null) {
             return;
@@ -153,17 +164,7 @@ public class DashboardController {
             }
         }), 0, 1, TimeUnit.SECONDS);
 
-        scheduler.scheduleAtFixedRate(() -> {
-            refreshDashboardData();
-            if (networkPanelController != null) {
-                networkPanelController.updateNetworkChart();
-            }
-            networkItemControllers.values().forEach(NetworkPanelController::updateNetworkChart);
-            if (widgetModule != null) {
-                widgetModule.loadTextItems();
-                widgetModule.loadImageItems();
-            }
-        }, 0, 5, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::refreshDashboardSnapshot, 0, 15, TimeUnit.SECONDS);
 
         connectWebSocket();
         loadDashboards();
@@ -305,6 +306,15 @@ public class DashboardController {
                 this::loadDashboardPanels,
                 () -> snapToGrid
         );
+
+            dashboardUIService = new DashboardUIService(
+                toastContainer,
+                classroomContainer,
+                dashboardScrollPane,
+                canvasModule,
+                editOnlyToolbar,
+                leftEditControls
+            );
 
         applyEditModeUiState();
         return splitPane;
@@ -482,6 +492,9 @@ public class DashboardController {
         editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         editModeBtn.setOnAction(e -> {
             isEditMode = editModeBtn.isSelected();
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setEditMode(isEditMode);
+            }
             applyEditModeUiState();
             showToast(isEditMode ? "Edit mode on" : "Edit mode off", false);
         });
@@ -491,6 +504,9 @@ public class DashboardController {
         lockLayoutBtn.setSelected(layoutLocked);
         lockLayoutBtn.setOnAction(e -> {
             layoutLocked = lockLayoutBtn.isSelected();
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setLayoutLocked(layoutLocked);
+            }
             showToast(layoutLocked ? "Layout locked" : "Layout unlocked", false);
         });
 
@@ -498,6 +514,9 @@ public class DashboardController {
         focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         focusModeBtn.setOnAction(e -> {
             focusMode = focusModeBtn.isSelected();
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setFocusMode(focusMode);
+            }
             if (leftToolPane != null) {
                 leftToolPane.setManaged(!focusMode);
                 leftToolPane.setVisible(!focusMode);
@@ -516,8 +535,12 @@ public class DashboardController {
 
         ToggleButton dashboardOnlyBtn = new ToggleButton("Dashboard only");
         dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        dashboardOnlyBtn.setSelected(dashboardOnlyMode);
         dashboardOnlyBtn.setOnAction(e -> {
             dashboardOnlyMode = dashboardOnlyBtn.isSelected();
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyMode);
+            }
             if (leftToolPane != null) {
                 leftToolPane.setManaged(!dashboardOnlyMode);
                 leftToolPane.setVisible(!dashboardOnlyMode);
@@ -534,7 +557,7 @@ public class DashboardController {
             RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
             rotate.setByAngle(360);
             rotate.play();
-            refreshDashboardData();
+            refreshDashboardSnapshot();
         });
 
         ColorPicker bgColorPicker = new ColorPicker(Color.web("#f0f2f5"));
@@ -563,6 +586,9 @@ public class DashboardController {
         snapToggleBtn.setSelected(snapToGrid);
         snapToggleBtn.setOnAction(e -> {
             snapToGrid = snapToggleBtn.isSelected();
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setSnapToGrid(snapToGrid);
+            }
             preferences.putBoolean("dashboard.snapToGrid", snapToGrid);
         });
 
@@ -697,16 +723,10 @@ public class DashboardController {
     }
 
     private void applyEditModeUiState() {
-        if (canvasModule != null) {
+        if (dashboardUIService != null) {
+            dashboardUIService.applyEditModeUiState(isEditMode);
+        } else if (canvasModule != null) {
             canvasModule.applyEditMode(isEditMode);
-        }
-        if (editOnlyToolbar != null) {
-            editOnlyToolbar.setManaged(isEditMode);
-            editOnlyToolbar.setVisible(isEditMode);
-        }
-        if (leftEditControls != null) {
-            leftEditControls.setManaged(isEditMode);
-            leftEditControls.setVisible(isEditMode);
         }
         if (groupListView != null) {
             groupListView.refresh();
@@ -718,7 +738,7 @@ public class DashboardController {
             realtimeModule = new DashboardRealtimeModule();
         }
         realtimeModule.start(
-                () -> Platform.runLater(this::refreshDashboardData),
+                () -> Platform.runLater(this::refreshDashboardSnapshot),
                 alertPayload -> showToast("Realtime alert received", false)
         );
     }
@@ -776,6 +796,33 @@ public class DashboardController {
             cachedClassrooms = classrooms;
             Platform.runLater(this::refreshPanelListAndDashboard);
         });
+    }
+
+    private void refreshDashboardSnapshot() {
+        dashboardDataService.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
+    }
+
+    private void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+
+        cachedClassrooms = snapshot.getClassrooms() == null ? List.of() : snapshot.getClassrooms();
+
+        if (widgetModule != null) {
+            widgetModule.applySnapshot(snapshot.getTexts(), snapshot.getImages());
+        }
+
+        NetworkTrafficDto traffic = snapshot.getTraffic();
+        if (traffic != null) {
+            if (networkPanelController != null) {
+                networkPanelController.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps());
+            }
+            networkItemControllers.values().forEach(controller ->
+                    controller.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps()));
+        }
+
+        refreshPanelListAndDashboard();
     }
 
     private void loadDashboards() {
@@ -1012,14 +1059,24 @@ public class DashboardController {
     private void applyZoom(double targetScale) {
         double clamped = Math.max(0.4, Math.min(2.2, targetScale));
         zoomScale = clamped;
+        if (dashboardViewModel != null) {
+            dashboardViewModel.setZoom(clamped);
+        }
         preferences.putDouble("dashboard.zoomScale", zoomScale);
-        if (classroomContainer != null) {
+        if (dashboardUIService != null) {
+            dashboardUIService.applyZoom(zoomScale);
+        } else if (classroomContainer != null) {
             classroomContainer.setScaleX(zoomScale);
             classroomContainer.setScaleY(zoomScale);
         }
     }
 
     private void fitAllPanelsToViewport() {
+        if (dashboardUIService != null) {
+            dashboardUIService.fitAllPanelsToViewport(getAllCanvasPanels());
+            return;
+        }
+
         if (dashboardScrollPane == null || classroomContainer == null) {
             return;
         }
@@ -1178,6 +1235,11 @@ public class DashboardController {
     }
 
     private void showToast(String message, boolean error) {
+        if (dashboardUIService != null) {
+            dashboardUIService.showToast(message, error);
+            return;
+        }
+
         if (toastContainer == null) {
             return;
         }
@@ -1201,7 +1263,7 @@ public class DashboardController {
 
     @FXML
     private void handleRefreshButtonAction() {
-        refreshDashboardData();
+        refreshDashboardSnapshot();
     }
 
     @FXML

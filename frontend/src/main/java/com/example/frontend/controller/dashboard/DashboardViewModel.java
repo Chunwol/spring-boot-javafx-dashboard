@@ -143,12 +143,22 @@ public class DashboardViewModel {
         return snapToGrid.get();
     }
 
+    public void setSnapToGrid(boolean value) {
+        snapToGrid.set(value);
+        savePreferences();
+    }
+
     public BooleanProperty layoutLockedProperty() {
         return layoutLocked;
     }
 
     public boolean isLayoutLocked() {
         return layoutLocked.get();
+    }
+
+    public void setLayoutLocked(boolean value) {
+        layoutLocked.set(value);
+        savePreferences();
     }
 
     public BooleanProperty dashboardOnlyModeProperty() {
@@ -159,6 +169,11 @@ public class DashboardViewModel {
         return dashboardOnlyMode.get();
     }
 
+    public void setDashboardOnlyMode(boolean value) {
+        dashboardOnlyMode.set(value);
+        savePreferences();
+    }
+
     public BooleanProperty focusModeProperty() {
         return focusMode;
     }
@@ -167,12 +182,20 @@ public class DashboardViewModel {
         return focusMode.get();
     }
 
+    public void setFocusMode(boolean value) {
+        focusMode.set(value);
+    }
+
     public BooleanProperty isEditModeProperty() {
         return isEditMode;
     }
 
     public boolean isEditMode() {
         return isEditMode.get();
+    }
+
+    public void setEditMode(boolean value) {
+        isEditMode.set(value);
     }
 
     public ObjectProperty<Long> selectedDashboardIdProperty() {

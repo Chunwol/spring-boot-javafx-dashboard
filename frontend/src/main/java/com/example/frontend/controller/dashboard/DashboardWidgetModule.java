@@ -71,6 +71,15 @@ public class DashboardWidgetModule {
     public List<Map<String, Object>> getCachedTexts() { return cachedTexts; }
     public List<Map<String, Object>> getCachedImages() { return cachedImages; }
 
+    public void applySnapshot(List<Map<String, Object>> texts, List<Map<String, Object>> images) {
+        cachedTexts = texts == null ? List.of() : texts;
+        cachedImages = images == null ? List.of() : images;
+        Platform.runLater(() -> {
+            updateTextItemsUi(cachedTexts);
+            updateImageItemsUi(cachedImages);
+        });
+    }
+
     // ─────────── 텍스트 아이템 ───────────
 
     public void handleAddTextItem() {

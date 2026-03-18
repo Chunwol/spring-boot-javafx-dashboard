@@ -1,5 +1,6 @@
 package com.example.backend.controller.dashboard;
 
+import com.example.backend.dto.dashboard.DashboardRefreshDto;
 import com.example.backend.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
@@ -85,6 +86,12 @@ public class DashboardApiController {
     @GetMapping("/traffic/summary")
     public ResponseEntity<NetworkTrafficDto> getNetworkTrafficSummary() {
         return ResponseEntity.ok(dashboardService.getNetworkTraffic());
+    }
+
+    @GetMapping("/refresh")
+    @Operation(summary = "대시보드 통합 새로고침", description = "강의실, 트래픽, 텍스트, 이미지 위젯을 한 번에 조회합니다.")
+    public ResponseEntity<DashboardRefreshDto> getDashboardRefreshSnapshot() {
+        return ResponseEntity.ok(dashboardService.getRefreshSnapshot());
     }
 
     @GetMapping("/classrooms/{groupId}/ip-ranges")

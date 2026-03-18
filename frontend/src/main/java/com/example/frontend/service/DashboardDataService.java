@@ -1,8 +1,10 @@
 package com.example.frontend.service;
 
 import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.DashboardRefreshDto;
 import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class DashboardDataService {
     private final ApiClient apiClient = ApiClient.getInstance();
@@ -10,5 +12,14 @@ public class DashboardDataService {
     public List<ClassroomSummaryDto> fetchClassrooms() throws Exception {
         return apiClient.getJson("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){}).get();
     }
-    // 필요시 fetchTexts, fetchImages 등 추가 구현
+
+    public void fetchRefreshSnapshotAsync(Consumer<DashboardRefreshDto> callback) {
+        apiClient.getJson("/dashboard/refresh", new TypeReference<DashboardRefreshDto>() {})
+                .thenAccept(callback)
+                .exceptionally(ex -> {
+                    ex.printStackTrace();
+                    callback.accept(new DashboardRefreshDto());
+                    return null;
+                });
+    }
 }

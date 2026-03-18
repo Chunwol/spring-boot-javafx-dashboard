@@ -76,4 +76,20 @@ public class NetworkPanelController {
                     return null;
                 });
     }
+
+    public void updateNetworkChart(double inboundMbps, double outboundMbps) {
+        Platform.runLater(() -> appendTrafficPoint(inboundMbps, outboundMbps));
+    }
+
+    private void appendTrafficPoint(double inboundMbps, double outboundMbps) {
+        String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        inboundSeries.getData().add(new XYChart.Data<>(now, inboundMbps));
+        outboundSeries.getData().add(new XYChart.Data<>(now, outboundMbps));
+        if (inboundSeries.getData().size() > 20) {
+            inboundSeries.getData().remove(0);
+        }
+        if (outboundSeries.getData().size() > 20) {
+            outboundSeries.getData().remove(0);
+        }
+    }
 }

@@ -1,15 +1,20 @@
 package com.example.backend.service.dashboard;
 
+import com.example.backend.dto.dashboard.DashboardRefreshDto;
 import com.example.backend.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
+import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
+import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.backend.repository.pc.PcMasterRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,15 +34,21 @@ public class DashboardService {
     private final PcMasterRepository pcMasterRepository;
     private final ClassroomIpRangeRepository ipRangeRepository;
     private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
+    private final DashboardWidgetItemRepository dashboardWidgetItemRepository;
+    private final ObjectMapper objectMapper;
 
     public DashboardService(ClassroomGroupRepository classroomGroupRepository,
                            PcMasterRepository pcMasterRepository,
                            ClassroomIpRangeRepository ipRangeRepository,
-                           ClassroomTeacherDeviceRepository teacherDeviceRepository) {
+                           ClassroomTeacherDeviceRepository teacherDeviceRepository,
+                           DashboardWidgetItemRepository dashboardWidgetItemRepository,
+                           ObjectMapper objectMapper) {
         this.classroomGroupRepository = classroomGroupRepository;
         this.pcMasterRepository = pcMasterRepository;
         this.ipRangeRepository = ipRangeRepository;
         this.teacherDeviceRepository = teacherDeviceRepository;
+        this.dashboardWidgetItemRepository = dashboardWidgetItemRepository;
+        this.objectMapper = objectMapper;
     }
 
     public List<ClassroomSummaryDto> getClassroomSummaries() {
@@ -118,6 +129,15 @@ public class DashboardService {
         return new NetworkTrafficDto(0.0, 0.0);
     }
 
+    public DashboardRefreshDto getRefreshSnapshot() {
+        DashboardRefreshDto snapshot = new DashboardRefreshDto();
+        snapshot.setClassrooms(getClassroomSummaries());
+        snapshot.setTraffic(getNetworkTraffic());
+        snapshot.setTexts(getWidgetItemsByType("TEXT"));
+        snapshot.setImages(getWidgetItemsByType("IMAGE"));
+        return snapshot;
+    }
+
     public List<ClassroomIpRange> getClassroomIpRanges(Long groupId) {
         return ipRangeRepository.findByGroupId(groupId);
     }
@@ -157,5 +177,33 @@ public class DashboardService {
         dto.setRole(pc.getRole());
         dto.setLastSeen(pc.getLastSeen());
         return dto;
+    }
+
+    private List<java.util.Map<String, Object>> getWidgetItemsByType(String type) {
+        return dashboardWidgetItemRepository.findAll().stream()
+                .filter(item -> type.equalsIgnoreCase(item.getType()))
+                .map(this::toWidgetResponse)
+                .toList();
+    }
+
+    private java.util.Map<String, Object> toWidgetResponse(DashboardWidgetItem item) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("id", item.getId());
+        out.put("type", item.getType());
+        out.put("x", item.getX());
+        out.put("y", item.getY());
+        out.put("width", item.getWidth());
+        out.put("height", item.getHeight());
+        out.put("visible", item.isVisible());
+        out.put("config", item.getConfig());
+        if (item.getConfig() != null && !item.getConfig().isBlank()) {
+            try {
+                java.util.Map<String, Object> parsed = objectMapper.readValue(item.getConfig(), new TypeReference<java.util.Map<String, Object>>() {});
+                out.putAll(parsed);
+            } catch (Exception e) {
+                logger.warn("Failed to parse widget config for item {}", item.getId(), e);
+            }
+        }
+        return out;
     }
 }
