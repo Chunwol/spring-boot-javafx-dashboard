@@ -3,6 +3,7 @@ package com.example.frontend.controller.dashboard;
 import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardPanelDto;
 import com.example.dto.dashboard.PcStatusDto;
+import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.ApiClient;
@@ -10,7 +11,6 @@ import com.example.frontend.model.panel.PanelInfo;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
-import javafx.geometry.Point2D;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
@@ -47,6 +47,7 @@ public class DashboardClassroomModule {
     private final LongSupplier dashboardIdSupplier;
     private final Runnable refreshPanelCallback;
     private final BooleanSupplier snapModeSupplier;
+    private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private static final double GRID_SIZE = 20.0;
 
     public DashboardClassroomModule(
@@ -401,31 +402,17 @@ public class DashboardClassroomModule {
     // ─── 드래그 / 리사이즈 ────────────────────────────────────────────────
 
     private void makeDraggable(VBox panel, ClassroomSummaryDto summary, Long dashboardPanelId) {
-        double[] startPos = {0, 0};
-        panel.setOnMousePressed(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D p = panel.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-            startPos[0] = p.getX() - panel.getLayoutX();
-            startPos[1] = p.getY() - panel.getLayoutY();
-            panel.setOpacity(0.7);
-            panel.toFront();
-            e.consume();
-        });
-        panel.setOnMouseDragged(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D p = panel.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-            panel.setLayoutX(applySnap(p.getX() - startPos[0]));
-            panel.setLayoutY(applySnap(p.getY() - startPos[1]));
-            e.consume();
-        });
-        panel.setOnMouseReleased(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
+        dashboardInteractionService.attachDragHandlers(
+                panel,
+                editModeSupplier,
+                this::applySnap,
+                () -> {
             panel.setOpacity(1.0);
             updateDashboardPanelPosition(dashboardPanelId,
                     panel.getLayoutX(), panel.getLayoutY(),
                     panel.getPrefWidth(), panel.getPrefHeight(), true);
-            e.consume();
-        });
+                }
+        );
     }
 
     private void makeResizable(VBox panel, ClassroomSummaryDto summary, Long dashboardPanelId) {
@@ -438,26 +425,19 @@ public class DashboardClassroomModule {
         handleBox.setAlignment(Pos.BOTTOM_RIGHT);
         panel.getChildren().add(handleBox);
 
-        resizeHandle.setOnMousePressed(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            e.consume();
-        });
-        resizeHandle.setOnMouseDragged(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D p = panel.sceneToLocal(e.getSceneX(), e.getSceneY());
-            double newWidth = p.getX();
-            double newHeight = p.getY();
-            if (newWidth > 200) panel.setPrefWidth(applySnap(newWidth));
-            if (newHeight > 200) panel.setPrefHeight(applySnap(newHeight));
-            e.consume();
-        });
-        resizeHandle.setOnMouseReleased(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
+        dashboardInteractionService.attachResizeHandlers(
+                panel,
+                resizeHandle,
+                200,
+                200,
+                editModeSupplier,
+                this::applySnap,
+                () -> {
             updateDashboardPanelPosition(dashboardPanelId,
                     panel.getLayoutX(), panel.getLayoutY(),
                     panel.getPrefWidth(), panel.getPrefHeight(), true);
-            e.consume();
-        });
+                }
+        );
     }
 
     private void updateDashboardPanelPosition(Long dashboardPanelId, double x, double y, double width, double height, boolean visible) {

@@ -7,6 +7,7 @@ import com.example.dto.dashboard.DashboardRefreshDto;
 import com.example.dto.dashboard.NetworkTrafficDto;
 import com.example.frontend.controller.dashboard.DashboardCanvasModule;
 import com.example.frontend.controller.dashboard.DashboardClassroomModule;
+import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
@@ -87,6 +88,7 @@ public class DashboardController {
     private DashboardWidgetModule widgetModule;
     private DashboardViewModel dashboardViewModel;
     private DashboardUIService dashboardUIService;
+    private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
 
     private Pane classroomContainer;
     private ScrollPane dashboardScrollPane;
@@ -976,44 +978,22 @@ public class DashboardController {
     }
 
     private void makeDashboardPanelInteractive(VBox panel, Long panelId) {
-        final double[] dragStart = new double[2];
-
-        panel.setOnMousePressed(event -> {
-            if (!isEditMode || layoutLocked) {
-                return;
-            }
-            Point2D parentPoint = panel.getParent().sceneToLocal(event.getSceneX(), event.getSceneY());
-            dragStart[0] = parentPoint.getX() - panel.getLayoutX();
-            dragStart[1] = parentPoint.getY() - panel.getLayoutY();
-            panel.toFront();
-            event.consume();
-        });
-
-        panel.setOnMouseDragged(event -> {
-            if (!isEditMode || layoutLocked) {
-                return;
-            }
-            Point2D parentPoint = panel.getParent().sceneToLocal(event.getSceneX(), event.getSceneY());
-            panel.setLayoutX(applySnap(parentPoint.getX() - dragStart[0]));
-            panel.setLayoutY(applySnap(parentPoint.getY() - dragStart[1]));
-            event.consume();
-        });
-
-        panel.setOnMouseReleased(event -> {
-            if (!isEditMode || layoutLocked || selectedDashboardId == null) {
-                return;
-            }
-            dashboardService.updatePanelPositionAsync(
-                    selectedDashboardId,
-                    panelId,
-                    panel.getLayoutX(),
-                    panel.getLayoutY(),
-                    panel.getPrefWidth(),
-                    panel.getPrefHeight()
-            );
-            showToast("Panel position saved", false);
-            event.consume();
-        });
+        dashboardInteractionService.attachDragHandlers(
+                panel,
+                () -> isEditMode && !layoutLocked && selectedDashboardId != null,
+                this::applySnap,
+                () -> {
+                    dashboardService.updatePanelPositionAsync(
+                            selectedDashboardId,
+                            panelId,
+                            panel.getLayoutX(),
+                            panel.getLayoutY(),
+                            panel.getPrefWidth(),
+                            panel.getPrefHeight()
+                    );
+                    showToast("Panel position saved", false);
+                }
+        );
     }
 
     private void addResizeHandleToDashboardPanel(VBox panel, Long panelId) {
@@ -1027,33 +1007,25 @@ public class DashboardController {
 
         panel.getChildren().add(handleHolder);
 
-        handle.setOnMouseDragged(event -> {
-            if (!isEditMode || layoutLocked) {
-                return;
-            }
-            Point2D local = panel.sceneToLocal(event.getSceneX(), event.getSceneY());
-            double newW = Math.max(320, local.getX());
-            double newH = Math.max(220, local.getY());
-            panel.setPrefWidth(applySnap(newW));
-            panel.setPrefHeight(applySnap(newH));
-            event.consume();
-        });
-
-        handle.setOnMouseReleased(event -> {
-            if (!isEditMode || layoutLocked || selectedDashboardId == null) {
-                return;
-            }
-            dashboardService.updatePanelPositionAsync(
-                    selectedDashboardId,
-                    panelId,
-                    panel.getLayoutX(),
-                    panel.getLayoutY(),
-                    panel.getPrefWidth(),
-                    panel.getPrefHeight()
-            );
-            showToast("Panel size saved", false);
-            event.consume();
-        });
+        dashboardInteractionService.attachResizeHandlers(
+                panel,
+                handle,
+                320,
+                220,
+                () -> isEditMode && !layoutLocked && selectedDashboardId != null,
+                this::applySnap,
+                () -> {
+                    dashboardService.updatePanelPositionAsync(
+                            selectedDashboardId,
+                            panelId,
+                            panel.getLayoutX(),
+                            panel.getLayoutY(),
+                            panel.getPrefWidth(),
+                            panel.getPrefHeight()
+                    );
+                    showToast("Panel size saved", false);
+                }
+        );
     }
 
     private void applyZoom(double targetScale) {
