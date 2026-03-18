@@ -181,8 +181,7 @@ public class DashboardService {
 
     private List<java.util.Map<String, Object>> getWidgetItemsByType(String type) {
         try {
-            return dashboardWidgetItemRepository.findAll().stream()
-                    .filter(item -> type.equalsIgnoreCase(item.getType()))
+            return dashboardWidgetItemRepository.findByTypeIgnoreCase(type).stream()
                     .map(this::toWidgetResponse)
                     .toList();
         } catch (Exception e) {

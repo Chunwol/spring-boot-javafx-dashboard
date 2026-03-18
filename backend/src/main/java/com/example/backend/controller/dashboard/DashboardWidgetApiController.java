@@ -63,8 +63,7 @@ public class DashboardWidgetApiController {
     @GetMapping("/dashboard/texts")
     public List<Map<String, Object>> listTextItems() {
         try {
-            return repository.findAll().stream()
-                    .filter(item -> "TEXT".equalsIgnoreCase(item.getType()))
+            return repository.findByTypeIgnoreCase("TEXT").stream()
                     .map(this::toTextMap)
                     .toList();
         } catch (Exception e) {
@@ -123,8 +122,7 @@ public class DashboardWidgetApiController {
     @GetMapping("/dashboard/images")
     public List<Map<String, Object>> listImageItems() {
         try {
-            return repository.findAll().stream()
-                    .filter(item -> "IMAGE".equalsIgnoreCase(item.getType()))
+            return repository.findByTypeIgnoreCase("IMAGE").stream()
                     .map(this::toImageMap)
                     .toList();
         } catch (Exception e) {
