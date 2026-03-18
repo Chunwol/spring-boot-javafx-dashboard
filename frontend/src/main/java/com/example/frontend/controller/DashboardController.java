@@ -303,7 +303,7 @@ public class DashboardController {
                 classroomContainer,
                 panelManager,
                 () -> isEditMode && !layoutLocked,
-                this::refreshDashboardData,
+            this::refreshDashboardSnapshot,
                 () -> selectedDashboardId == null ? -1L : selectedDashboardId,
                 this::loadDashboardPanels,
                 () -> snapToGrid
