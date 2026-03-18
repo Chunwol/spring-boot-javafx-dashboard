@@ -1,0 +1,70 @@
+plugins {
+    id 'java'
+    id 'application'
+    // GraalVM Native Image를 사용하려면 아래 플러그인을 활성화하고
+    // GraalVM JDK로 빌드해야 함 (일반 JDK에서는 주석 처리)
+    // id 'org.graalvm.buildtools.native' version '0.9.28'
+}
+
+group = 'com.example'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // 하드웨어 정보 수집 (MAC, IP, 네트워크 트래픽)
+    implementation 'com.github.oshi:oshi-core:6.4.13'
+
+    // HTTP 클라이언트
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // JSON 직렬화
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.1'
+
+    // 로깅
+    implementation 'org.slf4j:slf4j-simple:2.0.13'
+}
+
+application {
+    mainClass = 'com.example.agent.AgentMain'
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    archiveBaseName = 'agent'
+    archiveVersion = '1.0.0'
+    manifest {
+        attributes 'Main-Class': 'com.example.agent.AgentMain'
+    }
+    // 의존성 포함 fat jar
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// graalvmNative 설정 (GraalVM JDK 환경에서만 동작)
+// graalvmNative {
+//     binaries {
+//         main {
+//             imageName = 'agent'
+//             mainClass = 'com.example.agent.AgentMain'
+//             buildArgs.addAll([
+//                 '--no-fallback',
+//                 '-H:+ReportExceptionStackTraces',
+//                 '-H:ReflectionConfigurationFiles=src/main/resources/META-INF/native-image/reflect-config.json'
+//             ])
+//         }
+//     }
+// }

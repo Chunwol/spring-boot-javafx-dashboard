@@ -1,0 +1,79 @@
+package com.example.frontend.controller.panel;
+
+import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.example.frontend.service.ApiClient;
+import javafx.scene.layout.VBox;
+
+import javafx.geometry.Insets;
+import javafx.scene.chart.CategoryAxis;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
+import javafx.scene.layout.Priority;
+import javafx.application.Platform;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import com.fasterxml.jackson.databind.JsonNode;
+
+public class NetworkPanelController {
+    private final VBox panel;
+    private final ClassroomSummaryDto summary;
+    private final LineChart<String, Number> networkChart;
+    private final XYChart.Series<String, Number> inboundSeries;
+    private final XYChart.Series<String, Number> outboundSeries;
+    private final ApiClient apiClient = ApiClient.getInstance();
+
+    public NetworkPanelController(ClassroomSummaryDto summary) {
+        this.summary = summary;
+        this.inboundSeries = new XYChart.Series<>();
+        this.inboundSeries.setName("Inbound");
+        this.outboundSeries = new XYChart.Series<>();
+        this.outboundSeries.setName("Outbound");
+        this.networkChart = createNetworkChart();
+        this.panel = new VBox(networkChart);
+        this.panel.setPadding(new Insets(10));
+        VBox.setVgrow(networkChart, Priority.ALWAYS);
+    }
+
+    private LineChart<String, Number> createNetworkChart() {
+        CategoryAxis xAxis = new CategoryAxis();
+        xAxis.setLabel("시간");
+        NumberAxis yAxis = new NumberAxis();
+        yAxis.setLabel("트래픽 (Mbps)");
+        LineChart<String, Number> chart = new LineChart<>(xAxis, yAxis);
+        chart.setTitle("실시간 전체 네트워크 트래픽");
+        chart.setCreateSymbols(false);
+        chart.setAnimated(false);
+        chart.getData().addAll(inboundSeries, outboundSeries);
+        return chart;
+    }
+
+    public VBox getPanel() {
+        return panel;
+    }
+
+    // 네트워크 트래픽 데이터 갱신
+    public void updateNetworkChart() {
+        apiClient.get("/dashboard/traffic")
+                .thenAccept(body -> {
+                    try {
+                JsonNode node = apiClient.getObjectMapper().readTree(body);
+                        double inTraffic = node.get("inboundMbps").asDouble();
+                        double outTraffic = node.get("outboundMbps").asDouble();
+                        Platform.runLater(() -> {
+                            String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+                            inboundSeries.getData().add(new XYChart.Data<>(now, inTraffic));
+                            outboundSeries.getData().add(new XYChart.Data<>(now, outTraffic));
+                            if (inboundSeries.getData().size() > 20) inboundSeries.getData().remove(0);
+                            if (outboundSeries.getData().size() > 20) outboundSeries.getData().remove(0);
+                        });
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                })
+                .exceptionally(ex -> {
+                    ex.printStackTrace();
+                    return null;
+                });
+    }
+}

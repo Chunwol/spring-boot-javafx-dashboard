@@ -1,0 +1,10 @@
+ALTER TABLE command_queue ADD COLUMN status TEXT DEFAULT 'QUEUED';
+ALTER TABLE command_queue ADD COLUMN payload_json TEXT;
+ALTER TABLE command_queue ADD COLUMN created_at TEXT DEFAULT (datetime('now'));
+ALTER TABLE command_queue ADD COLUMN delivered_at TEXT;
+ALTER TABLE command_queue ADD COLUMN acked_at TEXT;
+ALTER TABLE command_queue ADD COLUMN completed_at TEXT;
+ALTER TABLE command_queue ADD COLUMN exit_code INTEGER;
+ALTER TABLE command_queue ADD COLUMN stdout TEXT;
+ALTER TABLE command_queue ADD COLUMN stderr TEXT;
+ALTER TABLE command_queue ADD COLUMN retry_count INTEGER DEFAULT 0;

@@ -1,0 +1,56 @@
+.root {
+    -fx-font-family: "Segoe UI";
+    -fx-background-color: linear-gradient(to bottom, #eef4ff, #ffffff 40%);
+}
+
+.label {
+    -fx-text-fill: #0f172a;
+}
+
+.button {
+    -fx-background-radius: 10;
+    -fx-padding: 8 14 8 14;
+    -fx-font-weight: 700;
+}
+
+.combo-box,
+.text-field,
+.password-field,
+.text-area,
+.list-view,
+.table-view,
+.color-picker,
+.menu-button,
+.toggle-button {
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: #d7e2ef;
+    -fx-background-color: white;
+}
+
+.scroll-pane {
+    -fx-background-color: transparent;
+}
+
+.tab-pane *.tab-header-area *.tab {
+    -fx-background-radius: 10 10 0 0;
+    -fx-background-color: #dde8f5;
+    -fx-padding: 8 16 8 16;
+}
+
+.tab-pane *.tab-header-area *.tab:selected {
+    -fx-background-color: #ffffff;
+}
+
+.list-cell {
+    -fx-padding: 8 10 8 10;
+}
+
+.table-row-cell {
+    -fx-background-color: white;
+    -fx-border-color: transparent transparent #eef2f7 transparent;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #dbeafe;
+}

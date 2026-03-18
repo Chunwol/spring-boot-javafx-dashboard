@@ -1,0 +1,48 @@
+# Gradle
+.gradle/
+build/
+out/
+*.class
+*.jar
+*.war
+*.ear
+*.pid
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Database
+db/mydatabase.db
+*.db
+*.sqlite
+
+# Uploads
+uploads/
+tmp/
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+
+# Node (if used)
+node_modules/
+dist/
+npm-debug.log

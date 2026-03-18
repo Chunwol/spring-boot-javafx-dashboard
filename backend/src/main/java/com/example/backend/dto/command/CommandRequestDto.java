@@ -1,0 +1,88 @@
+package com.example.backend.dto.command;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
+
+public class CommandRequestDto {
+    @NotBlank(message = "scope는 필수입니다.")
+    @Pattern(regexp = "^(?i)(SINGLE|GROUP)$", message = "scope는 SINGLE 또는 GROUP 이어야 합니다.")
+    private String scope; // SINGLE, GROUP
+
+    @Pattern(regexp = "^(?i)(TEACHER|STUDENT|ALL)?$", message = "role은 TEACHER/STUDENT/ALL 중 하나여야 합니다.")
+    private String role;  // TEACHER, STUDENT, ALL
+
+    @NotBlank(message = "type은 필수입니다.")
+    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL)$", message = "type 값이 올바르지 않습니다.")
+    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL
+
+    @Pattern(regexp = "^$|^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$", message = "macAddress 형식이 올바르지 않습니다.")
+    private String macAddress;
+
+    @Positive(message = "groupId는 1 이상의 값이어야 합니다.")
+    private Long groupId;
+
+    @Size(max = 4000, message = "payloadJson은 4000자를 초과할 수 없습니다.")
+    private String payloadJson;
+
+    @Size(max = 500, message = "scriptUrl은 500자를 초과할 수 없습니다.")
+    private String scriptUrl;
+
+    public String getScope() {
+        return scope;
+    }
+
+    public void setScope(String scope) {
+        this.scope = scope;
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getMacAddress() {
+        return macAddress;
+    }
+
+    public void setMacAddress(String macAddress) {
+        this.macAddress = macAddress;
+    }
+
+    public Long getGroupId() {
+        return groupId;
+    }
+
+    public void setGroupId(Long groupId) {
+        this.groupId = groupId;
+    }
+
+    public String getPayloadJson() {
+        return payloadJson;
+    }
+
+    public void setPayloadJson(String payloadJson) {
+        this.payloadJson = payloadJson;
+    }
+
+    public String getScriptUrl() {
+        return scriptUrl;
+    }
+
+    public void setScriptUrl(String scriptUrl) {
+        this.scriptUrl = scriptUrl;
+    }
+}
+
