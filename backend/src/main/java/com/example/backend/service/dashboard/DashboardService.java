@@ -180,10 +180,15 @@ public class DashboardService {
     }
 
     private List<java.util.Map<String, Object>> getWidgetItemsByType(String type) {
-        return dashboardWidgetItemRepository.findAll().stream()
-                .filter(item -> type.equalsIgnoreCase(item.getType()))
-                .map(this::toWidgetResponse)
-                .toList();
+        try {
+            return dashboardWidgetItemRepository.findAll().stream()
+                    .filter(item -> type.equalsIgnoreCase(item.getType()))
+                    .map(this::toWidgetResponse)
+                    .toList();
+        } catch (Exception e) {
+            logger.error("Failed to fetch widget items for type {}", type, e);
+            return List.of();
+        }
     }
 
     private java.util.Map<String, Object> toWidgetResponse(DashboardWidgetItem item) {

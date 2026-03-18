@@ -4,6 +4,8 @@ import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +17,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1")
 public class DashboardWidgetApiController {
+
+    private static final Logger log = LoggerFactory.getLogger(DashboardWidgetApiController.class);
 
     private final DashboardWidgetItemRepository repository;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -58,10 +62,15 @@ public class DashboardWidgetApiController {
 
     @GetMapping("/dashboard/texts")
     public List<Map<String, Object>> listTextItems() {
-        return repository.findAll().stream()
-                .filter(item -> "TEXT".equalsIgnoreCase(item.getType()))
-                .map(this::toTextMap)
-                .toList();
+        try {
+            return repository.findAll().stream()
+                    .filter(item -> "TEXT".equalsIgnoreCase(item.getType()))
+                    .map(this::toTextMap)
+                    .toList();
+        } catch (Exception e) {
+            log.error("Failed to list text dashboard widgets", e);
+            return List.of();
+        }
     }
 
     @PostMapping("/dashboard/texts")
@@ -113,10 +122,15 @@ public class DashboardWidgetApiController {
 
     @GetMapping("/dashboard/images")
     public List<Map<String, Object>> listImageItems() {
-        return repository.findAll().stream()
-                .filter(item -> "IMAGE".equalsIgnoreCase(item.getType()))
-                .map(this::toImageMap)
-                .toList();
+        try {
+            return repository.findAll().stream()
+                    .filter(item -> "IMAGE".equalsIgnoreCase(item.getType()))
+                    .map(this::toImageMap)
+                    .toList();
+        } catch (Exception e) {
+            log.error("Failed to list image dashboard widgets", e);
+            return List.of();
+        }
     }
 
     @PostMapping("/dashboard/images")
