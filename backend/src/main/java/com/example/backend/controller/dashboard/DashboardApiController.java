@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -50,11 +52,14 @@ public class DashboardApiController {
      * @return 강의실 요약 정보 리스트
      */
     @GetMapping("/classrooms")
-    @Operation(summary = "모든 강의실 요약 정보 조회", description = "온라인 PC 수, 전체 PC 수, 마지막 하트비트 등 강의실별 요약 정보를 조회합니다.")
+    @Operation(summary = "모든 강의실 요약 정보 조회", description = "온라인 PC 수, 전체 PC 수, 마지막 하트비트 등 강의실별 요약 정보를 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "강의실 요약 조회 성공")
-    public ResponseEntity<List<ClassroomSummaryDto>> getClassroomSummaries() {
-        List<ClassroomSummaryDto> summaries = dashboardService.getClassroomSummaries();
-        return ResponseEntity.ok(summaries);
+    public ResponseEntity<Page<ClassroomSummaryDto>> getClassroomSummaries(
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(dashboardService.getClassroomSummariesPaged(page, size));
     }
 
     /**
@@ -63,12 +68,15 @@ public class DashboardApiController {
      * @return PC 상태 정보 리스트
      */
     @GetMapping("/classrooms/{classroomId}/pcs")
-    @Operation(summary = "특정 강의실의 PC 상태 조회", description = "지정된 강의실에 속한 모든 PC의 현재 상태(온라인/오프라인, 역할 등)를 조회합니다.")
+    @Operation(summary = "특정 강의실의 PC 상태 조회", description = "지정된 강의실에 속한 모든 PC의 현재 상태(온라인/오프라인, 역할 등)를 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "PC 상태 조회 성공")
-    public ResponseEntity<List<PcStatusDto>> getPcsInClassroom(
-            @Parameter(description = "강의실 ID") @PathVariable Long classroomId) {
-        List<PcStatusDto> pcs = dashboardService.getPcStatuses(classroomId);
-        return ResponseEntity.ok(pcs);
+    public ResponseEntity<Page<PcStatusDto>> getPcsInClassroom(
+            @Parameter(description = "강의실 ID") @PathVariable Long classroomId,
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(dashboardService.getPcStatusesPaged(classroomId, page, size));
     }
 
     /**

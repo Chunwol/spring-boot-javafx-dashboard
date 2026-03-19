@@ -18,11 +18,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.backend.repository.pc.PcMasterRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -55,23 +60,31 @@ public class DashboardService {
         try {
             List<ClassroomGroup> groups = classroomGroupRepository.findAll();
             List<ClassroomSummaryDto> summaries = new ArrayList<>();
+            List<Long> groupIds = groups.stream().map(ClassroomGroup::getId).toList();
 
-            // 한 번의 쿼리로 모든 데이터를 fetch (N+1 최적화)
-            List<PcMaster> allPcs = pcMasterRepository.findAll();
+            // SQL 집계 기반으로 PC 카운트를 한 번에 조회
+            LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
+            Map<Long, PcStats> statsByGroup = new HashMap<>();
+            for (PcMasterRepository.GroupPcStatsProjection stat : pcMasterRepository.findGroupPcStats(fiveMinutesAgo)) {
+                statsByGroup.put(stat.getGroupId(), new PcStats(
+                        stat.getTotalCount() == null ? 0L : stat.getTotalCount(),
+                        stat.getOnlineCount() == null ? 0L : stat.getOnlineCount()
+                ));
+            }
+
+            // 교사 상태 판단용 최소 데이터만 로드
+            List<PcMaster> groupPcs = groupIds.isEmpty() ? List.of() : pcMasterRepository.findByGroupIdIn(groupIds);
             List<ClassroomIpRange> allIpRanges = ipRangeRepository.findAll();
             List<ClassroomTeacherDevice> allTeachers = teacherDeviceRepository.findAll();
 
-            LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
-
             for (ClassroomGroup group : groups) {
-                // 메모리에서 groupId로 필터링
-                List<PcMaster> pcs = allPcs.stream()
+                List<PcMaster> pcs = groupPcs.stream()
                         .filter(pc -> pc.getGroupId() != null && pc.getGroupId().equals(group.getId()))
                         .toList();
-                
-                long onlineCount = pcs.stream()
-                    .filter(pc -> pc.getLastSeen() != null && pc.getLastSeen().isAfter(fiveMinutesAgo))
-                    .count();
+
+                PcStats stats = statsByGroup.getOrDefault(group.getId(), PcStats.EMPTY);
+                long onlineCount = stats.onlineCount();
+                long totalCount = stats.totalCount();
 
                 List<String> ipRanges = allIpRanges.stream()
                         .filter(r -> r.getGroupId() != null && r.getGroupId().equals(group.getId()))
@@ -106,10 +119,10 @@ public class DashboardService {
                 ClassroomSummaryDto summary = new ClassroomSummaryDto();
                 summary.setGroupId(group.getId());
                 summary.setGroupName(group.getName());
-                summary.setOnlinePcs((int) onlineCount);
-                summary.setTotalPcs(pcs.size());
+                summary.setOnlinePcs(onlineCount);
+                summary.setTotalPcs(totalCount);
                 summary.setOnlinePcCount((int) onlineCount);
-                summary.setTotalPcCount(pcs.size());
+                summary.setTotalPcCount((int) totalCount);
                 summary.setIpRanges(ipRanges);
                 summary.setTeacherPcStatus(teacherStatus);
                 summary.setVisible(true);
@@ -124,7 +137,6 @@ public class DashboardService {
     }
 
     public List<PcStatusDto> getPcStatuses(Long groupId) {
-        // 최적화: 특정 그룹의 PCs만 로드 (메모리 효율성)
         List<PcMaster> pcs = pcMasterRepository.findByGroupId(groupId);
         return pcs.stream().map(pc -> {
             PcStatusDto dto = new PcStatusDto();
@@ -137,6 +149,32 @@ public class DashboardService {
             dto.setLastSeen(pc.getLastSeen());
             return dto;
         }).collect(Collectors.toList());
+    }
+
+    public Page<ClassroomSummaryDto> getClassroomSummariesPaged(int page, int size) {
+        List<ClassroomSummaryDto> summaries = getClassroomSummaries();
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, size);
+        int total = summaries.size();
+        int fromIndex = safePage * safeSize;
+        if (fromIndex >= total) {
+            return new PageImpl<>(List.of(), PageRequest.of(safePage, safeSize), total);
+        }
+        int toIndex = Math.min(fromIndex + safeSize, total);
+        return new PageImpl<>(summaries.subList(fromIndex, toIndex), PageRequest.of(safePage, safeSize), total);
+    }
+
+    public Page<PcStatusDto> getPcStatusesPaged(Long groupId, int page, int size) {
+        List<PcStatusDto> statuses = getPcStatuses(groupId);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, size);
+        int total = statuses.size();
+        int fromIndex = safePage * safeSize;
+        if (fromIndex >= total) {
+            return new PageImpl<>(List.of(), PageRequest.of(safePage, safeSize), total);
+        }
+        int toIndex = Math.min(fromIndex + safeSize, total);
+        return new PageImpl<>(statuses.subList(fromIndex, toIndex), PageRequest.of(safePage, safeSize), total);
     }
 
     public NetworkTrafficDto getNetworkTraffic() {
@@ -224,5 +262,9 @@ public class DashboardService {
             }
         }
         return out;
+    }
+
+    private record PcStats(long totalCount, long onlineCount) {
+        private static final PcStats EMPTY = new PcStats(0, 0);
     }
 }
