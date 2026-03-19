@@ -1299,9 +1299,9 @@ public class DashboardController {
             return;
         }
         List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
-        int classroomCount = classrooms == null ? 0 : classrooms.size();
-        long online = classrooms == null ? 0 : classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
-        long total = classrooms == null ? 0 : classrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
+        int classroomCount = classrooms.size();
+        long online = classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
+        long total = classrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
         statusSummaryLabel.setText("Classrooms " + classroomCount + ", online " + online + "/" + total);
         connectivityLabel.setText("Connected");
         connectivityLabel.setTextFill(Color.web("#86efac"));
@@ -1343,38 +1343,43 @@ public class DashboardController {
         return button;
     }
 
+    private DashboardViewModel viewModel() {
+        if (dashboardViewModel == null) {
+            dashboardViewModel = new DashboardViewModel();
+        }
+        return dashboardViewModel;
+    }
+
     private Long currentDashboardId() {
-        return dashboardViewModel != null ? dashboardViewModel.getSelectedDashboardId() : null;
+        return viewModel().getSelectedDashboardId();
     }
 
     private void setCurrentDashboardId(Long id) {
-        if (dashboardViewModel != null) {
-            dashboardViewModel.setSelectedDashboardId(id);
-        }
+        viewModel().setSelectedDashboardId(id);
     }
 
     private boolean isEditModeActive() {
-        return dashboardViewModel != null && dashboardViewModel.isEditMode();
+        return viewModel().isEditMode();
     }
 
     private boolean isLayoutLockedState() {
-        return dashboardViewModel != null && dashboardViewModel.isLayoutLocked();
+        return viewModel().isLayoutLocked();
     }
 
     private boolean isSnapToGridEnabled() {
-        return dashboardViewModel == null || dashboardViewModel.isSnapToGrid();
+        return viewModel().isSnapToGrid();
     }
 
     private double currentZoomScale() {
-        return dashboardViewModel != null ? dashboardViewModel.getZoomScale() : 1.0;
+        return viewModel().getZoomScale();
     }
 
     private boolean isDashboardOnlyModeActive() {
-        return dashboardViewModel != null && dashboardViewModel.isDashboardOnlyMode();
+        return viewModel().isDashboardOnlyMode();
     }
 
     private boolean isFocusModeActive() {
-        return dashboardViewModel != null && dashboardViewModel.isFocusMode();
+        return viewModel().isFocusMode();
     }
 
     @FXML
