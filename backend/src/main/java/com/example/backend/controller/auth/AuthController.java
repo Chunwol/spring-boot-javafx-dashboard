@@ -1,5 +1,6 @@
 package com.example.backend.controller.auth;
 
+import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.model.user.User;
@@ -11,12 +12,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 /**
  * 인증 관련 API
@@ -68,7 +66,6 @@ public class AuthController {
                 return ResponseEntity.ok(new LoginResponse(user.getUsername(), token));
             }
         }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("message", "Invalid credentials"));
+        throw new UnauthorizedException("Invalid credentials");
     }
 }

@@ -90,6 +90,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(resp);
     }
 
+        @ExceptionHandler(UnauthorizedException.class)
+        public ResponseEntity<ApiErrorResponse> handleUnauthorized(
+                        UnauthorizedException ex,
+                        HttpServletRequest request) {
+                ApiErrorResponse resp = ApiErrorResponse.of(
+                                HttpStatus.UNAUTHORIZED.value(),
+                                "Unauthorized",
+                                ex.getMessage(),
+                                request.getRequestURI());
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(resp);
+        }
+
         @ExceptionHandler(ConflictException.class)
         public ResponseEntity<ApiErrorResponse> handleConflict(
                         ConflictException ex,
