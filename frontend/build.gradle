@@ -25,6 +25,7 @@ compileJava {
 
 dependencies {
     implementation project(':common')
+    implementation 'org.controlsfx:controlsfx:11.1.2'
     
     // Jackson for JSON
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'

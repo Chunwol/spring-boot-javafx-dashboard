@@ -4,6 +4,7 @@ import com.example.frontend.service.ApiClient;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -26,6 +27,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
+
+import org.controlsfx.validation.ValidationSupport;
+import org.controlsfx.validation.Validator;
 
 /**
  * 대시보드 위젯(텍스트/이미지 아이템) CRUD 및 UI 렌더링 모듈.
@@ -90,6 +94,22 @@ public class DashboardWidgetModule {
         input.setPrefRowCount(4);
         dialog.getDialogPane().setContent(input);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        ValidationSupport validationSupport = new ValidationSupport();
+        validationSupport.registerValidator(
+            input,
+            Validator.createPredicateValidator(
+                textArea -> textArea != null && textArea.getText() != null && !textArea.getText().trim().isEmpty(),
+                "텍스트 내용을 입력하세요."
+            )
+        );
+        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        if (okButton != null) {
+            okButton.disableProperty().bind(Bindings.createBooleanBinding(
+                validationSupport::isInvalid,
+                validationSupport.invalidProperty()
+            ));
+        }
 
         ButtonType result = dialog.showAndWait().orElse(ButtonType.CANCEL);
         if (result != ButtonType.OK) {
@@ -270,6 +290,28 @@ public class DashboardWidgetModule {
         TextField input = new TextField("https://via.placeholder.com/640x360.png?text=Dashboard");
         dialog.getDialogPane().setContent(input);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        ValidationSupport validationSupport = new ValidationSupport();
+        validationSupport.registerValidator(
+                input,
+                Validator.createPredicateValidator(
+                        textField -> {
+                            if (textField == null || textField.getText() == null) {
+                                return false;
+                            }
+                            String value = textField.getText().trim();
+                            return value.startsWith("http://") || value.startsWith("https://");
+                        },
+                        "http:// 또는 https:// 형식의 URL을 입력하세요."
+                )
+        );
+        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        if (okButton != null) {
+            okButton.disableProperty().bind(Bindings.createBooleanBinding(
+                    validationSupport::isInvalid,
+                    validationSupport.invalidProperty()
+            ));
+        }
 
         ButtonType result = dialog.showAndWait().orElse(ButtonType.CANCEL);
         if (result != ButtonType.OK) {
