@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -47,11 +50,20 @@ public class IpRangeApiController {
     @GetMapping
     @Operation(
         summary = "IP 범위 목록 조회",
-        description = "등록된 모든 강의실의 IP 범위(CIDR 형식)를 조회합니다."
+        description = "등록된 모든 강의실의 IP 범위(CIDR 형식)를 조회합니다. 페이지네이션을 지원합니다."
     )
     @ApiResponse(responseCode = "200", description = "IP 범위 목록 조회 성공")
-    public ResponseEntity<List<ClassroomIpRange>> getAllIpRanges() {
-        return ResponseEntity.ok(ipRangeRepository.findAll());
+    public ResponseEntity<Page<ClassroomIpRange>> getAllIpRanges(
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기", example = "50")
+            @RequestParam(defaultValue = "50") int size) {
+        List<ClassroomIpRange> all = ipRangeRepository.findAll();
+        int total = all.size();
+        int from = Math.min(page * size, total);
+        int to = Math.min(from + size, total);
+        return ResponseEntity.ok(new PageImpl<>(from >= total ? List.of() : all.subList(from, to),
+                PageRequest.of(page, size), total));
     }
 
     /**

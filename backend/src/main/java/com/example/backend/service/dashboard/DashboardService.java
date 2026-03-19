@@ -5,7 +5,6 @@ import com.example.backend.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.model.classroom.ClassroomIpRange;
-import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.model.pc.PcMaster;
@@ -24,6 +23,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -58,36 +58,44 @@ public class DashboardService {
 
     public List<ClassroomSummaryDto> getClassroomSummaries() {
         try {
-            List<ClassroomGroup> groups = classroomGroupRepository.findAll();
-            List<ClassroomSummaryDto> summaries = new ArrayList<>();
-            List<Long> groupIds = groups.stream().map(ClassroomGroup::getId).toList();
-
-            // SQL 집계 기반으로 PC 카운트를 한 번에 조회
             LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
+            String cutoff = fiveMinutesAgo.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+
+            // 단일 LEFT JOIN 쿼리로 그룹 목록 + PC 집계 로드 (DB 쿼리 수: 5→3)
+            List<ClassroomGroupRepository.GroupWithPcStatsProjection> groupStats =
+                    classroomGroupRepository.findAllWithPcStats(cutoff);
+
+            List<Long> groupIds = groupStats.stream()
+                    .map(ClassroomGroupRepository.GroupWithPcStatsProjection::getGroupId)
+                    .toList();
             Map<Long, PcStats> statsByGroup = new HashMap<>();
-            for (PcMasterRepository.GroupPcStatsProjection stat : pcMasterRepository.findGroupPcStats(fiveMinutesAgo)) {
-                statsByGroup.put(stat.getGroupId(), new PcStats(
-                        stat.getTotalCount() == null ? 0L : stat.getTotalCount(),
-                        stat.getOnlineCount() == null ? 0L : stat.getOnlineCount()
+            for (ClassroomGroupRepository.GroupWithPcStatsProjection s : groupStats) {
+                statsByGroup.put(s.getGroupId(), new PcStats(
+                        s.getTotalCount() == null ? 0L : s.getTotalCount(),
+                        s.getOnlineCount() == null ? 0L : s.getOnlineCount()
                 ));
             }
 
-            // 교사 상태 판단용 최소 데이터만 로드
+            // 교사 상태 판단용 PC 목록 + IP 대역 + 교사 장치 로드
             List<PcMaster> groupPcs = groupIds.isEmpty() ? List.of() : pcMasterRepository.findByGroupIdIn(groupIds);
             List<ClassroomIpRange> allIpRanges = ipRangeRepository.findAll();
             List<ClassroomTeacherDevice> allTeachers = teacherDeviceRepository.findAll();
 
-            for (ClassroomGroup group : groups) {
+            List<ClassroomSummaryDto> summaries = new ArrayList<>();
+
+            for (ClassroomGroupRepository.GroupWithPcStatsProjection groupStat : groupStats) {
+                Long groupId = groupStat.getGroupId();
+
                 List<PcMaster> pcs = groupPcs.stream()
-                        .filter(pc -> pc.getGroupId() != null && pc.getGroupId().equals(group.getId()))
+                        .filter(pc -> pc.getGroupId() != null && pc.getGroupId().equals(groupId))
                         .toList();
 
-                PcStats stats = statsByGroup.getOrDefault(group.getId(), PcStats.EMPTY);
+                PcStats stats = statsByGroup.getOrDefault(groupId, PcStats.EMPTY);
                 long onlineCount = stats.onlineCount();
                 long totalCount = stats.totalCount();
 
                 List<String> ipRanges = allIpRanges.stream()
-                        .filter(r -> r.getGroupId() != null && r.getGroupId().equals(group.getId()))
+                        .filter(r -> r.getGroupId() != null && r.getGroupId().equals(groupId))
                         .map(r -> {
                             if (r.getCidr() != null && !r.getCidr().isBlank()) return r.getCidr();
                             if (r.getStartIp() != null && r.getEndIp() != null) return r.getStartIp() + "~" + r.getEndIp();
@@ -98,9 +106,9 @@ public class DashboardService {
 
                 String teacherStatus = "OFFLINE";
                 List<ClassroomTeacherDevice> teachers = allTeachers.stream()
-                        .filter(t -> t.getGroupId() != null && t.getGroupId().equals(group.getId()))
+                        .filter(t -> t.getGroupId() != null && t.getGroupId().equals(groupId))
                         .toList();
-                        
+
                 if (!teachers.isEmpty()) {
                     boolean anyOnlineTeacher = teachers.stream().anyMatch(t -> {
                         List<PcMaster> candidates = pcs.stream().filter(pc -> {
@@ -117,8 +125,8 @@ public class DashboardService {
                 }
 
                 ClassroomSummaryDto summary = new ClassroomSummaryDto();
-                summary.setGroupId(group.getId());
-                summary.setGroupName(group.getName());
+                summary.setGroupId(groupId);
+                summary.setGroupName(groupStat.getGroupName());
                 summary.setOnlinePcs(onlineCount);
                 summary.setTotalPcs(totalCount);
                 summary.setOnlinePcCount((int) onlineCount);

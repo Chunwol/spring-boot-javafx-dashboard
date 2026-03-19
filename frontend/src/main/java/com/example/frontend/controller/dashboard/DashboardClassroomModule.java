@@ -483,7 +483,7 @@ public class DashboardClassroomModule {
                                      Consumer<List<PcStatusDto>> uiUpdater,
                                      Consumer<String> placeholderUpdater) {
         placeholderUpdater.accept("로딩 중...");
-        apiClient.getJson("/dashboard/classrooms/" + groupId + "/pcs", new TypeReference<List<PcStatusDto>>() {})
+        apiClient.getPagedList("/dashboard/classrooms/" + groupId + "/pcs", new TypeReference<List<PcStatusDto>>() {})
                 .thenAccept(pcs -> Platform.runLater(() -> {
                     uiUpdater.accept(pcs);
                     if (pcs.isEmpty()) {

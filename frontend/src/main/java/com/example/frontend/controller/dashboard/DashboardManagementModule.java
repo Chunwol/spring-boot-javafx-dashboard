@@ -283,7 +283,7 @@ public class DashboardManagementModule {
     }
 
     private void loadIpRangesAndGroups() {
-        apiClient.getJson("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
+        apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
             .thenAccept(classrooms -> {
                 try {
                         Map<Long, String> groupMap = classrooms.stream().collect(java.util.stream.Collectors.toMap(ClassroomSummaryDto::getGroupId, ClassroomSummaryDto::getGroupName));
@@ -297,7 +297,7 @@ public class DashboardManagementModule {
                             }
                         });
 
-                        apiClient.getJson("/ip-ranges", new TypeReference<List<IpRangeItem>>() {})
+                        apiClient.getPagedList("/ip-ranges", new TypeReference<List<IpRangeItem>>() {})
                                 .thenAccept(items -> {
                                     items.forEach(item -> item.setGroupName(groupMap.getOrDefault(item.getGroupId(), "N/A")));
                                     Platform.runLater(() -> ipRangeTable.getItems().setAll(items));

@@ -18,7 +18,7 @@ public class DashboardDataService {
     }
 
     public List<ClassroomSummaryDto> fetchClassrooms() throws Exception {
-        return apiClient.getJson("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){}).get();
+        return apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){}).get();
     }
 
     public void fetchRefreshSnapshotAsync(Consumer<DashboardRefreshDto> callback) {

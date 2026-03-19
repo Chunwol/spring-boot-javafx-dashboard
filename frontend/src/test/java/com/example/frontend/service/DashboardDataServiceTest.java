@@ -57,14 +57,20 @@ class DashboardDataServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> CompletableFuture<T> getJson(String path, TypeReference<T> typeRef) {
-            if ("/dashboard/classrooms".equals(path)) {
-                return CompletableFuture.completedFuture((T) classrooms);
-            }
             if ("/dashboard/refresh".equals(path)) {
                 if (refreshFailure != null) {
                     return CompletableFuture.failedFuture(refreshFailure);
                 }
                 return CompletableFuture.completedFuture((T) new DashboardRefreshDto());
+            }
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Unexpected path: " + path));
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> java.util.concurrent.CompletableFuture<java.util.List<T>> getPagedList(String path, TypeReference<java.util.List<T>> typeRef) {
+            if ("/dashboard/classrooms".equals(path)) {
+                return CompletableFuture.completedFuture((java.util.List<T>) classrooms);
             }
             return CompletableFuture.failedFuture(new IllegalArgumentException("Unexpected path: " + path));
         }

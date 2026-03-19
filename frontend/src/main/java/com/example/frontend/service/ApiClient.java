@@ -10,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -99,6 +100,22 @@ public class ApiClient {
 
     public <T> CompletableFuture<T> getJson(String path, TypeReference<T> typeRef) {
         return get(path).thenApply(body -> readValue(body, typeRef));
+    }
+
+    /**
+     * Spring Data Page<T> 응답에서 content 리스트를 추출합니다.
+     * 백엔드가 일반 List를 반환하는 경우(legacy)에도 투명하게 동작합니다.
+     */
+    public <T> CompletableFuture<List<T>> getPagedList(String path, TypeReference<List<T>> typeRef) {
+        return get(path).thenApply(body -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(body);
+                com.fasterxml.jackson.databind.JsonNode content = root.has("content") ? root.get("content") : root;
+                return objectMapper.convertValue(content, typeRef);
+            } catch (Exception e) {
+                throw new java.util.concurrent.CompletionException(e);
+            }
+        });
     }
 
     public Map<String, Object> parseObject(String json) {

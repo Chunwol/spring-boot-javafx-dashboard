@@ -15,7 +15,7 @@ public class DashboardService {
     private final ApiClient apiClient = ApiClient.getInstance();
 
     public void fetchClassroomsAsync(Consumer<List<ClassroomSummaryDto>> callback) {
-        apiClient.getJson("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
+        apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
                 .thenAccept(callback)
                 .exceptionally(ex -> {
                     ex.printStackTrace();
