@@ -63,4 +63,19 @@ class DashboardViewModelTest {
         assertThat(raw.getX()).isEqualTo(11.0);
         assertThat(raw.getY()).isEqualTo(29.0);
     }
+
+    @Test
+    void preferences_shouldBeLoadedByNewInstance() {
+        DashboardViewModel first = new DashboardViewModel();
+        first.setZoom(1.7);
+        first.setSnapToGrid(false);
+        first.setLayoutLocked(true);
+        first.setDashboardOnlyMode(true);
+
+        DashboardViewModel second = new DashboardViewModel();
+        assertThat(second.getZoomScale()).isEqualTo(1.7);
+        assertThat(second.isSnapToGrid()).isFalse();
+        assertThat(second.isLayoutLocked()).isTrue();
+        assertThat(second.isDashboardOnlyMode()).isTrue();
+    }
 }

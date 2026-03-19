@@ -478,139 +478,22 @@ public class DashboardController {
         VBox rightPane = new VBox(10);
         rightPane.setPadding(new Insets(4, 8, 8, 8));
 
-        ToggleButton editModeBtn = new ToggleButton("Edit mode");
-        editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        editModeBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setEditMode(editModeBtn.isSelected());
-            }
-            applyEditModeUiState();
-            showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
-        });
+        ToggleButton editModeBtn = createEditModeToggleButton();
+        ToggleButton lockLayoutBtn = createLockLayoutToggleButton();
+        ToggleButton focusModeBtn = createFocusModeToggleButton();
+        ToggleButton dashboardOnlyBtn = createDashboardOnlyToggleButton();
+        Button fullScreenBtn = createFullScreenButton();
+        Button refreshBtn = createRefreshButton();
+        ColorPicker bgColorPicker = createBackgroundColorPicker();
 
-        ToggleButton lockLayoutBtn = new ToggleButton("Lock layout");
-        lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        lockLayoutBtn.setSelected(isLayoutLockedState());
-        lockLayoutBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
-            }
-            showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
-        });
-
-        ToggleButton focusModeBtn = new ToggleButton("Focus mode");
-        focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        focusModeBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
-            }
-            if (leftToolPane != null) {
-                leftToolPane.setManaged(!isFocusModeActive());
-                leftToolPane.setVisible(!isFocusModeActive());
-            }
-            if (mainSplitPane != null) {
-                mainSplitPane.setDividerPositions(isFocusModeActive() ? 0.0 : 0.23);
-            }
-        });
-
-        Button fullScreenBtn = createIconActionButton("Full screen", "mdi2f-fullscreen", "#1d4ed8", "white");
-        fullScreenBtn.setOnAction(e -> {
-            if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
-                stage.setFullScreen(!stage.isFullScreen());
-            }
-        });
-
-        ToggleButton dashboardOnlyBtn = new ToggleButton("Dashboard only");
-        dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
-        dashboardOnlyBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
-            }
-            if (leftToolPane != null) {
-                leftToolPane.setManaged(!isDashboardOnlyModeActive());
-                leftToolPane.setVisible(!isDashboardOnlyModeActive());
-            }
-            if (topBarRef != null) {
-                topBarRef.setManaged(!isDashboardOnlyModeActive());
-                topBarRef.setVisible(!isDashboardOnlyModeActive());
-            }
-            showToast(isDashboardOnlyModeActive() ? "Dashboard-only mode" : "Normal mode", false);
-        });
-
-        Button refreshBtn = createIconActionButton("Refresh", "mdi2r-refresh", "#0f766e", "white");
-        refreshBtn.setOnAction(e -> {
-            RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
-            rotate.setByAngle(360);
-            rotate.play();
-            refreshDashboardSnapshot();
-        });
-
-        ColorPicker bgColorPicker = new ColorPicker(Color.web("#f0f2f5"));
-        bgColorPicker.setOnAction(e -> {
-            if (classroomContainer == null) {
-                return;
-            }
-            Color color = bgColorPicker.getValue();
-            String hex = String.format("#%02X%02X%02X",
-                    (int) (color.getRed() * 255),
-                    (int) (color.getGreen() * 255),
-                    (int) (color.getBlue() * 255));
-            classroomContainer.setStyle("-fx-background-color: " + hex + ";");
-        });
-
-        ToggleButton gridToggleBtn = new ToggleButton("Grid");
-        gridToggleBtn.setStyle("-fx-background-radius: 8;");
-        gridToggleBtn.setOnAction(e -> {
-            if (canvasModule != null) {
-                canvasModule.drawGrid(gridToggleBtn.isSelected());
-            }
-        });
-
-        ToggleButton snapToggleBtn = new ToggleButton("Snap");
-        snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        snapToggleBtn.setSelected(isSnapToGridEnabled());
-        snapToggleBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected());
-            }
-        });
-
-        MenuButton alignMenu = new MenuButton("Align");
-        MenuItem alignLeft = new MenuItem("Left");
-        alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
-        MenuItem alignRight = new MenuItem("Right");
-        alignRight.setOnAction(e -> canvasModule.alignSelectedNodes("RIGHT"));
-        MenuItem alignTop = new MenuItem("Top");
-        alignTop.setOnAction(e -> canvasModule.alignSelectedNodes("TOP"));
-        MenuItem alignBottom = new MenuItem("Bottom");
-        alignBottom.setOnAction(e -> canvasModule.alignSelectedNodes("BOTTOM"));
-        alignMenu.getItems().addAll(alignLeft, alignRight, alignTop, alignBottom);
-
-        MenuButton arrangeMenu = new MenuButton("Arrange");
-        MenuItem gridArrange = new MenuItem("Grid");
-        gridArrange.setOnAction(e -> arrangePanels("GRID"));
-        MenuItem rowArrange = new MenuItem("Row");
-        rowArrange.setOnAction(e -> arrangePanels("ROW"));
-        MenuItem colArrange = new MenuItem("Column");
-        colArrange.setOnAction(e -> arrangePanels("COLUMN"));
-        arrangeMenu.getItems().addAll(gridArrange, rowArrange, colArrange);
-
-        Button zoomOutBtn = new Button("-");
-        zoomOutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
-
-        Button zoomResetBtn = new Button("100%");
-        zoomResetBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        zoomResetBtn.setOnAction(e -> applyZoom(1.0));
-
-        Button zoomInBtn = new Button("+");
-        zoomInBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
-
-        Button fitAllBtn = new Button("Fit all");
-        fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
+        ToggleButton gridToggleBtn = createGridToggleButton();
+        ToggleButton snapToggleBtn = createSnapToggleButton();
+        MenuButton alignMenu = createAlignMenu();
+        MenuButton arrangeMenu = createArrangeMenu();
+        Button zoomOutBtn = createZoomOutButton();
+        Button zoomResetBtn = createZoomResetButton();
+        Button zoomInBtn = createZoomInButton();
+        Button fitAllBtn = createFitAllButton();
 
         editOnlyToolbar = new HBox(
                 8,
@@ -683,6 +566,185 @@ public class DashboardController {
 
         rightPane.getChildren().addAll(rightToolbar, canvasStack);
         return rightPane;
+    }
+
+    private ToggleButton createEditModeToggleButton() {
+        ToggleButton editModeBtn = new ToggleButton("Edit mode");
+        editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        editModeBtn.setOnAction(e -> {
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setEditMode(editModeBtn.isSelected());
+            }
+            applyEditModeUiState();
+            showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
+        });
+        return editModeBtn;
+    }
+
+    private ToggleButton createLockLayoutToggleButton() {
+        ToggleButton lockLayoutBtn = new ToggleButton("Lock layout");
+        lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        lockLayoutBtn.setSelected(isLayoutLockedState());
+        lockLayoutBtn.setOnAction(e -> {
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
+            }
+            showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
+        });
+        return lockLayoutBtn;
+    }
+
+    private ToggleButton createFocusModeToggleButton() {
+        ToggleButton focusModeBtn = new ToggleButton("Focus mode");
+        focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        focusModeBtn.setOnAction(e -> {
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
+            }
+            if (leftToolPane != null) {
+                leftToolPane.setManaged(!isFocusModeActive());
+                leftToolPane.setVisible(!isFocusModeActive());
+            }
+            if (mainSplitPane != null) {
+                mainSplitPane.setDividerPositions(isFocusModeActive() ? 0.0 : 0.23);
+            }
+        });
+        return focusModeBtn;
+    }
+
+    private ToggleButton createDashboardOnlyToggleButton() {
+        ToggleButton dashboardOnlyBtn = new ToggleButton("Dashboard only");
+        dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
+        dashboardOnlyBtn.setOnAction(e -> {
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
+            }
+            if (leftToolPane != null) {
+                leftToolPane.setManaged(!isDashboardOnlyModeActive());
+                leftToolPane.setVisible(!isDashboardOnlyModeActive());
+            }
+            if (topBarRef != null) {
+                topBarRef.setManaged(!isDashboardOnlyModeActive());
+                topBarRef.setVisible(!isDashboardOnlyModeActive());
+            }
+            showToast(isDashboardOnlyModeActive() ? "Dashboard-only mode" : "Normal mode", false);
+        });
+        return dashboardOnlyBtn;
+    }
+
+    private Button createFullScreenButton() {
+        Button fullScreenBtn = createIconActionButton("Full screen", "mdi2f-fullscreen", "#1d4ed8", "white");
+        fullScreenBtn.setOnAction(e -> {
+            if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
+                stage.setFullScreen(!stage.isFullScreen());
+            }
+        });
+        return fullScreenBtn;
+    }
+
+    private Button createRefreshButton() {
+        Button refreshBtn = createIconActionButton("Refresh", "mdi2r-refresh", "#0f766e", "white");
+        refreshBtn.setOnAction(e -> {
+            RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
+            rotate.setByAngle(360);
+            rotate.play();
+            refreshDashboardSnapshot();
+        });
+        return refreshBtn;
+    }
+
+    private ColorPicker createBackgroundColorPicker() {
+        ColorPicker bgColorPicker = new ColorPicker(Color.web("#f0f2f5"));
+        bgColorPicker.setOnAction(e -> {
+            if (classroomContainer == null) {
+                return;
+            }
+            Color color = bgColorPicker.getValue();
+            String hex = String.format("#%02X%02X%02X",
+                    (int) (color.getRed() * 255),
+                    (int) (color.getGreen() * 255),
+                    (int) (color.getBlue() * 255));
+            classroomContainer.setStyle("-fx-background-color: " + hex + ";");
+        });
+        return bgColorPicker;
+    }
+
+    private ToggleButton createGridToggleButton() {
+        ToggleButton gridToggleBtn = new ToggleButton("Grid");
+        gridToggleBtn.setStyle("-fx-background-radius: 8;");
+        gridToggleBtn.setOnAction(e -> {
+            if (canvasModule != null) {
+                canvasModule.drawGrid(gridToggleBtn.isSelected());
+            }
+        });
+        return gridToggleBtn;
+    }
+
+    private ToggleButton createSnapToggleButton() {
+        ToggleButton snapToggleBtn = new ToggleButton("Snap");
+        snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        snapToggleBtn.setSelected(isSnapToGridEnabled());
+        snapToggleBtn.setOnAction(e -> {
+            if (dashboardViewModel != null) {
+                dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected());
+            }
+        });
+        return snapToggleBtn;
+    }
+
+    private MenuButton createAlignMenu() {
+        MenuButton alignMenu = new MenuButton("Align");
+        MenuItem alignLeft = new MenuItem("Left");
+        alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
+        MenuItem alignRight = new MenuItem("Right");
+        alignRight.setOnAction(e -> canvasModule.alignSelectedNodes("RIGHT"));
+        MenuItem alignTop = new MenuItem("Top");
+        alignTop.setOnAction(e -> canvasModule.alignSelectedNodes("TOP"));
+        MenuItem alignBottom = new MenuItem("Bottom");
+        alignBottom.setOnAction(e -> canvasModule.alignSelectedNodes("BOTTOM"));
+        alignMenu.getItems().addAll(alignLeft, alignRight, alignTop, alignBottom);
+        return alignMenu;
+    }
+
+    private MenuButton createArrangeMenu() {
+        MenuButton arrangeMenu = new MenuButton("Arrange");
+        MenuItem gridArrange = new MenuItem("Grid");
+        gridArrange.setOnAction(e -> arrangePanels("GRID"));
+        MenuItem rowArrange = new MenuItem("Row");
+        rowArrange.setOnAction(e -> arrangePanels("ROW"));
+        MenuItem colArrange = new MenuItem("Column");
+        colArrange.setOnAction(e -> arrangePanels("COLUMN"));
+        arrangeMenu.getItems().addAll(gridArrange, rowArrange, colArrange);
+        return arrangeMenu;
+    }
+
+    private Button createZoomOutButton() {
+        Button zoomOutBtn = new Button("-");
+        zoomOutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
+        return zoomOutBtn;
+    }
+
+    private Button createZoomResetButton() {
+        Button zoomResetBtn = new Button("100%");
+        zoomResetBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomResetBtn.setOnAction(e -> applyZoom(1.0));
+        return zoomResetBtn;
+    }
+
+    private Button createZoomInButton() {
+        Button zoomInBtn = new Button("+");
+        zoomInBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
+        return zoomInBtn;
+    }
+
+    private Button createFitAllButton() {
+        Button fitAllBtn = new Button("Fit all");
+        fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
+        return fitAllBtn;
     }
 
     private ComboBox<ClassroomSummaryDto> buildClassroomCombo(String prompt) {
