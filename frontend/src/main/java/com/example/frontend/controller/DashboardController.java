@@ -125,13 +125,10 @@ public class DashboardController {
     private List<DashboardInfoDto> cachedDashboards = new ArrayList<>();
     private List<DashboardPanelDto> cachedDashboardPanels = new ArrayList<>();
 
-    private boolean dashboardOnlyMode = false;
-    private boolean focusMode = false;
 
     @FXML
     public void initialize() {
         dashboardViewModel = new DashboardViewModel();
-        dashboardOnlyMode = dashboardViewModel.isDashboardOnlyMode();
 
         if (rootVBox == null) {
             return;
@@ -503,16 +500,15 @@ public class DashboardController {
         ToggleButton focusModeBtn = new ToggleButton("Focus mode");
         focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         focusModeBtn.setOnAction(e -> {
-            focusMode = focusModeBtn.isSelected();
             if (dashboardViewModel != null) {
-                dashboardViewModel.setFocusMode(focusMode);
+                dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             }
             if (leftToolPane != null) {
-                leftToolPane.setManaged(!focusMode);
-                leftToolPane.setVisible(!focusMode);
+                leftToolPane.setManaged(!isFocusModeActive());
+                leftToolPane.setVisible(!isFocusModeActive());
             }
             if (mainSplitPane != null) {
-                mainSplitPane.setDividerPositions(focusMode ? 0.0 : 0.23);
+                mainSplitPane.setDividerPositions(isFocusModeActive() ? 0.0 : 0.23);
             }
         });
 
@@ -525,21 +521,20 @@ public class DashboardController {
 
         ToggleButton dashboardOnlyBtn = new ToggleButton("Dashboard only");
         dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        dashboardOnlyBtn.setSelected(dashboardOnlyMode);
+        dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
-            dashboardOnlyMode = dashboardOnlyBtn.isSelected();
             if (dashboardViewModel != null) {
-                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyMode);
+                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
             }
             if (leftToolPane != null) {
-                leftToolPane.setManaged(!dashboardOnlyMode);
-                leftToolPane.setVisible(!dashboardOnlyMode);
+                leftToolPane.setManaged(!isDashboardOnlyModeActive());
+                leftToolPane.setVisible(!isDashboardOnlyModeActive());
             }
             if (topBarRef != null) {
-                topBarRef.setManaged(!dashboardOnlyMode);
-                topBarRef.setVisible(!dashboardOnlyMode);
+                topBarRef.setManaged(!isDashboardOnlyModeActive());
+                topBarRef.setVisible(!isDashboardOnlyModeActive());
             }
-            showToast(dashboardOnlyMode ? "Dashboard-only mode" : "Normal mode", false);
+            showToast(isDashboardOnlyModeActive() ? "Dashboard-only mode" : "Normal mode", false);
         });
 
         Button refreshBtn = createActionButton("Refresh", "#0f766e", "white");
@@ -1246,6 +1241,14 @@ public class DashboardController {
 
     private double currentZoomScale() {
         return dashboardViewModel != null ? dashboardViewModel.getZoomScale() : 1.0;
+    }
+
+    private boolean isDashboardOnlyModeActive() {
+        return dashboardViewModel != null && dashboardViewModel.isDashboardOnlyMode();
+    }
+
+    private boolean isFocusModeActive() {
+        return dashboardViewModel != null && dashboardViewModel.isFocusMode();
     }
 
     @FXML
