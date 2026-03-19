@@ -68,7 +68,6 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.prefs.Preferences;
 
 public class DashboardController {
 
@@ -119,7 +118,6 @@ public class DashboardController {
     private final DashboardService dashboardService = new DashboardService();
     private final DashboardDataService dashboardDataService = new DashboardDataService();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private final Preferences preferences = Preferences.userNodeForPackage(DashboardController.class);
 
     private static final String API_BASE_URL = "http://localhost:8080/api/v1";
 
@@ -127,20 +125,12 @@ public class DashboardController {
     private List<DashboardInfoDto> cachedDashboards = new ArrayList<>();
     private List<DashboardPanelDto> cachedDashboardPanels = new ArrayList<>();
 
-    private Long selectedDashboardId;
-    private double zoomScale = 1.0;
-    private boolean snapToGrid = true;
-    private boolean layoutLocked = false;
     private boolean dashboardOnlyMode = false;
     private boolean focusMode = false;
-    private boolean isEditMode = false;
 
     @FXML
     public void initialize() {
         dashboardViewModel = new DashboardViewModel();
-        zoomScale = dashboardViewModel.getZoomScale();
-        snapToGrid = dashboardViewModel.isSnapToGrid();
-        layoutLocked = dashboardViewModel.isLayoutLocked();
         dashboardOnlyMode = dashboardViewModel.isDashboardOnlyMode();
 
         if (rootVBox == null) {
@@ -493,9 +483,8 @@ public class DashboardController {
         ToggleButton editModeBtn = new ToggleButton("Edit mode");
         editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         editModeBtn.setOnAction(e -> {
-            isEditMode = editModeBtn.isSelected();
             if (dashboardViewModel != null) {
-                dashboardViewModel.setEditMode(isEditMode);
+                dashboardViewModel.setEditMode(editModeBtn.isSelected());
             }
             applyEditModeUiState();
             showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
@@ -505,9 +494,8 @@ public class DashboardController {
         lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         lockLayoutBtn.setSelected(isLayoutLockedState());
         lockLayoutBtn.setOnAction(e -> {
-            layoutLocked = lockLayoutBtn.isSelected();
             if (dashboardViewModel != null) {
-                dashboardViewModel.setLayoutLocked(layoutLocked);
+                dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
             }
             showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
         });
@@ -587,11 +575,8 @@ public class DashboardController {
         snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         snapToggleBtn.setSelected(isSnapToGridEnabled());
         snapToggleBtn.setOnAction(e -> {
-            snapToGrid = snapToggleBtn.isSelected();
             if (dashboardViewModel != null) {
-                dashboardViewModel.setSnapToGrid(snapToGrid);
-            } else {
-                preferences.putBoolean("dashboard.snapToGrid", snapToGrid);
+                dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected());
             }
         });
 
@@ -1034,17 +1019,15 @@ public class DashboardController {
 
     private void applyZoom(double targetScale) {
         double clamped = Math.max(0.4, Math.min(2.2, targetScale));
-        zoomScale = clamped;
         if (dashboardViewModel != null) {
             dashboardViewModel.setZoom(clamped);
-        } else {
-            preferences.putDouble("dashboard.zoomScale", zoomScale);
         }
+        double scale = currentZoomScale();
         if (dashboardUIService != null) {
-            dashboardUIService.applyZoom(zoomScale);
+            dashboardUIService.applyZoom(scale);
         } else if (classroomContainer != null) {
-            classroomContainer.setScaleX(zoomScale);
-            classroomContainer.setScaleY(zoomScale);
+            classroomContainer.setScaleX(scale);
+            classroomContainer.setScaleY(scale);
         }
     }
 
@@ -1240,33 +1223,29 @@ public class DashboardController {
     }
 
     private Long currentDashboardId() {
-        if (dashboardViewModel != null) {
-            return dashboardViewModel.getSelectedDashboardId();
-        }
-        return selectedDashboardId;
+        return dashboardViewModel != null ? dashboardViewModel.getSelectedDashboardId() : null;
     }
 
     private void setCurrentDashboardId(Long id) {
-        selectedDashboardId = id;
         if (dashboardViewModel != null) {
             dashboardViewModel.setSelectedDashboardId(id);
         }
     }
 
     private boolean isEditModeActive() {
-        return dashboardViewModel != null ? dashboardViewModel.isEditMode() : isEditMode;
+        return dashboardViewModel != null && dashboardViewModel.isEditMode();
     }
 
     private boolean isLayoutLockedState() {
-        return dashboardViewModel != null ? dashboardViewModel.isLayoutLocked() : layoutLocked;
+        return dashboardViewModel != null && dashboardViewModel.isLayoutLocked();
     }
 
     private boolean isSnapToGridEnabled() {
-        return dashboardViewModel != null ? dashboardViewModel.isSnapToGrid() : snapToGrid;
+        return dashboardViewModel == null || dashboardViewModel.isSnapToGrid();
     }
 
     private double currentZoomScale() {
-        return dashboardViewModel != null ? dashboardViewModel.getZoomScale() : zoomScale;
+        return dashboardViewModel != null ? dashboardViewModel.getZoomScale() : 1.0;
     }
 
     @FXML
