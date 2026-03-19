@@ -7,7 +7,15 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public class DashboardDataService {
-    private final ApiClient apiClient = ApiClient.getInstance();
+    private final ApiClient apiClient;
+
+    public DashboardDataService() {
+        this(ApiClient.getInstance());
+    }
+
+    public DashboardDataService(ApiClient apiClient) {
+        this.apiClient = apiClient;
+    }
 
     public List<ClassroomSummaryDto> fetchClassrooms() throws Exception {
         return apiClient.getJson("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){}).get();
