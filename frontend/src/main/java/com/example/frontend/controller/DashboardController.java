@@ -891,6 +891,19 @@ public class DashboardController {
                 .toList();
 
         List<Long> activeIds = networkPanels.stream().map(DashboardPanelDto::getId).toList();
+        removeInactiveNetworkPanels(activeIds);
+
+        for (DashboardPanelDto panelDto : networkPanels) {
+            VBox existing = networkItemMap.get(panelDto.getId());
+            if (existing == null) {
+                addNetworkPanel(panelDto);
+            } else {
+                updateNetworkPanelLayout(existing, panelDto);
+            }
+        }
+    }
+
+    private void removeInactiveNetworkPanels(List<Long> activeIds) {
         new ArrayList<>(networkItemMap.keySet()).forEach(id -> {
             if (!activeIds.contains(id)) {
                 VBox node = networkItemMap.remove(id);
@@ -900,58 +913,62 @@ public class DashboardController {
                 networkItemControllers.remove(id);
             }
         });
+    }
 
-        for (DashboardPanelDto panelDto : networkPanels) {
-            VBox existing = networkItemMap.get(panelDto.getId());
-            if (existing == null) {
-                ClassroomSummaryDto linked = cachedClassrooms.stream()
-                        .filter(c -> c.getGroupId().equals(panelDto.getRefGroupId()))
-                        .findFirst()
-                        .orElse(null);
+    private void addNetworkPanel(DashboardPanelDto panelDto) {
+        ClassroomSummaryDto linked = cachedClassrooms.stream()
+                .filter(c -> c.getGroupId().equals(panelDto.getRefGroupId()))
+                .findFirst()
+                .orElse(null);
 
-                NetworkPanelController controller = new NetworkPanelController(linked);
-                VBox body = controller.getPanel();
+        NetworkPanelController controller = new NetworkPanelController(linked);
+        VBox wrapper = buildNetworkPanelWrapper(panelDto, linked, controller);
 
-                Label title = new Label(linked != null ? linked.getGroupName() + " Network" : "Network panel");
-                title.setStyle("-fx-font-weight: 700; -fx-text-fill: #0f172a;");
+        makeDashboardPanelInteractive(wrapper, panelDto.getId());
+        addResizeHandleToDashboardPanel(wrapper, panelDto.getId());
 
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
+        classroomContainer.getChildren().add(wrapper);
+        networkItemMap.put(panelDto.getId(), wrapper);
+        networkItemControllers.put(panelDto.getId(), controller);
+    }
 
-                Button deleteBtn = new Button("Delete");
-                deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
-                deleteBtn.setOnAction(e -> {
-                    Long dashboardId = currentDashboardId();
-                    if (dashboardId != null) {
-                        dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), this::loadDashboardPanels);
-                    }
-                });
+    private VBox buildNetworkPanelWrapper(DashboardPanelDto panelDto, ClassroomSummaryDto linked, NetworkPanelController controller) {
+        VBox body = controller.getPanel();
 
-                HBox header = new HBox(8, title, spacer, deleteBtn);
-                header.setAlignment(Pos.CENTER_LEFT);
+        Label title = new Label(linked != null ? linked.getGroupName() + " Network" : "Network panel");
+        title.setStyle("-fx-font-weight: 700; -fx-text-fill: #0f172a;");
 
-                VBox wrapper = new VBox(8, header, body);
-                wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
-                wrapper.setPadding(new Insets(12));
-                wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #cbd5e1; -fx-border-radius: 10;");
-                wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 80);
-                wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 80);
-                wrapper.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : getResponsiveDefaultSize("NETWORK")[0]);
-                wrapper.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : getResponsiveDefaultSize("NETWORK")[1]);
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
-                makeDashboardPanelInteractive(wrapper, panelDto.getId());
-                addResizeHandleToDashboardPanel(wrapper, panelDto.getId());
-
-                classroomContainer.getChildren().add(wrapper);
-                networkItemMap.put(panelDto.getId(), wrapper);
-                networkItemControllers.put(panelDto.getId(), controller);
-            } else {
-                existing.setLayoutX(panelDto.getX() != null ? panelDto.getX() : existing.getLayoutX());
-                existing.setLayoutY(panelDto.getY() != null ? panelDto.getY() : existing.getLayoutY());
-                existing.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : existing.getPrefWidth());
-                existing.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : existing.getPrefHeight());
+        Button deleteBtn = new Button("Delete");
+        deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setOnAction(e -> {
+            Long dashboardId = currentDashboardId();
+            if (dashboardId != null) {
+                dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), this::loadDashboardPanels);
             }
-        }
+        });
+
+        HBox header = new HBox(8, title, spacer, deleteBtn);
+        header.setAlignment(Pos.CENTER_LEFT);
+
+        VBox wrapper = new VBox(8, header, body);
+        wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
+        wrapper.setPadding(new Insets(12));
+        wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #cbd5e1; -fx-border-radius: 10;");
+        wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 80);
+        wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 80);
+        wrapper.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : getResponsiveDefaultSize("NETWORK")[0]);
+        wrapper.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : getResponsiveDefaultSize("NETWORK")[1]);
+        return wrapper;
+    }
+
+    private void updateNetworkPanelLayout(VBox existing, DashboardPanelDto panelDto) {
+        existing.setLayoutX(panelDto.getX() != null ? panelDto.getX() : existing.getLayoutX());
+        existing.setLayoutY(panelDto.getY() != null ? panelDto.getY() : existing.getLayoutY());
+        existing.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : existing.getPrefWidth());
+        existing.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : existing.getPrefHeight());
     }
 
     private void makeDashboardPanelInteractive(VBox panel, Long panelId) {
