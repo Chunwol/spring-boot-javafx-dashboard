@@ -458,9 +458,10 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 - **git**: `test(core): add unit tests for services`
 
 ### Step 5-2: 통합 테스트 (2시간)
-- **진행 상태 (2026-03-19)**: 진행 중 (1차 완료)
+- **진행 상태 (2026-03-19)**: 진행 중 (2차 완료)
 - **완료 항목**:
   - `DashboardDataServiceTest` 추가 (비동기 fallback 포함)
+  - `DashboardUIServiceTest` 추가 (줌/편집 UI/fit-all 분기 검증)
   - `:frontend:test` 통과
 - **시나리오**:
   - Dashboard 로드 → 모든 패널 렌더링 ✅
