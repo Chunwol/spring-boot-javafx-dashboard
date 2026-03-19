@@ -14,7 +14,6 @@ import com.example.frontend.controller.dashboard.DashboardUIService;
 import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
 import com.example.frontend.controller.panel.NetworkPanelController;
-import com.example.frontend.service.DashboardDataService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -617,9 +616,7 @@ public class DashboardController {
         ToggleButton editModeBtn = new ToggleButton("Edit mode");
         editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         editModeBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setEditMode(editModeBtn.isSelected());
-            }
+            dashboardViewModel.setEditMode(editModeBtn.isSelected());
             applyEditModeUiState();
             showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
         });
@@ -631,9 +628,7 @@ public class DashboardController {
         lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         lockLayoutBtn.setSelected(isLayoutLockedState());
         lockLayoutBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
-            }
+            dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
             showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
         });
         return lockLayoutBtn;
@@ -643,9 +638,7 @@ public class DashboardController {
         ToggleButton focusModeBtn = new ToggleButton("Focus mode");
         focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         focusModeBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
-            }
+            dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             if (leftToolPane != null) {
                 leftToolPane.setManaged(!isFocusModeActive());
                 leftToolPane.setVisible(!isFocusModeActive());
@@ -662,9 +655,7 @@ public class DashboardController {
         dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
-            }
+            dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
             if (leftToolPane != null) {
                 leftToolPane.setManaged(!isDashboardOnlyModeActive());
                 leftToolPane.setVisible(!isDashboardOnlyModeActive());
@@ -730,11 +721,7 @@ public class DashboardController {
         ToggleButton snapToggleBtn = new ToggleButton("Snap");
         snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         snapToggleBtn.setSelected(isSnapToGridEnabled());
-        snapToggleBtn.setOnAction(e -> {
-            if (dashboardViewModel != null) {
-                dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected());
-            }
-        });
+        snapToggleBtn.setOnAction(e -> dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected()));
         return snapToggleBtn;
     }
 
@@ -891,9 +878,6 @@ public class DashboardController {
         if (snapshot == null) {
             return;
         }
-
-        // ViewModel already updated cachedClassrooms via applyRefreshSnapshot
-        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
 
         if (widgetModule != null) {
             widgetModule.applySnapshot(snapshot.getTexts(), snapshot.getImages());
@@ -1145,9 +1129,7 @@ public class DashboardController {
 
     private void applyZoom(double targetScale) {
         double clamped = Math.max(0.4, Math.min(2.2, targetScale));
-        if (dashboardViewModel != null) {
-            dashboardViewModel.setZoom(clamped);
-        }
+        dashboardViewModel.setZoom(clamped);
         double scale = currentZoomScale();
         if (dashboardUIService != null) {
             dashboardUIService.applyZoom(scale);
@@ -1219,6 +1201,9 @@ public class DashboardController {
 
     private double[] getResponsiveDefaultSize(String type) {
         double sceneWidth = rootVBox != null && rootVBox.getScene() != null ? rootVBox.getScene().getWidth() : 1600;
+        if (dashboardUIService != null) {
+            return dashboardUIService.getResponsiveDefaultSize(type, sceneWidth);
+        }
         boolean large = sceneWidth >= 1800;
         boolean medium = sceneWidth >= 1400;
 
