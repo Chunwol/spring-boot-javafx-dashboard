@@ -10,9 +10,11 @@ import com.example.frontend.controller.dashboard.DashboardClassroomModule;
 import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
+import com.example.frontend.controller.dashboard.DashboardResourcePanelModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
 import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
+import com.example.frontend.controller.dashboard.DashboardNetworkPanelModule;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
@@ -55,6 +57,8 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import javafx.util.Duration;
 import org.kordamp.ikonli.javafx.FontIcon;
 
@@ -85,6 +89,7 @@ public class DashboardController {
     private DashboardManagementModule managementModule;
     private DashboardRealtimeModule realtimeModule;
     private DashboardWidgetModule widgetModule;
+    private DashboardResourcePanelModule resourcePanelModule;
     private DashboardViewModel dashboardViewModel;
     private DashboardUIService dashboardUIService;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
@@ -110,13 +115,17 @@ public class DashboardController {
     private final DashboardPanelManager panelManager = new DashboardPanelManager();
     private final Map<Long, VBox> textItemMap = new HashMap<>();
     private final Map<Long, VBox> imageItemMap = new HashMap<>();
-    private final Map<Long, VBox> networkItemMap = new HashMap<>();
-    private final Map<Long, NetworkPanelController> networkItemControllers = new HashMap<>();
+    private DashboardNetworkPanelModule networkPanelModule;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final DashboardService dashboardService = new DashboardService();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "dashboard-scheduler");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile boolean shutdownRequested = false;
 
     private static final String API_BASE_URL = "http://localhost:8080/api/v1";
 
@@ -139,6 +148,8 @@ public class DashboardController {
         rootVBox.sceneProperty().addListener((obs, oldScene, newScene) -> {
             if (newScene != null) {
                 newScene.widthProperty().addListener((o, oldW, newW) -> resizeCanvasBySceneWidth(newW.doubleValue()));
+                newScene.windowProperty().addListener((wo, oldWindow, newWindow) -> registerWindowShutdownHook(newWindow));
+                registerWindowShutdownHook(newScene.getWindow());
             }
         });
 
@@ -255,14 +266,7 @@ public class DashboardController {
         SplitPane splitPane = new SplitPane();
         this.mainSplitPane = splitPane;
         splitPane.setStyle("-fx-background-color: transparent;");
-
-        VBox leftPane = buildLeftPane();
-        this.leftToolPane = leftPane;
-
         VBox rightPane = buildRightPane();
-
-        splitPane.getItems().addAll(leftPane, rightPane);
-        splitPane.setDividerPositions(0.23);
 
         widgetModule = new DashboardWidgetModule(
                 httpClient,
@@ -291,6 +295,23 @@ public class DashboardController {
             this::isSnapToGridEnabled
         );
 
+        resourcePanelModule = new DashboardResourcePanelModule(
+            dashboardViewModel,
+            classroomModule,
+            widgetModule,
+            dashboardService,
+            this::isEditModeActive,
+            this::currentDashboardId,
+            this::getResponsiveDefaultSize,
+            this::loadDashboardPanels
+        );
+
+        VBox leftPane = buildLeftPane();
+        this.leftToolPane = leftPane;
+
+        splitPane.getItems().addAll(leftPane, rightPane);
+        splitPane.setDividerPositions(0.23);
+
             dashboardUIService = new DashboardUIService(
                 toastContainer,
                 classroomContainer,
@@ -300,58 +321,25 @@ public class DashboardController {
                 leftEditControls
             );
 
+            networkPanelModule = new DashboardNetworkPanelModule(
+                dashboardService,
+                classroomContainer,
+                dashboardInteractionService,
+                () -> isEditModeActive() && !isLayoutLockedState(),
+                this::applySnap,
+                this::currentDashboardId,
+                this::showToast,
+                this::getResponsiveDefaultSize,
+                this::loadDashboardPanels
+            );
+
         applyEditModeUiState();
         return splitPane;
     }
 
     private VBox buildLeftPane() {
-        VBox leftPane = new VBox(10);
-        leftPane.setPadding(new Insets(14));
-        leftPane.setPrefWidth(300);
-        leftPane.setMinWidth(260);
-        leftPane.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; -fx-border-color: #dbe5f1; -fx-border-radius: 12;");
-
-        Label listTitle = new Label("Resources");
-        listTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        Label listSub = new Label("Panels and widgets available for canvas");
-        listSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-
-        Button addClassroomBtn = createAddClassroomButton();
-
-        panelClassroomCombo = buildClassroomCombo("Select classroom for panel");
-
-        Button addClassroomPanelBtn = createAddClassroomPanelButton();
-
-        Button addTextBtn = createAddTextButton();
-
-        Button addImageBtn = createAddImageButton();
-
-        Button backupBtn = createBackupTextButton();
-
-        Button restoreBtn = createRestoreTextButton();
-
-        networkClassroomCombo = buildClassroomCombo("Select classroom for network panel");
-
-        Button addNetworkPanelBtn = createAddNetworkPanelButton();
-
-        groupListView = createResourceListView();
-        VBox.setVgrow(groupListView, Priority.ALWAYS);
-
-        leftEditControls = new VBox(
-                8,
-                addClassroomBtn,
-                addTextBtn,
-                addImageBtn,
-                backupBtn,
-                restoreBtn,
-                new Separator(),
-                panelClassroomCombo,
-                addClassroomPanelBtn,
-                networkClassroomCombo,
-                addNetworkPanelBtn
-        );
-
-        leftPane.getChildren().addAll(listTitle, listSub, groupListView, leftEditControls);
+        VBox leftPane = resourcePanelModule.buildView();
+        leftEditControls = resourcePanelModule.getEditControls();
         return leftPane;
     }
 
@@ -806,8 +794,8 @@ public class DashboardController {
         } else if (canvasModule != null) {
             canvasModule.applyEditMode(isEditModeActive());
         }
-        if (groupListView != null) {
-            groupListView.refresh();
+        if (resourcePanelModule != null) {
+            resourcePanelModule.refreshListView();
         }
     }
 
@@ -888,8 +876,9 @@ public class DashboardController {
             if (networkPanelController != null) {
                 networkPanelController.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps());
             }
-            networkItemControllers.values().forEach(controller ->
-                    controller.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps()));
+            if (networkPanelModule != null) {
+                networkPanelModule.updateNetworkTraffic(traffic.getInboundMbps(), traffic.getOutboundMbps());
+            }
         }
 
         refreshPanelListAndDashboard();
@@ -952,179 +941,18 @@ public class DashboardController {
     private void refreshPanelListAndDashboard() {
         List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
         List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
-        
-        if (groupListView != null) {
-            groupListView.getItems().clear();
-            groupListView.getItems().addAll(classrooms);
-            if (widgetModule != null) {
-                groupListView.getItems().addAll(widgetModule.getCachedTexts());
-                groupListView.getItems().addAll(widgetModule.getCachedImages());
-            }
-        }
 
-        if (panelClassroomCombo != null) {
-            panelClassroomCombo.getItems().setAll(classrooms);
-        }
-        if (networkClassroomCombo != null) {
-            networkClassroomCombo.getItems().setAll(classrooms);
+        if (resourcePanelModule != null) {
+            resourcePanelModule.updateItems(classrooms, panels);
         }
 
         if (classroomModule != null) {
             classroomModule.updateDashboardClassrooms(classrooms, panels);
         }
-        renderNetworkPanels();
+        if (networkPanelModule != null) {
+            networkPanelModule.update(classrooms, panels);
+        }
         updateTopSummary();
-    }
-
-    private void renderNetworkPanels() {
-        if (classroomContainer == null) {
-            return;
-        }
-
-        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
-        List<DashboardPanelDto> networkPanels = panels.stream()
-                .filter(p -> "NETWORK_TRAFFIC".equalsIgnoreCase(p.getPanelType()))
-                .toList();
-
-        List<Long> activeIds = networkPanels.stream().map(DashboardPanelDto::getId).toList();
-        removeInactiveNetworkPanels(activeIds);
-
-        for (DashboardPanelDto panelDto : networkPanels) {
-            VBox existing = networkItemMap.get(panelDto.getId());
-            if (existing == null) {
-                addNetworkPanel(panelDto);
-            } else {
-                updateNetworkPanelLayout(existing, panelDto);
-            }
-        }
-    }
-
-    private void removeInactiveNetworkPanels(List<Long> activeIds) {
-        new ArrayList<>(networkItemMap.keySet()).forEach(id -> {
-            if (!activeIds.contains(id)) {
-                VBox node = networkItemMap.remove(id);
-                if (node != null) {
-                    classroomContainer.getChildren().remove(node);
-                }
-                networkItemControllers.remove(id);
-            }
-        });
-    }
-
-    private void addNetworkPanel(DashboardPanelDto panelDto) {
-        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
-        ClassroomSummaryDto linked = classrooms.stream()
-                .filter(c -> c.getGroupId().equals(panelDto.getRefGroupId()))
-                .findFirst()
-                .orElse(null);
-
-        NetworkPanelController controller = new NetworkPanelController(linked);
-        VBox wrapper = buildNetworkPanelWrapper(panelDto, linked, controller);
-
-        makeDashboardPanelInteractive(wrapper, panelDto.getId());
-        addResizeHandleToDashboardPanel(wrapper, panelDto.getId());
-
-        classroomContainer.getChildren().add(wrapper);
-        networkItemMap.put(panelDto.getId(), wrapper);
-        networkItemControllers.put(panelDto.getId(), controller);
-    }
-
-    private VBox buildNetworkPanelWrapper(DashboardPanelDto panelDto, ClassroomSummaryDto linked, NetworkPanelController controller) {
-        VBox body = controller.getPanel();
-
-        Label title = new Label(linked != null ? linked.getGroupName() + " Network" : "Network panel");
-        title.setStyle("-fx-font-weight: 700; -fx-text-fill: #0f172a;");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        Button deleteBtn = new Button("Delete");
-        deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
-        deleteBtn.setOnAction(e -> {
-            Long dashboardId = currentDashboardId();
-            if (dashboardId != null) {
-                dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), this::loadDashboardPanels);
-            }
-        });
-
-        HBox header = new HBox(8, title, spacer, deleteBtn);
-        header.setAlignment(Pos.CENTER_LEFT);
-
-        VBox wrapper = new VBox(8, header, body);
-        wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
-        wrapper.setPadding(new Insets(12));
-        wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #cbd5e1; -fx-border-radius: 10;");
-        wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 80);
-        wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 80);
-        wrapper.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : getResponsiveDefaultSize("NETWORK")[0]);
-        wrapper.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : getResponsiveDefaultSize("NETWORK")[1]);
-        return wrapper;
-    }
-
-    private void updateNetworkPanelLayout(VBox existing, DashboardPanelDto panelDto) {
-        existing.setLayoutX(panelDto.getX() != null ? panelDto.getX() : existing.getLayoutX());
-        existing.setLayoutY(panelDto.getY() != null ? panelDto.getY() : existing.getLayoutY());
-        existing.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : existing.getPrefWidth());
-        existing.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : existing.getPrefHeight());
-    }
-
-    private void makeDashboardPanelInteractive(VBox panel, Long panelId) {
-        dashboardInteractionService.attachDragHandlers(
-                panel,
-                () -> isEditModeActive() && !isLayoutLockedState() && currentDashboardId() != null,
-                this::applySnap,
-                () -> {
-                    Long dashboardId = currentDashboardId();
-                    if (dashboardId == null) {
-                        return;
-                    }
-                    dashboardService.updatePanelPositionAsync(
-                            dashboardId,
-                            panelId,
-                            panel.getLayoutX(),
-                            panel.getLayoutY(),
-                            panel.getPrefWidth(),
-                            panel.getPrefHeight()
-                    );
-                    showToast("Panel position saved", false);
-                }
-        );
-    }
-
-    private void addResizeHandleToDashboardPanel(VBox panel, Long panelId) {
-        Label handle = new Label("◢");
-        handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
-        handle.setMouseTransparent(false);
-
-        StackPane handleHolder = new StackPane(handle);
-        handleHolder.setPickOnBounds(false);
-        StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
-
-        panel.getChildren().add(handleHolder);
-
-        dashboardInteractionService.attachResizeHandlers(
-                panel,
-                handle,
-                320,
-                220,
-                () -> isEditModeActive() && !isLayoutLockedState() && currentDashboardId() != null,
-                this::applySnap,
-                () -> {
-                    Long dashboardId = currentDashboardId();
-                    if (dashboardId == null) {
-                        return;
-                    }
-                    dashboardService.updatePanelPositionAsync(
-                            dashboardId,
-                            panelId,
-                            panel.getLayoutX(),
-                            panel.getLayoutY(),
-                            panel.getPrefWidth(),
-                            panel.getPrefHeight()
-                    );
-                    showToast("Panel size saved", false);
-                }
-        );
     }
 
     private void applyZoom(double targetScale) {
@@ -1277,7 +1105,9 @@ public class DashboardController {
         panelManager.getPanels().forEach(p -> nodes.add(p.getPanel()));
         nodes.addAll(textItemMap.values());
         nodes.addAll(imageItemMap.values());
-        nodes.addAll(networkItemMap.values());
+        if (networkPanelModule != null) {
+            nodes.addAll(networkPanelModule.getPanelViews());
+        }
         return nodes;
     }
 
@@ -1407,9 +1237,20 @@ public class DashboardController {
     }
 
     public void shutdown() {
+        if (shutdownRequested) {
+            return;
+        }
+        shutdownRequested = true;
         scheduler.shutdownNow();
         if (realtimeModule != null) {
             realtimeModule.stop();
         }
+    }
+
+    private void registerWindowShutdownHook(Window window) {
+        if (window == null) {
+            return;
+        }
+        window.addEventHandler(WindowEvent.WINDOW_HIDDEN, e -> shutdown());
     }
 }
