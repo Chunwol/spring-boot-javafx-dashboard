@@ -99,7 +99,9 @@ public class DashboardWidgetModule {
         validationSupport.registerValidator(
             input,
             Validator.createPredicateValidator(
-                textArea -> textArea != null && textArea.getText() != null && !textArea.getText().trim().isEmpty(),
+                (TextArea textArea) -> textArea != null
+                    && textArea.getText() != null
+                    && !textArea.getText().trim().isEmpty(),
                 "텍스트 내용을 입력하세요."
             )
         );
@@ -295,7 +297,7 @@ public class DashboardWidgetModule {
         validationSupport.registerValidator(
                 input,
                 Validator.createPredicateValidator(
-                        textField -> {
+                        (TextField textField) -> {
                             if (textField == null || textField.getText() == null) {
                                 return false;
                             }
