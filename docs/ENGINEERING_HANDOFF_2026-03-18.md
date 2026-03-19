@@ -369,9 +369,10 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 ## 🟢 **PHASE 4: 외부 라이브러리 도입 (1주일+)**
 
 ### Step 4-1: ControlsFX 도입 (2시간)
+- **진행 상태 (2026-03-19)**: 완료
 - **라이브러리 추가**: `build.gradle`
   ```gradle
-  implementation "org.controlsfx:controlsfx:11.1.0"
+  implementation "org.controlsfx:controlsfx:11.1.2"
   ```
 - **활용 처**:
   - TableView → 리치 DataGrid
@@ -383,10 +384,11 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 - **git**: `deps(ui): add ControlsFX for rich controls`
 
 ### Step 4-2: Ikonli (Material Icons) 도입 (1.5시간)
+- **진행 상태 (2026-03-19)**: 완료
 - **라이브러리 추가**:
   ```gradle
   implementation "org.kordamp.ikonli:ikonli-javafx:12.3.1"
-  implementation "org.kordamp.ikonli:ikonli-material-pack:12.3.1"
+  implementation "org.kordamp.ikonli:ikonli-materialdesign2-pack:12.3.1"
   ```
 - **활용**:
   - 텍스트 버튼 → 아이콘 버튼 (일관된 Material Design)
