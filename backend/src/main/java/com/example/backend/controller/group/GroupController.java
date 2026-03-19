@@ -15,6 +15,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -45,10 +47,14 @@ public class GroupController {
     }
 
     @GetMapping
-    @Operation(summary = "모든 강의실 조회", description = "전체 강의실(그룹) 목록을 조회합니다.")
+    @Operation(summary = "모든 강의실 조회", description = "전체 강의실(그룹) 목록을 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "강의실 목록 조회 성공")
-    public List<ClassroomGroup> listGroups() {
-        return groupRepository.findAll();
+    public Page<ClassroomGroup> listGroups(
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
+        return groupRepository.findAll(org.springframework.data.domain.PageRequest.of(page, size));
     }
 
     @PostMapping

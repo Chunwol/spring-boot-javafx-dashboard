@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -231,12 +234,17 @@ public class CommandController {
      * 명령 목록 조회 (GET /api/v1/commands)
      * ?status=QUEUED,DELIVERED,ACKED  → 해당 상태 필터 (기본: 진행 중 전체)
      * ?taskId=123                     → 단일 명령 조회
+     * ?page=0&size=20                 → 페이지네이션 (기본: page=0, size=20)
      */
     @GetMapping("/commands")
-    @Operation(summary = "명령 목록 조회", description = "진행 중이거나 완료된 명령 목록을 조회합니다.")
+    @Operation(summary = "명령 목록 조회", description = "진행 중이거나 완료된 명령 목록을 조회합니다. 페이지네이션을 지원합니다.")
     public ResponseEntity<?> listCommands(
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) Long taskId) {
+            @RequestParam(required = false) Long taskId,
+            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "페이지 크기", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
         if (taskId != null) {
             return commandQueueRepository.findById(taskId)
                     .map(c -> ResponseEntity.ok(c))
@@ -248,7 +256,19 @@ public class CommandController {
                 : List.of("QUEUED", "DELIVERED", "ACKED");
 
         List<CommandQueue> result = commandQueueRepository.findByStatusInOrderByCreatedAtDesc(statuses);
-        return ResponseEntity.ok(result);
+        
+        // 메모리에서 페이지네이션 처리
+        int totalElements = result.size();
+        int fromIndex = page * size;
+        int toIndex = Math.min(fromIndex + size, totalElements);
+        
+        if (fromIndex > totalElements) {
+            return ResponseEntity.ok(new PageImpl<>(List.of(), PageRequest.of(page, size), totalElements));
+        }
+        
+        List<CommandQueue> pageContent = result.subList(fromIndex, toIndex);
+        Page<CommandQueue> pageResult = new PageImpl<>(pageContent, PageRequest.of(page, size), totalElements);
+        return ResponseEntity.ok(pageResult);
     }
 }
 
