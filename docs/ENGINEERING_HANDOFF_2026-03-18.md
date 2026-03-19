@@ -431,6 +431,11 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 ## 🎯 **PHASE 5: 테스트 + 최적화 (1주일)**
 
 ### Step 5-1: 단위 테스트 작성 (3시간)
+- **진행 상태 (2026-03-19)**: 진행 중 (1차 완료)
+- **완료 항목**:
+  - `DashboardViewModelTest` 추가
+  - `DashboardInteractionServiceTest` 추가
+  - `:frontend:test` 통과
 - **대상 클래스**:
   - DashboardStateManager (상태 변경 테스트)
   - DashboardLayoutService (좌표 계산 테스트)
