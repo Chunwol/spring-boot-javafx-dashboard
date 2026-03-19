@@ -509,6 +509,13 @@ public class DashboardClassroomModule {
         ))
                 .thenAccept(response -> {
                     log.info("Group command sent successfully: {} for groupId={}", type, groupId);
+                })
+                .exceptionally(ex -> {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    log.warn("Failed to send group command {} for groupId={}", type, groupId, cause);
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            type + " 명령 전송 실패: " + cause.getMessage()).show());
+                    return null;
                 });
     }
 }

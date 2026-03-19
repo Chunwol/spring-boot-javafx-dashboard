@@ -25,15 +25,13 @@ public class CommandStatusPanelController {
     private static final String[] ACTIVE_STATUSES = {"QUEUED", "DELIVERED", "ACKED"};
 
     private final ApiClient apiClient = ApiClient.getInstance();
-    private final String apiBaseUrl;
 
     private VBox rootPanel;
     private VBox commandListBox;
     private Label summaryLabel;
     private ScheduledExecutorService scheduler;
 
-    public CommandStatusPanelController(String apiBaseUrl) {
-        this.apiBaseUrl = apiBaseUrl;
+    public CommandStatusPanelController() {
     }
 
     /** 패널 VBox 반환 */
@@ -85,13 +83,18 @@ public class CommandStatusPanelController {
         });
         scheduler.scheduleAtFixedRate(this::refresh, 0, 10, TimeUnit.SECONDS);
 
+        // 패널이 scene에서 제거될 때 scheduler 자동 종료
+        panel.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null) shutdown();
+        });
+
         rootPanel = panel;
         return panel;
     }
 
     /** 서버에서 진행 중인 명령 목록을 가져와 UI를 갱신한다. */
     public void refresh() {
-        apiClient.getJson("/commands?status=QUEUED,DELIVERED,ACKED", new TypeReference<List<Map<String, Object>>>() {})
+        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(commands -> Platform.runLater(() -> updateUI(commands)))
                 .exceptionally(ex -> {
                     Platform.runLater(() -> summaryLabel.setText("서버 연결 오류"));

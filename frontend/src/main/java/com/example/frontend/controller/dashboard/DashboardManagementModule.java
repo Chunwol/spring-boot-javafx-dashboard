@@ -43,12 +43,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class DashboardManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardManagementModule.class);
+    private static final ExecutorService SCRIPT_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "script-deploy");
+        t.setDaemon(true);
+        return t;
+    });
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String apiBaseUrl;
@@ -318,7 +326,8 @@ public class DashboardManagementModule {
                                 })
                                 .exceptionally(ex -> {
                                     log.warn("Failed to load IP ranges", ex);
-                                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "IP 대역 목록 조회 실패: " + ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()).show());
+                                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                            "IP 대역 목록 조회 실패: " + errorMessage(ex)).show());
                                     return null;
                                 });
                     } catch (Exception e) {
@@ -327,7 +336,8 @@ public class DashboardManagementModule {
                 })
                 .exceptionally(ex -> {
                     log.warn("Failed to load classrooms", ex);
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "강의실 목록 조회 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "강의실 목록 조회 실패: " + errorMessage(ex)).show());
                     return null;
                 });
     }
@@ -344,7 +354,8 @@ public class DashboardManagementModule {
                 })
                 .exceptionally(ex -> {
                     log.warn("Failed to load teacher devices for group {}", selected.getGroupId(), ex);
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "교사 PC 목록 조회 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "교사 PC 목록 조회 실패: " + errorMessage(ex)).show());
                     return null;
                 });
     }
@@ -369,7 +380,8 @@ public class DashboardManagementModule {
                         loadTeacherDevices();
                     }))
                     .exceptionally(ex -> {
-                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "교사 PC 등록 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                "교사 PC 등록 실패: " + errorMessage(ex)).show());
                         return null;
                     });
         } catch (Exception e) {
@@ -391,7 +403,8 @@ public class DashboardManagementModule {
                     noteTF.clear();
                 }))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "등록 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "등록 실패: " + errorMessage(ex)).show());
                     return null;
                 });
     }
@@ -436,7 +449,7 @@ public class DashboardManagementModule {
                     }))
                     .exceptionally(ex -> {
                         Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                "추가 실패\n" + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                                "추가 실패\n" + errorMessage(ex)).show());
                         return null;
                     });
         } catch (Exception e) {
@@ -448,7 +461,8 @@ public class DashboardManagementModule {
         apiClient.delete("/ip-ranges/" + item.getId())
                 .thenAccept(resp -> Platform.runLater(this::loadIpRangesAndGroups))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "삭제 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "삭제 실패: " + errorMessage(ex)).show());
                     return null;
                 });
     }
@@ -472,42 +486,71 @@ public class DashboardManagementModule {
     }
 
     private void uploadAndExecuteScript(File file) {
-        new Thread(() -> {
+        SCRIPT_EXECUTOR.execute(() -> {
             try {
                 HttpRequest uploadRequest = MultipartUtil
                         .newMultipartRequest(apiBaseUrl + "/scripts", Map.of("file", file.toPath().toString()))
                         .build();
                 HttpResponse<String> uploadResponse = httpClient.send(uploadRequest, HttpResponse.BodyHandlers.ofString());
 
-                // 업로드 응답에서 scriptId 추출 (서버가 JSON {"id":xxx} 반환 가정)
-                String scriptId;
-                try {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> resp = new com.fasterxml.jackson.databind.ObjectMapper()
-                            .readValue(uploadResponse.body(), Map.class);
-                    scriptId = resp.getOrDefault("id", "0").toString();
-                } catch (Exception e) {
-                    scriptId = "0";
+                if (uploadResponse.statusCode() < 200 || uploadResponse.statusCode() >= 300) {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "스크립트 업로드 실패: HTTP " + uploadResponse.statusCode()).show());
+                    return;
                 }
 
-                String jsonBody = String.format(
-                        "{\"scope\":\"BROADCAST\",\"type\":\"RUN_PS1\",\"role\":\"ALL\",\"payload\":\"%s\"}", scriptId);
-                HttpRequest cmdRequest = HttpRequest.newBuilder()
-                        .uri(URI.create(apiBaseUrl + "/commands"))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                        .build();
-                httpClient.sendAsync(cmdRequest, HttpResponse.BodyHandlers.discarding());
+                @SuppressWarnings("unchecked")
+                Map<String, Object> uploadResp = objectMapper.readValue(uploadResponse.body(), Map.class);
+                String scriptUrl = String.valueOf(uploadResp.getOrDefault("downloadUrl", ""));
+                if (scriptUrl.isBlank()) {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "스크립트 업로드 응답에 downloadUrl이 없습니다.").show());
+                    return;
+                }
 
-                final int statusCode = uploadResponse.statusCode();
+                // 전체 강의실에 GROUP RUN_PS1 명령 발행
+                List<ClassroomSummaryDto> classrooms = apiClient
+                        .getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
+                        .join();
+
+                int queuedGroups = 0;
+                int failedGroups = 0;
+                for (ClassroomSummaryDto c : classrooms) {
+                    if (c == null || c.getGroupId() == null) continue;
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("scope", "GROUP");
+                    payload.put("groupId", c.getGroupId());
+                    payload.put("role", "ALL");
+                    payload.put("type", "RUN_PS1");
+                    payload.put("scriptUrl", scriptUrl);
+                    payload.put("payloadJson", "{}");
+                    try {
+                        apiClient.postJson("/commands", payload).join();
+                        queuedGroups++;
+                    } catch (Exception e) {
+                        log.warn("Failed to enqueue RUN_PS1 for group {}", c.getGroupId(), e);
+                        failedGroups++;
+                    }
+                }
+
+                final int successCount = queuedGroups;
+                final int failCount = failedGroups;
                 Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
-                        "스크립트 업로드 및 실행 요청 완료 (" + statusCode + ")").show());
+                    "스크립트 배포 요청 완료: 성공 " + successCount + "개 강의실, 실패 " + failCount + "개").show());
             } catch (Exception e) {
                 log.warn("Failed to upload/execute script {}", file.getName(), e);
                 Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                         "스크립트 업로드 오류: " + e.getMessage()).show());
             }
-        }).start();
+        });
+    }
+
+    private String errorMessage(Throwable ex) {
+        Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
+                ? ex.getCause() : ex;
+        if (cause == null) return "알 수 없는 오류";
+        String msg = cause.getMessage();
+        return msg == null || msg.isBlank() ? cause.toString() : msg;
     }
 
     private void handleDownloadReport(String type) {

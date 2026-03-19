@@ -62,8 +62,8 @@ public class NetworkPanelController {
                 .thenAccept(body -> {
                     try {
                         JsonNode node = apiClient.getObjectMapper().readTree(body);
-                        double inTraffic = node.get("inboundMbps").asDouble();
-                        double outTraffic = node.get("outboundMbps").asDouble();
+                        double inTraffic = node.path("inboundMbps").asDouble(0.0);
+                        double outTraffic = node.path("outboundMbps").asDouble(0.0);
                         Platform.runLater(() -> {
                             String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
                             inboundSeries.getData().add(new XYChart.Data<>(now, inTraffic));

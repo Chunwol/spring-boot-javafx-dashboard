@@ -17,7 +17,24 @@ import java.util.concurrent.CompletionException;
 
 public class ApiClient {
 
-    public static final String DEFAULT_BASE_URL = "http://localhost:8080/api/v1";
+    public static final String DEFAULT_BASE_URL;
+    public static final String DEFAULT_WS_URL;
+
+    static {
+        String apiUrl = "http://localhost:8080/api/v1";
+        String wsUrl  = "ws://localhost:8080/ws/websocket";
+        try (var stream = ApiClient.class.getResourceAsStream("/application.properties")) {
+            if (stream != null) {
+                java.util.Properties props = new java.util.Properties();
+                props.load(stream);
+                apiUrl = props.getProperty("API_BASE_URL", apiUrl);
+                wsUrl  = props.getProperty("WEBSOCKET_STOMP_URL", wsUrl);
+            }
+        } catch (Exception ignored) {}
+        DEFAULT_BASE_URL = apiUrl;
+        DEFAULT_WS_URL   = wsUrl;
+    }
+
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(8);
     private static final int DEFAULT_RETRY_COUNT = 1;
     private static final ApiClient INSTANCE = new ApiClient(DEFAULT_BASE_URL);

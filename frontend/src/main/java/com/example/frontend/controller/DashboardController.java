@@ -115,7 +115,7 @@ public class DashboardController {
     });
     private volatile boolean shutdownRequested = false;
 
-    private static final String API_BASE_URL = "http://localhost:8080/api/v1";
+    private static final String API_BASE_URL = com.example.frontend.service.ApiClient.DEFAULT_BASE_URL;
 
 
     @FXML

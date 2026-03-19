@@ -12,6 +12,7 @@ import java.lang.reflect.Type;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -41,12 +42,13 @@ public class DashboardRealtimeModule {
     private WebSocketStompClient stompClient;
     private StompSession activeSession;
     private volatile boolean stopped = false;
+    private final AtomicBoolean reconnectPending = new AtomicBoolean(false);
 
     private Runnable onDashboardMessage;
     private Consumer<String> onAlertMessage;
 
     public DashboardRealtimeModule() {
-        this("ws://localhost:8080/ws/websocket");
+        this(com.example.frontend.service.ApiClient.DEFAULT_WS_URL);
     }
 
     public DashboardRealtimeModule(String wsUrl) {
@@ -151,7 +153,14 @@ public class DashboardRealtimeModule {
 
     private void scheduleReconnect() {
         if (stopped) return;
+        if (!reconnectPending.compareAndSet(false, true)) {
+            log.debug("[WS] 재연결 이미 예약됨, 중복 예약 스킵");
+            return;
+        }
         log.info("[WS] 재연결 예약 ({}초 후)...", RECONNECT_DELAY_SEC);
-        scheduler.schedule(this::doConnect, RECONNECT_DELAY_SEC, TimeUnit.SECONDS);
+        scheduler.schedule(() -> {
+            reconnectPending.set(false);
+            doConnect();
+        }, RECONNECT_DELAY_SEC, TimeUnit.SECONDS);
     }
 }

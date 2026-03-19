@@ -22,7 +22,7 @@ public class DashboardPdfService {
     private final ApiClient apiClient = ApiClient.getInstance();
 
     public DashboardPdfService() {
-        this("http://localhost:8080/api/v1");
+        this(ApiClient.DEFAULT_BASE_URL);
     }
 
     public DashboardPdfService(String apiBaseUrl) {
@@ -142,6 +142,9 @@ public class DashboardPdfService {
         if (choice.startsWith("MONTHLY:")) {
             String[] parts = choice.split(":");
             return apiBaseUrl + "/reports/pdf?type=MONTHLY&year=" + parts[1] + "&month=" + parts[2];
+        }
+        if ("WEEKLY_LAST".equals(choice)) {
+            return apiBaseUrl + "/reports/pdf?type=WEEKLY_LAST";
         }
         return apiBaseUrl + "/reports/pdf?type=WEEKLY";
     }
