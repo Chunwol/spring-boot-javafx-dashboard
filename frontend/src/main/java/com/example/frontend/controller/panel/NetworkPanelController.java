@@ -47,7 +47,8 @@ public class NetworkPanelController {
         chart.setTitle("실시간 전체 네트워크 트래픽");
         chart.setCreateSymbols(false);
         chart.setAnimated(false);
-        chart.getData().addAll(inboundSeries, outboundSeries);
+        chart.getData().add(inboundSeries);
+        chart.getData().add(outboundSeries);
         return chart;
     }
 
@@ -60,7 +61,7 @@ public class NetworkPanelController {
         apiClient.get("/dashboard/traffic")
                 .thenAccept(body -> {
                     try {
-                JsonNode node = apiClient.getObjectMapper().readTree(body);
+                        JsonNode node = apiClient.getObjectMapper().readTree(body);
                         double inTraffic = node.get("inboundMbps").asDouble();
                         double outTraffic = node.get("outboundMbps").asDouble();
                         Platform.runLater(() -> {

@@ -1,5 +1,6 @@
 package com.example.util;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
@@ -46,6 +47,6 @@ public class HttpClientUtil {
     }
 
     public static Map<String, Object> parseJsonObject(String json) throws IOException {
-        return objectMapper.readValue(json, Map.class);
+        return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
     }
 }

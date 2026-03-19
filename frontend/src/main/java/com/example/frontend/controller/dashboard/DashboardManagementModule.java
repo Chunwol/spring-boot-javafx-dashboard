@@ -133,7 +133,7 @@ public class DashboardManagementModule {
         HBox.setHgrow(descField, javafx.scene.layout.Priority.ALWAYS);
 
         ipRangeTable = new TableView<>();
-        ipRangeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        ipRangeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         ipRangeTable.setPrefHeight(320);
 
         TableColumn<IpRangeItem, Long> idCol = new TableColumn<>("ID");
@@ -171,7 +171,13 @@ public class DashboardManagementModule {
             }
         });
 
-        ipRangeTable.getColumns().addAll(idCol, groupNameCol, cidrCol, startCol, endCol, descCol, actionCol);
+        ipRangeTable.getColumns().add(idCol);
+        ipRangeTable.getColumns().add(groupNameCol);
+        ipRangeTable.getColumns().add(cidrCol);
+        ipRangeTable.getColumns().add(startCol);
+        ipRangeTable.getColumns().add(endCol);
+        ipRangeTable.getColumns().add(descCol);
+        ipRangeTable.getColumns().add(actionCol);
         VBox ipBox = new VBox(10, ipTitle, ipHint, ipForm, rangeSpecArea, ipRangeTable);
         ipBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return ipBox;
@@ -195,7 +201,7 @@ public class DashboardManagementModule {
         addTeacherBtn.setOnAction(e -> addTeacherDevice(teacherIp, teacherMac, teacherDesc));
 
         teacherDeviceTable = new TableView<>();
-        teacherDeviceTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        teacherDeviceTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         TableColumn<TeacherDeviceItem, Long> teacherIdCol = new TableColumn<>("ID");
         teacherIdCol.setCellValueFactory(new PropertyValueFactory<>("id"));
         TableColumn<TeacherDeviceItem, String> teacherGroupCol = new TableColumn<>("강의실");
@@ -232,7 +238,12 @@ public class DashboardManagementModule {
                 setGraphic(empty ? null : deleteBtn);
             }
         });
-        teacherDeviceTable.getColumns().addAll(teacherIdCol, teacherGroupCol, teacherIpCol, teacherMacCol, teacherDescCol, teacherActionCol);
+        teacherDeviceTable.getColumns().add(teacherIdCol);
+        teacherDeviceTable.getColumns().add(teacherGroupCol);
+        teacherDeviceTable.getColumns().add(teacherIpCol);
+        teacherDeviceTable.getColumns().add(teacherMacCol);
+        teacherDeviceTable.getColumns().add(teacherDescCol);
+        teacherDeviceTable.getColumns().add(teacherActionCol);
 
         Label brokenTitle = new Label("고장 PC 등록");
         brokenTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
