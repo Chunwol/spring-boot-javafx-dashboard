@@ -3,11 +3,14 @@ package com.example.frontend.controller.dashboard;
 import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardInfoDto;
 import com.example.dto.dashboard.DashboardPanelDto;
+import com.example.dto.dashboard.DashboardRefreshDto;
+import com.example.frontend.service.DashboardDataService;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.geometry.Point2D;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.prefs.Preferences;
 
 /**
@@ -41,8 +44,16 @@ public class DashboardViewModel {
     // Preferences
     private final Preferences preferences;
 
+    // Data Service
+    private final DashboardDataService dataService;
+
     public DashboardViewModel() {
+        this(new DashboardDataService());
+    }
+
+    public DashboardViewModel(DashboardDataService dataService) {
         this.preferences = Preferences.userNodeForPackage(DashboardViewModel.class);
+        this.dataService = dataService;
         loadPreferences();
     }
 
@@ -258,4 +269,50 @@ public class DashboardViewModel {
     public static double getMaxZoom() {
         return MAX_ZOOM;
     }
+
+    // Data Loading Methods
+    /**
+     * Fetch classrooms from backend using DashboardDataService.
+     */
+    public void loadClassrooms(Consumer<List<ClassroomSummaryDto>> callback) {
+        try {
+            List<ClassroomSummaryDto> classrooms = dataService.fetchClassrooms();
+            setCachedClassrooms(classrooms);
+            if (callback != null) {
+                callback.accept(classrooms);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            if (callback != null) {
+                callback.accept(List.of());
+            }
+        }
+    }
+
+    /**
+     * Update cached data from a refresh snapshot.
+     */
+    public void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        
+        List<ClassroomSummaryDto> classrooms = snapshot.getClassrooms();
+        if (classrooms != null) {
+            setCachedClassrooms(classrooms);
+        }
+    }
+
+    /**
+     * Fetch refresh snapshot asynchronously using DashboardDataService.
+     */
+    public void fetchRefreshSnapshotAsync(Consumer<DashboardRefreshDto> callback) {
+        dataService.fetchRefreshSnapshotAsync(snapshot -> {
+            applyRefreshSnapshot(snapshot);
+            if (callback != null) {
+                callback.accept(snapshot);
+            }
+        });
+    }
 }
+

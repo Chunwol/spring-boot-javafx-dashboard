@@ -117,14 +117,9 @@ public class DashboardController {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final DashboardService dashboardService = new DashboardService();
-    private final DashboardDataService dashboardDataService = new DashboardDataService();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private static final String API_BASE_URL = "http://localhost:8080/api/v1";
-
-    private List<ClassroomSummaryDto> cachedClassrooms = new ArrayList<>();
-    private List<DashboardInfoDto> cachedDashboards = new ArrayList<>();
-    private List<DashboardPanelDto> cachedDashboardPanels = new ArrayList<>();
 
 
     @FXML
@@ -397,8 +392,9 @@ public class DashboardController {
     }
 
     private ResourceRowModel resolveResourceRowModel(Object item) {
+        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
         if (item instanceof ClassroomSummaryDto dto) {
-            boolean added = cachedDashboardPanels.stream().anyMatch(p ->
+            boolean added = panels.stream().anyMatch(p ->
                     "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
                             && dto.getGroupId().equals(p.getRefGroupId()));
             String sub = (added ? "Added" : "Not added") + " , online " + dto.getOnlinePcs() + "/" + dto.getTotalPcs();
@@ -453,7 +449,8 @@ public class DashboardController {
                 new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
                 return;
             }
-            boolean exists = cachedDashboardPanels.stream().anyMatch(p ->
+            List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
+            boolean exists = panels.stream().anyMatch(p ->
                     "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
                             && selected.getGroupId().equals(p.getRefGroupId()));
             if (exists) {
@@ -887,7 +884,7 @@ public class DashboardController {
     }
 
     private void refreshDashboardSnapshot() {
-        dashboardDataService.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
+        dashboardViewModel.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
     }
 
     private void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
@@ -895,7 +892,8 @@ public class DashboardController {
             return;
         }
 
-        cachedClassrooms = snapshot.getClassrooms() == null ? List.of() : snapshot.getClassrooms();
+        // ViewModel already updated cachedClassrooms via applyRefreshSnapshot
+        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
 
         if (widgetModule != null) {
             widgetModule.applySnapshot(snapshot.getTexts(), snapshot.getImages());
@@ -915,7 +913,7 @@ public class DashboardController {
 
     private void loadDashboards() {
         dashboardService.fetchDashboardsAsync(dashboards -> Platform.runLater(() -> {
-            cachedDashboards = dashboards;
+            dashboardViewModel.setCachedDashboards(dashboards);
             if (dashboardSelector == null) {
                 return;
             }
@@ -936,12 +934,12 @@ public class DashboardController {
 
     private void loadDashboardPanels() {
         if (currentDashboardId() == null) {
-            cachedDashboardPanels = List.of();
+            dashboardViewModel.setCachedDashboardPanels(List.of());
             Platform.runLater(this::refreshPanelListAndDashboard);
             return;
         }
         dashboardService.fetchDashboardPanelsAsync(currentDashboardId(), panels -> Platform.runLater(() -> {
-            cachedDashboardPanels = panels;
+            dashboardViewModel.setCachedDashboardPanels(panels);
             refreshPanelListAndDashboard();
         }));
     }
@@ -968,9 +966,12 @@ public class DashboardController {
     }
 
     private void refreshPanelListAndDashboard() {
+        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
+        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
+        
         if (groupListView != null) {
             groupListView.getItems().clear();
-            groupListView.getItems().addAll(cachedClassrooms);
+            groupListView.getItems().addAll(classrooms);
             if (widgetModule != null) {
                 groupListView.getItems().addAll(widgetModule.getCachedTexts());
                 groupListView.getItems().addAll(widgetModule.getCachedImages());
@@ -978,14 +979,14 @@ public class DashboardController {
         }
 
         if (panelClassroomCombo != null) {
-            panelClassroomCombo.getItems().setAll(cachedClassrooms);
+            panelClassroomCombo.getItems().setAll(classrooms);
         }
         if (networkClassroomCombo != null) {
-            networkClassroomCombo.getItems().setAll(cachedClassrooms);
+            networkClassroomCombo.getItems().setAll(classrooms);
         }
 
         if (classroomModule != null) {
-            classroomModule.updateDashboardClassrooms(cachedClassrooms, cachedDashboardPanels);
+            classroomModule.updateDashboardClassrooms(classrooms, panels);
         }
         renderNetworkPanels();
         updateTopSummary();
@@ -996,7 +997,8 @@ public class DashboardController {
             return;
         }
 
-        List<DashboardPanelDto> networkPanels = cachedDashboardPanels.stream()
+        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
+        List<DashboardPanelDto> networkPanels = panels.stream()
                 .filter(p -> "NETWORK_TRAFFIC".equalsIgnoreCase(p.getPanelType()))
                 .toList();
 
@@ -1026,7 +1028,8 @@ public class DashboardController {
     }
 
     private void addNetworkPanel(DashboardPanelDto panelDto) {
-        ClassroomSummaryDto linked = cachedClassrooms.stream()
+        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
+        ClassroomSummaryDto linked = classrooms.stream()
                 .filter(c -> c.getGroupId().equals(panelDto.getRefGroupId()))
                 .findFirst()
                 .orElse(null);
@@ -1310,9 +1313,10 @@ public class DashboardController {
         if (statusSummaryLabel == null || connectivityLabel == null) {
             return;
         }
-        int classroomCount = cachedClassrooms == null ? 0 : cachedClassrooms.size();
-        long online = cachedClassrooms == null ? 0 : cachedClassrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
-        long total = cachedClassrooms == null ? 0 : cachedClassrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
+        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
+        int classroomCount = classrooms == null ? 0 : classrooms.size();
+        long online = classrooms == null ? 0 : classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
+        long total = classrooms == null ? 0 : classrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
         statusSummaryLabel.setText("Classrooms " + classroomCount + ", online " + online + "/" + total);
         connectivityLabel.setText("Connected");
         connectivityLabel.setTextFill(Color.web("#86efac"));
