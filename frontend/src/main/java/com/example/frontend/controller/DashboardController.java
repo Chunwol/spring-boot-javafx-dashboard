@@ -322,73 +322,23 @@ public class DashboardController {
         Label listSub = new Label("Panels and widgets available for canvas");
         listSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
 
-        Button addClassroomBtn = createIconActionButton("Add classroom", "mdi2s-school-outline", "#0ea5e9", "white");
-        addClassroomBtn.setMaxWidth(Double.MAX_VALUE);
-        addClassroomBtn.setOnAction(e -> classroomModule.handleAddClassroom());
+        Button addClassroomBtn = createAddClassroomButton();
 
         panelClassroomCombo = buildClassroomCombo("Select classroom for panel");
 
-        Button addClassroomPanelBtn = createActionButton("Add classroom panel", "#2563eb", "white");
-        addClassroomPanelBtn.setMaxWidth(Double.MAX_VALUE);
-        addClassroomPanelBtn.setOnAction(e -> {
-            ClassroomSummaryDto selected = panelClassroomCombo.getValue();
-            if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
-                return;
-            }
-            boolean exists = cachedDashboardPanels.stream().anyMatch(p ->
-                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
-                            && selected.getGroupId().equals(p.getRefGroupId()));
-            if (exists) {
-                new Alert(Alert.AlertType.INFORMATION, "Classroom panel already exists on dashboard.").showAndWait();
-                return;
-            }
-            double[] size = getResponsiveDefaultSize("CLASSROOM");
-            classroomModule.addClassroomPanel(selected, 40.0, 40.0, size[0], size[1]);
-        });
+        Button addClassroomPanelBtn = createAddClassroomPanelButton();
 
-        Button addTextBtn = createIconActionButton("Add text", "mdi2t-text-box-plus-outline", "#334155", "white");
-        addTextBtn.setMaxWidth(Double.MAX_VALUE);
-        addTextBtn.setOnAction(e -> widgetModule.handleAddTextItem());
+        Button addTextBtn = createAddTextButton();
 
-        Button addImageBtn = createIconActionButton("Add image", "mdi2i-image-plus-outline", "#334155", "white");
-        addImageBtn.setMaxWidth(Double.MAX_VALUE);
-        addImageBtn.setOnAction(e -> widgetModule.handleAddImageItem());
+        Button addImageBtn = createAddImageButton();
 
-        Button backupBtn = createIconActionButton("Backup text", "mdi2c-content-save-outline", "#64748b", "white");
-        backupBtn.setMaxWidth(Double.MAX_VALUE);
-        backupBtn.setOnAction(e -> widgetModule.handleBackupTextItems());
+        Button backupBtn = createBackupTextButton();
 
-        Button restoreBtn = createIconActionButton("Restore text", "mdi2r-restore", "#64748b", "white");
-        restoreBtn.setMaxWidth(Double.MAX_VALUE);
-        restoreBtn.setOnAction(e -> widgetModule.handleRestoreTextItems());
+        Button restoreBtn = createRestoreTextButton();
 
         networkClassroomCombo = buildClassroomCombo("Select classroom for network panel");
 
-        Button addNetworkPanelBtn = createIconActionButton("Add network panel", "mdi2w-wan", "#2563eb", "white");
-        addNetworkPanelBtn.setMaxWidth(Double.MAX_VALUE);
-        addNetworkPanelBtn.setOnAction(e -> {
-            ClassroomSummaryDto selected = networkClassroomCombo.getValue();
-            if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
-                return;
-            }
-            if (currentDashboardId() == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
-                return;
-            }
-            double[] size = getResponsiveDefaultSize("NETWORK");
-            dashboardService.createPanelAsync(
-                    currentDashboardId(),
-                    "NETWORK_TRAFFIC",
-                    selected.getGroupId(),
-                    60.0,
-                    60.0,
-                    size[0],
-                    size[1],
-                    dto -> Platform.runLater(this::loadDashboardPanels)
-            );
-        });
+        Button addNetworkPanelBtn = createAddNetworkPanelButton();
 
         groupListView = new ListView<>();
         groupListView.setPlaceholder(new Label("No items to display."));
@@ -472,6 +422,91 @@ public class DashboardController {
 
         leftPane.getChildren().addAll(listTitle, listSub, groupListView, leftEditControls);
         return leftPane;
+    }
+
+    private Button createAddClassroomButton() {
+        Button button = createIconActionButton("Add classroom", "mdi2s-school-outline", "#0ea5e9", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> classroomModule.handleAddClassroom());
+        return button;
+    }
+
+    private Button createAddClassroomPanelButton() {
+        Button button = createActionButton("Add classroom panel", "#2563eb", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> {
+            ClassroomSummaryDto selected = panelClassroomCombo.getValue();
+            if (selected == null) {
+                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
+                return;
+            }
+            boolean exists = cachedDashboardPanels.stream().anyMatch(p ->
+                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
+                            && selected.getGroupId().equals(p.getRefGroupId()));
+            if (exists) {
+                new Alert(Alert.AlertType.INFORMATION, "Classroom panel already exists on dashboard.").showAndWait();
+                return;
+            }
+            double[] size = getResponsiveDefaultSize("CLASSROOM");
+            classroomModule.addClassroomPanel(selected, 40.0, 40.0, size[0], size[1]);
+        });
+        return button;
+    }
+
+    private Button createAddTextButton() {
+        Button button = createIconActionButton("Add text", "mdi2t-text-box-plus-outline", "#334155", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> widgetModule.handleAddTextItem());
+        return button;
+    }
+
+    private Button createAddImageButton() {
+        Button button = createIconActionButton("Add image", "mdi2i-image-plus-outline", "#334155", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> widgetModule.handleAddImageItem());
+        return button;
+    }
+
+    private Button createBackupTextButton() {
+        Button button = createIconActionButton("Backup text", "mdi2c-content-save-outline", "#64748b", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> widgetModule.handleBackupTextItems());
+        return button;
+    }
+
+    private Button createRestoreTextButton() {
+        Button button = createIconActionButton("Restore text", "mdi2r-restore", "#64748b", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> widgetModule.handleRestoreTextItems());
+        return button;
+    }
+
+    private Button createAddNetworkPanelButton() {
+        Button button = createIconActionButton("Add network panel", "mdi2w-wan", "#2563eb", "white");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> {
+            ClassroomSummaryDto selected = networkClassroomCombo.getValue();
+            if (selected == null) {
+                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
+                return;
+            }
+            if (currentDashboardId() == null) {
+                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
+                return;
+            }
+            double[] size = getResponsiveDefaultSize("NETWORK");
+            dashboardService.createPanelAsync(
+                    currentDashboardId(),
+                    "NETWORK_TRAFFIC",
+                    selected.getGroupId(),
+                    60.0,
+                    60.0,
+                    size[0],
+                    size[1],
+                    dto -> Platform.runLater(this::loadDashboardPanels)
+            );
+        });
+        return button;
     }
 
     private VBox buildRightPane() {

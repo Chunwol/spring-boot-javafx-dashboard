@@ -463,6 +463,7 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
   - `DashboardDataServiceTest` 추가 (비동기 fallback 포함)
   - `DashboardUIServiceTest` 추가 (줌/편집 UI/fit-all 분기 검증)
   - `DashboardViewModelTest`에 설정 영속(load/save) 케이스 추가
+  - `DashboardInteractionServiceTest`에 드래그/리사이즈 값 변화 검증 추가
   - `:frontend:test` 통과
 - **시나리오**:
   - Dashboard 로드 → 모든 패널 렌더링 ✅
