@@ -34,19 +34,14 @@ import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
-import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.Dragboard;
-import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -106,10 +101,7 @@ public class DashboardController {
     private VBox leftToolPane;
     private VBox leftEditControls;
 
-    private ListView<Object> groupListView;
     private ComboBox<DashboardInfoDto> dashboardSelector;
-    private ComboBox<ClassroomSummaryDto> panelClassroomCombo;
-    private ComboBox<ClassroomSummaryDto> networkClassroomCombo;
 
     private NetworkPanelController networkPanelController;
     private final DashboardPanelManager panelManager = new DashboardPanelManager();
@@ -341,169 +333,6 @@ public class DashboardController {
         VBox leftPane = resourcePanelModule.buildView();
         leftEditControls = resourcePanelModule.getEditControls();
         return leftPane;
-    }
-
-    private ListView<Object> createResourceListView() {
-        ListView<Object> listView = new ListView<>();
-        listView.setPlaceholder(new Label("No items to display."));
-        listView.setStyle("-fx-background-radius: 10; -fx-border-color: #dbe5f1; -fx-border-radius: 10;");
-        listView.setCellFactory(param -> new ListCell<>() {
-            @Override
-            protected void updateItem(Object item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setGraphic(null);
-                    return;
-                }
-
-                ResourceRowModel model = resolveResourceRowModel(item);
-
-                Label nameLabel = new Label(model.name());
-                nameLabel.setStyle("-fx-font-weight: 600;");
-                Label subLabel = new Label(model.subLabel());
-                subLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-                VBox textBox = new VBox(2, nameLabel, subLabel);
-
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
-                Label dragHint = new Label(isEditModeActive() ? "Drag to add" : "");
-                dragHint.setStyle("-fx-text-fill: #2563eb; -fx-font-size: 11px; -fx-font-weight: 700;");
-
-                HBox row = new HBox(10, textBox, spacer, dragHint);
-                row.setAlignment(Pos.CENTER_LEFT);
-                configureResourceDrag(row, model.dragKey());
-                setGraphic(row);
-            }
-        });
-        return listView;
-    }
-
-    private ResourceRowModel resolveResourceRowModel(Object item) {
-        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
-        if (item instanceof ClassroomSummaryDto dto) {
-            boolean added = panels.stream().anyMatch(p ->
-                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
-                            && dto.getGroupId().equals(p.getRefGroupId()));
-            String sub = (added ? "Added" : "Not added") + " , online " + dto.getOnlinePcs() + "/" + dto.getTotalPcs();
-            return new ResourceRowModel("GROUP_ADD:" + dto.getGroupId(), dto.getGroupName(), sub);
-        }
-
-        if (item instanceof Map<?, ?> rawMap) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = (Map<String, Object>) rawMap;
-            Long id = ((Number) map.get("id")).longValue();
-            if (map.containsKey("text")) {
-                String text = map.get("text").toString();
-                String sub = text.substring(0, Math.min(24, text.length()));
-                return new ResourceRowModel("TEXT_ADD:" + id, "Text widget", sub);
-            }
-            if (map.containsKey("imageUrl")) {
-                return new ResourceRowModel("IMAGE_ADD:" + id, "Image widget #" + id, "Move/delete from canvas");
-            }
-        }
-
-        return new ResourceRowModel("", "Unknown", "");
-    }
-
-    private void configureResourceDrag(HBox row, String dragKey) {
-        row.setOnDragDetected(event -> {
-            if (!isEditModeActive() || dragKey == null || dragKey.isBlank()) {
-                return;
-            }
-            Dragboard dragboard = groupListView.startDragAndDrop(TransferMode.COPY);
-            ClipboardContent content = new ClipboardContent();
-            content.putString(dragKey);
-            dragboard.setContent(content);
-            event.consume();
-        });
-    }
-
-    private record ResourceRowModel(String dragKey, String name, String subLabel) {}
-
-    private Button createAddClassroomButton() {
-        Button button = createIconActionButton("Add classroom", "mdi2s-school-outline", "#0ea5e9", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> classroomModule.handleAddClassroom());
-        return button;
-    }
-
-    private Button createAddClassroomPanelButton() {
-        Button button = createActionButton("Add classroom panel", "#2563eb", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> {
-            ClassroomSummaryDto selected = panelClassroomCombo.getValue();
-            if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
-                return;
-            }
-            List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
-            boolean exists = panels.stream().anyMatch(p ->
-                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
-                            && selected.getGroupId().equals(p.getRefGroupId()));
-            if (exists) {
-                new Alert(Alert.AlertType.INFORMATION, "Classroom panel already exists on dashboard.").showAndWait();
-                return;
-            }
-            double[] size = getResponsiveDefaultSize("CLASSROOM");
-            classroomModule.addClassroomPanel(selected, 40.0, 40.0, size[0], size[1]);
-        });
-        return button;
-    }
-
-    private Button createAddTextButton() {
-        Button button = createIconActionButton("Add text", "mdi2t-text-box-plus-outline", "#334155", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> widgetModule.handleAddTextItem());
-        return button;
-    }
-
-    private Button createAddImageButton() {
-        Button button = createIconActionButton("Add image", "mdi2i-image-plus-outline", "#334155", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> widgetModule.handleAddImageItem());
-        return button;
-    }
-
-    private Button createBackupTextButton() {
-        Button button = createIconActionButton("Backup text", "mdi2c-content-save-outline", "#64748b", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> widgetModule.handleBackupTextItems());
-        return button;
-    }
-
-    private Button createRestoreTextButton() {
-        Button button = createIconActionButton("Restore text", "mdi2r-restore", "#64748b", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> widgetModule.handleRestoreTextItems());
-        return button;
-    }
-
-    private Button createAddNetworkPanelButton() {
-        Button button = createIconActionButton("Add network panel", "mdi2w-wan", "#2563eb", "white");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> {
-            ClassroomSummaryDto selected = networkClassroomCombo.getValue();
-            if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
-                return;
-            }
-            if (currentDashboardId() == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
-                return;
-            }
-            double[] size = getResponsiveDefaultSize("NETWORK");
-            dashboardService.createPanelAsync(
-                    currentDashboardId(),
-                    "NETWORK_TRAFFIC",
-                    selected.getGroupId(),
-                    60.0,
-                    60.0,
-                    size[0],
-                    size[1],
-                    dto -> Platform.runLater(this::loadDashboardPanels)
-            );
-        });
-        return button;
     }
 
     private VBox buildRightPane() {
@@ -765,27 +594,6 @@ public class DashboardController {
         fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
         fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
         return fitAllBtn;
-    }
-
-    private ComboBox<ClassroomSummaryDto> buildClassroomCombo(String prompt) {
-        ComboBox<ClassroomSummaryDto> combo = new ComboBox<>();
-        combo.setPromptText(prompt);
-        combo.setMaxWidth(Double.MAX_VALUE);
-        combo.setCellFactory(param -> new ListCell<>() {
-            @Override
-            protected void updateItem(ClassroomSummaryDto item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getGroupName());
-            }
-        });
-        combo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ClassroomSummaryDto item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getGroupName());
-            }
-        });
-        return combo;
     }
 
     private void applyEditModeUiState() {
