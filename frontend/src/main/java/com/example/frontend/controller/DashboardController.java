@@ -25,7 +25,6 @@ import javafx.animation.RotateTransition;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
-import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
@@ -72,9 +71,6 @@ public class DashboardController {
 
     private static final double GRID_SIZE = 20.0;
     private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
-
-    @FXML
-    private ScrollPane scrollPane;
 
     @FXML
     private VBox rootVBox;
