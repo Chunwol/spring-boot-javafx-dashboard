@@ -475,14 +475,17 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 - **git**: `test(integration): add E2E tests for dashboard workflows`
 
 ### Step 5-3: 성능 프로파일링 (2시간)
-- **진행 상태 (2026-03-19)**: 진행 중 (1차 완료)
+- **진행 상태 (2026-03-19)**: 진행 중 (2차 완료)
 - **완료 항목**:
   - `scripts/profile-dashboard.ps1` 추가
+  - `scripts/profile-dashboard.ps1 -IncludeBuildMetrics` 지원 추가
+  - `scripts/profile-dashboard.latest.json` 실측 갱신
   - `docs/PERFORMANCE_BASELINE.md` 추가
   - 실측 베이스라인 수집 완료
-    - Unified refresh avg 38.93ms
-    - Backend Working Set 119.45MB
-    - Backend Private Memory 422.12MB
+    - Unified refresh avg 36.37ms
+    - Backend Working Set 139.95MB
+    - Backend Private Memory 423.63MB
+    - frontend classes build 4049.86ms
 - **측정 항목**:
   - 초기 로드 시간 (목표: <2초)
   - HTTP 요청 수 및 대역폭 (목표: 95% ↓)
@@ -492,6 +495,10 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 - **git**: `perf(profiling): add performance baselines`
 
 ### Step 5-4: 문서화 (2시간)
+- **진행 상태 (2026-03-19)**: 진행 중 (1차 완료)
+- **완료 항목**:
+  - `docs/FRONTEND_ARCHITECTURE.md` 추가
+  - `docs/STYLE_GUIDE.md` 추가
 - **내용**:
   - 아키텍처 문서 (서비스 구조 다이어그램)
   - API 통합 가이드 (새 모듈 추가 방법)

@@ -340,70 +340,7 @@ public class DashboardController {
 
         Button addNetworkPanelBtn = createAddNetworkPanelButton();
 
-        groupListView = new ListView<>();
-        groupListView.setPlaceholder(new Label("No items to display."));
-        groupListView.setStyle("-fx-background-radius: 10; -fx-border-color: #dbe5f1; -fx-border-radius: 10;");
-        groupListView.setCellFactory(param -> new ListCell<>() {
-            @Override
-            protected void updateItem(Object item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setGraphic(null);
-                    return;
-                }
-
-                Label nameLabel = new Label();
-                nameLabel.setStyle("-fx-font-weight: 600;");
-                Label subLabel = new Label();
-                subLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-                VBox textBox = new VBox(2, nameLabel, subLabel);
-
-                String dragKey = "";
-                if (item instanceof ClassroomSummaryDto dto) {
-                    nameLabel.setText(dto.getGroupName());
-                    boolean added = cachedDashboardPanels.stream().anyMatch(p ->
-                            "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
-                                    && dto.getGroupId().equals(p.getRefGroupId()));
-                    subLabel.setText((added ? "Added" : "Not added") + " , online " + dto.getOnlinePcs() + "/" + dto.getTotalPcs());
-                    dragKey = "GROUP_ADD:" + dto.getGroupId();
-                } else if (item instanceof Map<?, ?> rawMap) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> map = (Map<String, Object>) rawMap;
-                    Long id = ((Number) map.get("id")).longValue();
-                    if (map.containsKey("text")) {
-                        String text = map.get("text").toString();
-                        nameLabel.setText("Text widget");
-                        subLabel.setText(text.substring(0, Math.min(24, text.length())));
-                        dragKey = "TEXT_ADD:" + id;
-                    } else if (map.containsKey("imageUrl")) {
-                        nameLabel.setText("Image widget #" + id);
-                        subLabel.setText("Move/delete from canvas");
-                        dragKey = "IMAGE_ADD:" + id;
-                    }
-                }
-
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
-                Label dragHint = new Label(isEditModeActive() ? "Drag to add" : "");
-                dragHint.setStyle("-fx-text-fill: #2563eb; -fx-font-size: 11px; -fx-font-weight: 700;");
-
-                HBox row = new HBox(10, textBox, spacer, dragHint);
-                row.setAlignment(Pos.CENTER_LEFT);
-                setGraphic(row);
-
-                String finalDragKey = dragKey;
-                row.setOnDragDetected(event -> {
-                    if (!isEditModeActive()) {
-                        return;
-                    }
-                    Dragboard dragboard = groupListView.startDragAndDrop(TransferMode.COPY);
-                    ClipboardContent content = new ClipboardContent();
-                    content.putString(finalDragKey);
-                    dragboard.setContent(content);
-                    event.consume();
-                });
-            }
-        });
+        groupListView = createResourceListView();
         VBox.setVgrow(groupListView, Priority.ALWAYS);
 
         leftEditControls = new VBox(
@@ -423,6 +360,82 @@ public class DashboardController {
         leftPane.getChildren().addAll(listTitle, listSub, groupListView, leftEditControls);
         return leftPane;
     }
+
+    private ListView<Object> createResourceListView() {
+        ListView<Object> listView = new ListView<>();
+        listView.setPlaceholder(new Label("No items to display."));
+        listView.setStyle("-fx-background-radius: 10; -fx-border-color: #dbe5f1; -fx-border-radius: 10;");
+        listView.setCellFactory(param -> new ListCell<>() {
+            @Override
+            protected void updateItem(Object item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    return;
+                }
+
+                ResourceRowModel model = resolveResourceRowModel(item);
+
+                Label nameLabel = new Label(model.name());
+                nameLabel.setStyle("-fx-font-weight: 600;");
+                Label subLabel = new Label(model.subLabel());
+                subLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
+                VBox textBox = new VBox(2, nameLabel, subLabel);
+
+                Region spacer = new Region();
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+                Label dragHint = new Label(isEditModeActive() ? "Drag to add" : "");
+                dragHint.setStyle("-fx-text-fill: #2563eb; -fx-font-size: 11px; -fx-font-weight: 700;");
+
+                HBox row = new HBox(10, textBox, spacer, dragHint);
+                row.setAlignment(Pos.CENTER_LEFT);
+                configureResourceDrag(row, model.dragKey());
+                setGraphic(row);
+            }
+        });
+        return listView;
+    }
+
+    private ResourceRowModel resolveResourceRowModel(Object item) {
+        if (item instanceof ClassroomSummaryDto dto) {
+            boolean added = cachedDashboardPanels.stream().anyMatch(p ->
+                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
+                            && dto.getGroupId().equals(p.getRefGroupId()));
+            String sub = (added ? "Added" : "Not added") + " , online " + dto.getOnlinePcs() + "/" + dto.getTotalPcs();
+            return new ResourceRowModel("GROUP_ADD:" + dto.getGroupId(), dto.getGroupName(), sub);
+        }
+
+        if (item instanceof Map<?, ?> rawMap) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) rawMap;
+            Long id = ((Number) map.get("id")).longValue();
+            if (map.containsKey("text")) {
+                String text = map.get("text").toString();
+                String sub = text.substring(0, Math.min(24, text.length()));
+                return new ResourceRowModel("TEXT_ADD:" + id, "Text widget", sub);
+            }
+            if (map.containsKey("imageUrl")) {
+                return new ResourceRowModel("IMAGE_ADD:" + id, "Image widget #" + id, "Move/delete from canvas");
+            }
+        }
+
+        return new ResourceRowModel("", "Unknown", "");
+    }
+
+    private void configureResourceDrag(HBox row, String dragKey) {
+        row.setOnDragDetected(event -> {
+            if (!isEditModeActive() || dragKey == null || dragKey.isBlank()) {
+                return;
+            }
+            Dragboard dragboard = groupListView.startDragAndDrop(TransferMode.COPY);
+            ClipboardContent content = new ClipboardContent();
+            content.putString(dragKey);
+            dragboard.setContent(content);
+            event.consume();
+        });
+    }
+
+    private record ResourceRowModel(String dragKey, String name, String subLabel) {}
 
     private Button createAddClassroomButton() {
         Button button = createIconActionButton("Add classroom", "mdi2s-school-outline", "#0ea5e9", "white");

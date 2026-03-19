@@ -1,7 +1,8 @@
 param(
     [string]$BaseUrl = "http://localhost:8080/api/v1",
     [int]$Iterations = 5,
-    [int]$Warmup = 1
+    [int]$Warmup = 1,
+    [switch]$IncludeBuildMetrics
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,6 +82,24 @@ function Get-BackendMemorySummary {
     }
 }
 
+function Measure-CommandDuration {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$Label
+    )
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments -NoNewWindow -Wait -PassThru
+    $sw.Stop()
+
+    [pscustomobject]@{
+        Name = $Label
+        ExitCode = $proc.ExitCode
+        ElapsedMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+    }
+}
+
 $results = @(
     (Measure-Endpoint -Label "Unified refresh" -Path "/dashboard/refresh")
     (Measure-Endpoint -Label "Classrooms" -Path "/dashboard/classrooms")
@@ -89,6 +108,15 @@ $results = @(
 )
 
 $memory = Get-BackendMemorySummary
+$buildMetrics = @()
+
+if ($IncludeBuildMetrics) {
+    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+    $gradleBat = Join-Path $repoRoot "gradlew.bat"
+    if (Test-Path $gradleBat) {
+        $buildMetrics += Measure-CommandDuration -FilePath $gradleBat -Arguments @(':frontend:classes') -Label 'frontend classes build'
+    }
+}
 
 Write-Host "Dashboard performance baseline" -ForegroundColor Cyan
 $results | Format-Table Name, Path, AvgMs, MinMs, MaxMs, PayloadBytes -AutoSize
@@ -97,6 +125,11 @@ Write-Host ""
 Write-Host "Backend memory" -ForegroundColor Cyan
 $memory | Format-List
 
+if ($buildMetrics.Count -gt 0) {
+    Write-Host "Build metrics" -ForegroundColor Cyan
+    $buildMetrics | Format-Table Name, ExitCode, ElapsedMs -AutoSize
+}
+
 $output = [pscustomobject]@{
     MeasuredAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     BaseUrl = $BaseUrl
@@ -104,6 +137,7 @@ $output = [pscustomobject]@{
     Warmup = $Warmup
     Endpoints = $results
     BackendMemory = $memory
+    BuildMetrics = $buildMetrics
 }
 
 $jsonPath = Join-Path $PSScriptRoot "profile-dashboard.latest.json"
