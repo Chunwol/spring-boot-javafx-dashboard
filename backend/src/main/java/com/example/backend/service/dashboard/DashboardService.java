@@ -186,7 +186,7 @@ public class DashboardService {
     }
 
     public NetworkTrafficDto getNetworkTraffic() {
-        // TODO: 실제 트래픽 집계 로직 구현 (현재는 더미 값 반환)
+        // 현재는 기본값을 반환하며, 트래픽 수집 파이프라인 연동 시 실제 집계값으로 교체됩니다.
         return new NetworkTrafficDto(0.0, 0.0);
     }
 

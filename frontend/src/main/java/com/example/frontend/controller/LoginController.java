@@ -1,6 +1,8 @@
 package com.example.frontend.controller;
 
 import com.example.frontend.service.ApiClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.application.Platform;
@@ -15,6 +17,8 @@ import javafx.stage.Stage;
 import java.util.Map;
 
 public class LoginController {
+
+    private static final Logger log = LoggerFactory.getLogger(LoginController.class);
 
     @FXML
     private TextField usernameField;
@@ -74,7 +78,7 @@ public class LoginController {
                         try {
                             showDashboard();
                         } catch (Exception ex) {
-                            ex.printStackTrace();
+                            log.warn("Failed to transition to dashboard after login", ex);
                             messageLabel.setText("화면 전환 오류: " + ex.getMessage());
                             messageLabel.setVisible(true);
                         }
@@ -88,7 +92,7 @@ public class LoginController {
                         return null;
                     });
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Login request failed before async dispatch", e);
             messageLabel.setText("서버 연결 실패. 백엔드가 실행 중인지 확인하세요.\n" + e.getMessage());
             messageLabel.setVisible(true);
         }

@@ -1,6 +1,8 @@
 package com.example.frontend.controller.dashboard;
 
 import javafx.application.Platform;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.converter.StringMessageConverter;
 import org.springframework.messaging.simp.stomp.*;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
@@ -23,6 +25,8 @@ import java.util.function.Consumer;
  * 연결 실패 또는 세션 종료 시 30초 후 자동 재연결.
  */
 public class DashboardRealtimeModule {
+
+    private static final Logger log = LoggerFactory.getLogger(DashboardRealtimeModule.class);
 
     private static final int RECONNECT_DELAY_SEC = 30;
 
@@ -93,26 +97,26 @@ public class DashboardRealtimeModule {
             @Override
             public void afterConnected(StompSession session, StompHeaders headers) {
                 activeSession = session;
-                System.out.println("[WS] Connected to " + wsUrl);
+                log.info("[WS] Connected to {}", wsUrl);
                 subscribeTopics(session);
             }
 
             @Override
             public void handleTransportError(StompSession session, Throwable ex) {
-                System.err.println("[WS] Transport error: " + ex.getMessage());
+                log.warn("[WS] Transport error", ex);
                 scheduleReconnect();
             }
 
             @Override
             public void handleException(StompSession session, StompCommand cmd,
                                         StompHeaders headers, byte[] payload, Throwable ex) {
-                System.err.println("[WS] STOMP exception: " + ex.getMessage());
+                log.warn("[WS] STOMP exception", ex);
             }
 
             @Override
             public void handleFrame(StompHeaders headers, Object payload) {
                 // ERROR frames
-                System.err.println("[WS] ERROR frame: " + payload);
+                log.warn("[WS] ERROR frame: {}", payload);
                 scheduleReconnect();
             }
         });
@@ -147,7 +151,7 @@ public class DashboardRealtimeModule {
 
     private void scheduleReconnect() {
         if (stopped) return;
-        System.out.println("[WS] 재연결 예약 (" + RECONNECT_DELAY_SEC + "초 후)...");
+        log.info("[WS] 재연결 예약 ({}초 후)...", RECONNECT_DELAY_SEC);
         scheduler.schedule(this::doConnect, RECONNECT_DELAY_SEC, TimeUnit.SECONDS);
     }
 }

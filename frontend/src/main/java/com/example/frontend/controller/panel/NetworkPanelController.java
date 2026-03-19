@@ -14,8 +14,11 @@ import javafx.application.Platform;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class NetworkPanelController {
+    private static final Logger log = LoggerFactory.getLogger(NetworkPanelController.class);
     private final VBox panel;
     private final ClassroomSummaryDto summary;
     private final LineChart<String, Number> networkChart;
@@ -68,11 +71,11 @@ public class NetworkPanelController {
                             if (outboundSeries.getData().size() > 20) outboundSeries.getData().remove(0);
                         });
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        log.warn("Failed to parse network chart payload", e);
                     }
                 })
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to fetch network traffic for chart", ex);
                     return null;
                 });
     }

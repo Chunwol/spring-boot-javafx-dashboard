@@ -21,6 +21,8 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.http.HttpClient;
 import java.util.HashMap;
@@ -36,6 +38,8 @@ import java.util.function.LongSupplier;
  * 강의실 CRUD API 호출을 담당하는 모듈.
  */
 public class DashboardClassroomModule {
+
+    private static final Logger log = LoggerFactory.getLogger(DashboardClassroomModule.class);
 
     private final ApiClient apiClient;
     private final ObjectMapper objectMapper;
@@ -504,7 +508,7 @@ public class DashboardClassroomModule {
                 "role", "ALL"
         ))
                 .thenAccept(response -> {
-                    System.out.println("Command sent successfully: " + type);
+                    log.info("Group command sent successfully: {} for groupId={}", type, groupId);
                 });
     }
 }

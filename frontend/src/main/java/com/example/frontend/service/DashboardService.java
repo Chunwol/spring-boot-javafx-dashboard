@@ -4,6 +4,8 @@ import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardInfoDto;
 import com.example.dto.dashboard.DashboardPanelDto;
 import com.fasterxml.jackson.core.type.TypeReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.List;
@@ -12,13 +14,14 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class DashboardService {
+    private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
     private final ApiClient apiClient = ApiClient.getInstance();
 
     public void fetchClassroomsAsync(Consumer<List<ClassroomSummaryDto>> callback) {
         apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
                 .thenAccept(callback)
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to fetch classrooms", ex);
                     callback.accept(List.of());
                     return null;
                 });
@@ -33,12 +36,12 @@ public class DashboardService {
                         double outTraffic = node.get("outboundMbps").asDouble();
                         callback.accept(inTraffic, outTraffic);
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        log.warn("Failed to parse network traffic response", e);
                         callback.accept(0.0, 0.0);
                     }
                 })
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to fetch network traffic", ex);
                     callback.accept(0.0, 0.0);
                     return null;
                 });
@@ -47,20 +50,28 @@ public class DashboardService {
     public void fetchTextItemsAsync(Consumer<List<java.util.Map<String, Object>>> callback) {
         apiClient.getJson("/dashboard/texts", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(callback)
-                .exceptionally(ex -> { ex.printStackTrace(); callback.accept(List.of()); return null; });
+                .exceptionally(ex -> {
+                    log.warn("Failed to fetch text items", ex);
+                    callback.accept(List.of());
+                    return null;
+                });
     }
 
     public void fetchImageItemsAsync(Consumer<List<java.util.Map<String, Object>>> callback) {
         apiClient.getJson("/dashboard/images", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(callback)
-                .exceptionally(ex -> { ex.printStackTrace(); callback.accept(List.of()); return null; });
+                .exceptionally(ex -> {
+                    log.warn("Failed to fetch image items", ex);
+                    callback.accept(List.of());
+                    return null;
+                });
     }
 
     public void fetchDashboardsAsync(Consumer<List<DashboardInfoDto>> callback) {
         apiClient.getJson("/dashboards", new TypeReference<List<DashboardInfoDto>>() {})
                 .thenAccept(callback)
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to fetch dashboards", ex);
                     callback.accept(List.of());
                     return null;
                 });
@@ -76,12 +87,12 @@ public class DashboardService {
             apiClient.postJson("/dashboards", payload, DashboardInfoDto.class)
                     .thenAccept(callback)
                     .exceptionally(ex -> {
-                        ex.printStackTrace();
+                        log.warn("Failed to create dashboard", ex);
                         callback.accept(null);
                         return null;
                     });
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Invalid dashboard create request", e);
             callback.accept(null);
         }
     }
@@ -90,7 +101,7 @@ public class DashboardService {
         apiClient.getJson("/dashboards/" + dashboardId + "/panels", new TypeReference<List<DashboardPanelDto>>() {})
                 .thenAccept(callback)
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to fetch dashboard panels", ex);
                     callback.accept(List.of());
                     return null;
                 });
@@ -113,12 +124,12 @@ public class DashboardService {
             apiClient.postJson("/dashboards/" + dashboardId + "/panels", payload, DashboardPanelDto.class)
                     .thenAccept(callback)
                     .exceptionally(ex -> {
-                        ex.printStackTrace();
+                        log.warn("Failed to create panel", ex);
                         callback.accept(null);
                         return null;
                     });
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Invalid panel create request", e);
             callback.accept(null);
         }
     }
@@ -126,7 +137,11 @@ public class DashboardService {
     public void deletePanelAsync(Long dashboardId, Long panelId, Runnable onDone) {
         apiClient.delete("/dashboards/" + dashboardId + "/panels/" + panelId)
                 .thenRun(onDone)
-                .exceptionally(ex -> { ex.printStackTrace(); onDone.run(); return null; });
+                .exceptionally(ex -> {
+                    log.warn("Failed to delete panel {}", panelId, ex);
+                    onDone.run();
+                    return null;
+                });
     }
 
     public void updatePanelPositionAsync(Long dashboardId, Long panelId,
@@ -139,11 +154,11 @@ public class DashboardService {
             payload.put("height", height);
 
             apiClient.putJson("/dashboards/" + dashboardId + "/panels/" + panelId, payload).exceptionally(ex -> {
-                ex.printStackTrace();
+                log.warn("Failed to update panel position {}", panelId, ex);
                 return null;
             });
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Invalid panel position payload", e);
         }
     }
 }

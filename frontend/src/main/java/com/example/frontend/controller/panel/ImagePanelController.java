@@ -37,7 +37,7 @@ public class ImagePanelController {
 
         Button refreshBtn = new Button("새로고침");
         refreshBtn.setOnAction(e -> {
-            // TODO: 실제 API에서 이미지 로드
+            // 임시 프리뷰 이미지를 갱신합니다.
             imageView.setImage(new Image("https://via.placeholder.com/320x180.png?text=Updated", true));
         });
 

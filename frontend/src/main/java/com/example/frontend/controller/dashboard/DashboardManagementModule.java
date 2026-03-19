@@ -44,8 +44,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DashboardManagementModule {
+    private static final Logger log = LoggerFactory.getLogger(DashboardManagementModule.class);
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String apiBaseUrl;
@@ -303,16 +306,16 @@ public class DashboardManagementModule {
                                     Platform.runLater(() -> ipRangeTable.getItems().setAll(items));
                                 })
                                 .exceptionally(ex -> {
-                                    ex.printStackTrace();
+                                    log.warn("Failed to load IP ranges", ex);
                                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "IP 대역 목록 조회 실패: " + ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()).show());
                                     return null;
                                 });
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        log.warn("Failed while preparing classroom/IP mapping", e);
                     }
                 })
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to load classrooms", ex);
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "강의실 목록 조회 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
                     return null;
                 });
@@ -329,7 +332,7 @@ public class DashboardManagementModule {
                     Platform.runLater(() -> teacherDeviceTable.getItems().setAll(items));
                 })
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    log.warn("Failed to load teacher devices for group {}", selected.getGroupId(), ex);
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "교사 PC 목록 조회 실패: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage())).show());
                     return null;
                 });
@@ -489,7 +492,7 @@ public class DashboardManagementModule {
                 Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
                         "스크립트 업로드 및 실행 요청 완료 (" + statusCode + ")").show());
             } catch (Exception e) {
-                e.printStackTrace();
+                log.warn("Failed to upload/execute script {}", file.getName(), e);
                 Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                         "스크립트 업로드 오류: " + e.getMessage()).show());
             }
@@ -523,7 +526,7 @@ public class DashboardManagementModule {
                             Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
                                     "보고서가 저장되었습니다:\n" + file.getAbsolutePath()).show());
                         } catch (IOException e) {
-                            e.printStackTrace();
+                            log.warn("Failed to save report file {}", file.getAbsolutePath(), e);
                             Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                                     "파일 저장 중 오류가 발생했습니다.").show());
                         }
