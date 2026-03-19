@@ -4,6 +4,7 @@ import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.layout.Region;
 
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleUnaryOperator;
 
@@ -61,13 +62,31 @@ public class DashboardInteractionService {
             DoubleUnaryOperator snapper,
             Runnable onReleased
     ) {
+        attachResizeHandlers(panel, handle, minWidth, minHeight, canInteract, snapper, null, onReleased);
+    }
+
+    public void attachResizeHandlers(
+            Region panel,
+            Node handle,
+            double minWidth,
+            double minHeight,
+            BooleanSupplier canInteract,
+            DoubleUnaryOperator snapper,
+            BiConsumer<Double, Double> onDragged,
+            Runnable onReleased
+    ) {
         handle.setOnMouseDragged(event -> {
             if (!canInteract.getAsBoolean()) {
                 return;
             }
             Point2D local = panel.sceneToLocal(event.getSceneX(), event.getSceneY());
-            panel.setPrefWidth(snapper.applyAsDouble(Math.max(minWidth, local.getX())));
-            panel.setPrefHeight(snapper.applyAsDouble(Math.max(minHeight, local.getY())));
+            double newW = snapper.applyAsDouble(Math.max(minWidth, local.getX()));
+            double newH = snapper.applyAsDouble(Math.max(minHeight, local.getY()));
+            panel.setPrefWidth(newW);
+            panel.setPrefHeight(newH);
+            if (onDragged != null) {
+                onDragged.accept(newW, newH);
+            }
             event.consume();
         });
 

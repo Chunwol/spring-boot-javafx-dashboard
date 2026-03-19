@@ -4,7 +4,6 @@ import com.example.frontend.service.ApiClient;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
-import javafx.geometry.Point2D;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -42,6 +41,7 @@ public class DashboardWidgetModule {
     private final BooleanSupplier editModeSupplier;
     private final BooleanSupplier snapModeSupplier;
     private final Runnable onRefreshPanelList;
+    private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private static final double GRID_SIZE = 20.0;
 
     private List<Map<String, Object>> cachedTexts = new ArrayList<>();
@@ -206,30 +206,18 @@ public class DashboardWidgetModule {
     }
 
     private void makeTextItemInteractive(VBox box, TextArea textArea, Long id) {
-        final double[] dragStart = new double[2];
-
-        box.setOnMousePressed(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D p = box.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-            dragStart[0] = p.getX() - box.getLayoutX();
-            dragStart[1] = p.getY() - box.getLayoutY();
-            box.toFront();
-            e.consume();
-        });
-
-        box.setOnMouseDragged(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D p = box.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-            box.setLayoutX(applySnap(p.getX() - dragStart[0]));
-            box.setLayoutY(applySnap(p.getY() - dragStart[1]));
-            e.consume();
-        });
-
-        box.setOnMouseReleased(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            updateTextItem(id, textArea.getText(), box.getLayoutX(), box.getLayoutY(), box.getPrefWidth(), box.getPrefHeight());
-            e.consume();
-        });
+        dashboardInteractionService.attachDragHandlers(
+                box,
+                editModeSupplier,
+                this::applySnap,
+                () -> updateTextItem(
+                        id,
+                        textArea.getText(),
+                        box.getLayoutX(),
+                        box.getLayoutY(),
+                        box.getPrefWidth(),
+                        box.getPrefHeight())
+        );
 
         textArea.focusedProperty().addListener((obs, oldVal, newVal) -> {
             if (!newVal && editModeSupplier.getAsBoolean()) {
@@ -380,33 +368,19 @@ public class DashboardWidgetModule {
                 refreshBtn.setOnAction(e -> imageView.setImage(new Image(imageUrlFinal, widthFinal, heightFinal, true, true)));
                 newBox.getChildren().addAll(deleteBtn, imageView, refreshBtn);
                 newBox.setPrefSize(widthFinal, heightFinal + 56);
-                final double[] dragStart = new double[2];
-                newBox.setOnMousePressed(e -> {
-                    if (!editModeSupplier.getAsBoolean()) return;
-                    Point2D p = newBox.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-                    dragStart[0] = p.getX() - newBox.getLayoutX();
-                    dragStart[1] = p.getY() - newBox.getLayoutY();
-                    e.consume();
-                });
-                newBox.setOnMouseDragged(e -> {
-                    if (!editModeSupplier.getAsBoolean()) return;
-                    Point2D p = newBox.getParent().sceneToLocal(e.getSceneX(), e.getSceneY());
-                    newBox.setLayoutX(applySnap(p.getX() - dragStart[0]));
-                    newBox.setLayoutY(applySnap(p.getY() - dragStart[1]));
-                    e.consume();
-                });
-                newBox.setOnMouseReleased(e -> {
-                    if (!editModeSupplier.getAsBoolean()) return;
-                    apiClient.putJson("/dashboard/images/" + id, Map.of(
-                        "x", newBox.getLayoutX(),
-                        "y", newBox.getLayoutY(),
-                        "width", newBox.getPrefWidth(),
-                        "height", newBox.getPrefHeight() - 56,
-                        "visible", true,
-                        "imageUrl", imageUrlFinal
-                    )).exceptionally(ex -> null);
-                    e.consume();
-                });
+                dashboardInteractionService.attachDragHandlers(
+                        newBox,
+                        editModeSupplier,
+                        this::applySnap,
+                        () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
+                                "x", newBox.getLayoutX(),
+                                "y", newBox.getLayoutY(),
+                                "width", newBox.getPrefWidth(),
+                                "height", newBox.getPrefHeight() - 56,
+                                "visible", true,
+                                "imageUrl", imageUrlFinal
+                        )).exceptionally(ex -> null)
+                );
                 imageItemMap.put(id, newBox);
                 classroomContainer.getChildren().add(newBox);
                 addImageResizeHandle(newBox, id, imageUrlFinal);
@@ -518,21 +492,25 @@ public class DashboardWidgetModule {
         handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
         box.getChildren().add(handleWrap);
 
-        handle.setOnMouseDragged(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D local = box.sceneToLocal(e.getSceneX(), e.getSceneY());
-            double w = Math.max(180, applySnap(local.getX()));
-            double h = Math.max(120, applySnap(local.getY()));
-            box.setPrefSize(w, h);
-            textArea.setPrefWidth(w);
-            textArea.setPrefHeight(Math.max(80, h - 34));
-            e.consume();
-        });
-        handle.setOnMouseReleased(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            updateTextItem(id, textArea.getText(), box.getLayoutX(), box.getLayoutY(), box.getPrefWidth(), box.getPrefHeight());
-            e.consume();
-        });
+        dashboardInteractionService.attachResizeHandlers(
+                box,
+                handle,
+                180,
+                120,
+                editModeSupplier,
+                this::applySnap,
+                (w, h) -> {
+                    textArea.setPrefWidth(w);
+                    textArea.setPrefHeight(Math.max(80, h - 34));
+                },
+                () -> updateTextItem(
+                        id,
+                        textArea.getText(),
+                        box.getLayoutX(),
+                        box.getLayoutY(),
+                        box.getPrefWidth(),
+                        box.getPrefHeight())
+        );
     }
 
     private void addImageResizeHandle(VBox box, Long id, String imageUrlFinal) {
@@ -542,32 +520,29 @@ public class DashboardWidgetModule {
         handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
         box.getChildren().add(handleWrap);
 
-        handle.setOnMouseDragged(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            Point2D local = box.sceneToLocal(e.getSceneX(), e.getSceneY());
-            double w = Math.max(220, applySnap(local.getX()));
-            double h = Math.max(180, applySnap(local.getY()));
-            box.setPrefSize(w, h);
-            if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
-                iv.setFitWidth(w - 8);
-                iv.setFitHeight(Math.max(120, h - 64));
-                iv.setImage(new Image(imageUrlFinal, iv.getFitWidth(), iv.getFitHeight(), true, true));
-            }
-            e.consume();
-        });
-
-        handle.setOnMouseReleased(e -> {
-            if (!editModeSupplier.getAsBoolean()) return;
-            apiClient.putJson("/dashboard/images/" + id, Map.of(
-                    "x", box.getLayoutX(),
-                    "y", box.getLayoutY(),
-                    "width", box.getPrefWidth(),
-                    "height", box.getPrefHeight() - 56,
-                    "visible", true,
-                    "imageUrl", imageUrlFinal
-            )).exceptionally(ex -> null);
-            e.consume();
-        });
+        dashboardInteractionService.attachResizeHandlers(
+                box,
+                handle,
+                220,
+                180,
+                editModeSupplier,
+                this::applySnap,
+                (w, h) -> {
+                    if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
+                        iv.setFitWidth(w - 8);
+                        iv.setFitHeight(Math.max(120, h - 64));
+                        iv.setImage(new Image(imageUrlFinal, iv.getFitWidth(), iv.getFitHeight(), true, true));
+                    }
+                },
+                () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
+                        "x", box.getLayoutX(),
+                        "y", box.getLayoutY(),
+                        "width", box.getPrefWidth(),
+                        "height", box.getPrefHeight() - 56,
+                        "visible", true,
+                        "imageUrl", imageUrlFinal
+                )).exceptionally(ex -> null)
+        );
     }
 
     private double applySnap(double value) {
