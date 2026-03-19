@@ -57,6 +57,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import org.kordamp.ikonli.javafx.FontIcon;
 
 import java.net.http.HttpClient;
 import java.time.LocalTime;
@@ -199,7 +200,7 @@ public class DashboardController {
             }
         });
 
-        Button addDashboardBtn = createActionButton("+ Dashboard", "#16a34a", "white");
+        Button addDashboardBtn = createIconActionButton("+ Dashboard", "mdi2p-plus", "#16a34a", "white");
         addDashboardBtn.setOnAction(e -> handleCreateDashboard());
 
         statusSummaryLabel = new Label("Classrooms 0, Online 0/0");
@@ -321,7 +322,7 @@ public class DashboardController {
         Label listSub = new Label("Panels and widgets available for canvas");
         listSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
 
-        Button addClassroomBtn = createActionButton("Add classroom", "#0ea5e9", "white");
+        Button addClassroomBtn = createIconActionButton("Add classroom", "mdi2s-school-outline", "#0ea5e9", "white");
         addClassroomBtn.setMaxWidth(Double.MAX_VALUE);
         addClassroomBtn.setOnAction(e -> classroomModule.handleAddClassroom());
 
@@ -346,25 +347,25 @@ public class DashboardController {
             classroomModule.addClassroomPanel(selected, 40.0, 40.0, size[0], size[1]);
         });
 
-        Button addTextBtn = createActionButton("Add text", "#334155", "white");
+        Button addTextBtn = createIconActionButton("Add text", "mdi2t-text-box-plus-outline", "#334155", "white");
         addTextBtn.setMaxWidth(Double.MAX_VALUE);
         addTextBtn.setOnAction(e -> widgetModule.handleAddTextItem());
 
-        Button addImageBtn = createActionButton("Add image", "#334155", "white");
+        Button addImageBtn = createIconActionButton("Add image", "mdi2i-image-plus-outline", "#334155", "white");
         addImageBtn.setMaxWidth(Double.MAX_VALUE);
         addImageBtn.setOnAction(e -> widgetModule.handleAddImageItem());
 
-        Button backupBtn = createActionButton("Backup text", "#64748b", "white");
+        Button backupBtn = createIconActionButton("Backup text", "mdi2c-content-save-outline", "#64748b", "white");
         backupBtn.setMaxWidth(Double.MAX_VALUE);
         backupBtn.setOnAction(e -> widgetModule.handleBackupTextItems());
 
-        Button restoreBtn = createActionButton("Restore text", "#64748b", "white");
+        Button restoreBtn = createIconActionButton("Restore text", "mdi2r-restore", "#64748b", "white");
         restoreBtn.setMaxWidth(Double.MAX_VALUE);
         restoreBtn.setOnAction(e -> widgetModule.handleRestoreTextItems());
 
         networkClassroomCombo = buildClassroomCombo("Select classroom for network panel");
 
-        Button addNetworkPanelBtn = createActionButton("Add network panel", "#2563eb", "white");
+        Button addNetworkPanelBtn = createIconActionButton("Add network panel", "mdi2w-wan", "#2563eb", "white");
         addNetworkPanelBtn.setMaxWidth(Double.MAX_VALUE);
         addNetworkPanelBtn.setOnAction(e -> {
             ClassroomSummaryDto selected = networkClassroomCombo.getValue();
@@ -512,7 +513,7 @@ public class DashboardController {
             }
         });
 
-        Button fullScreenBtn = createActionButton("Full screen", "#1d4ed8", "white");
+        Button fullScreenBtn = createIconActionButton("Full screen", "mdi2f-fullscreen", "#1d4ed8", "white");
         fullScreenBtn.setOnAction(e -> {
             if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
                 stage.setFullScreen(!stage.isFullScreen());
@@ -537,7 +538,7 @@ public class DashboardController {
             showToast(isDashboardOnlyModeActive() ? "Dashboard-only mode" : "Normal mode", false);
         });
 
-        Button refreshBtn = createActionButton("Refresh", "#0f766e", "white");
+        Button refreshBtn = createIconActionButton("Refresh", "mdi2r-refresh", "#0f766e", "white");
         refreshBtn.setOnAction(e -> {
             RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
             rotate.setByAngle(360);
@@ -1214,6 +1215,15 @@ public class DashboardController {
         button.setStyle("-fx-background-color: " + bgColor
                 + "; -fx-text-fill: " + textColor
                 + "; -fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 8 12 8 12;");
+        return button;
+    }
+
+    private Button createIconActionButton(String text, String iconLiteral, String bgColor, String textColor) {
+        Button button = createActionButton(text, bgColor, textColor);
+        FontIcon icon = new FontIcon(iconLiteral);
+        icon.setIconSize(14);
+        icon.setIconColor(Color.web(textColor));
+        button.setGraphic(icon);
         return button;
     }
 
