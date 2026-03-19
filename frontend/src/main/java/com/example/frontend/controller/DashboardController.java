@@ -793,13 +793,6 @@ public class DashboardController {
         }
     }
 
-    private void refreshDashboardData() {
-        dashboardService.fetchClassroomsAsync(classrooms -> {
-            cachedClassrooms = classrooms;
-            Platform.runLater(this::refreshPanelListAndDashboard);
-        });
-    }
-
     private void refreshDashboardSnapshot() {
         dashboardDataService.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
     }
