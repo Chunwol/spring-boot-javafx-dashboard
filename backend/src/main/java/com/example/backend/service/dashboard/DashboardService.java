@@ -56,14 +56,25 @@ public class DashboardService {
             List<ClassroomGroup> groups = classroomGroupRepository.findAll();
             List<ClassroomSummaryDto> summaries = new ArrayList<>();
 
+            // 한 번의 쿼리로 모든 데이터를 fetch (N+1 최적화)
+            List<PcMaster> allPcs = pcMasterRepository.findAll();
+            List<ClassroomIpRange> allIpRanges = ipRangeRepository.findAll();
+            List<ClassroomTeacherDevice> allTeachers = teacherDeviceRepository.findAll();
+
+            LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
+
             for (ClassroomGroup group : groups) {
-                List<PcMaster> pcs = pcMasterRepository.findByGroupId(group.getId());
+                // 메모리에서 groupId로 필터링
+                List<PcMaster> pcs = allPcs.stream()
+                        .filter(pc -> pc.getGroupId() != null && pc.getGroupId().equals(group.getId()))
+                        .toList();
+                
                 long onlineCount = pcs.stream()
-                    .filter(pc -> pc.getLastSeen() != null &&
-                            pc.getLastSeen().isAfter(LocalDateTime.now().minusMinutes(5)))
+                    .filter(pc -> pc.getLastSeen() != null && pc.getLastSeen().isAfter(fiveMinutesAgo))
                     .count();
 
-                List<String> ipRanges = ipRangeRepository.findByGroupId(group.getId()).stream()
+                List<String> ipRanges = allIpRanges.stream()
+                        .filter(r -> r.getGroupId() != null && r.getGroupId().equals(group.getId()))
                         .map(r -> {
                             if (r.getCidr() != null && !r.getCidr().isBlank()) return r.getCidr();
                             if (r.getStartIp() != null && r.getEndIp() != null) return r.getStartIp() + "~" + r.getEndIp();
@@ -73,7 +84,10 @@ public class DashboardService {
                         .toList();
 
                 String teacherStatus = "OFFLINE";
-                List<ClassroomTeacherDevice> teachers = teacherDeviceRepository.findByGroupId(group.getId());
+                List<ClassroomTeacherDevice> teachers = allTeachers.stream()
+                        .filter(t -> t.getGroupId() != null && t.getGroupId().equals(group.getId()))
+                        .toList();
+                        
                 if (!teachers.isEmpty()) {
                     boolean anyOnlineTeacher = teachers.stream().anyMatch(t -> {
                         List<PcMaster> candidates = pcs.stream().filter(pc -> {
@@ -84,7 +98,7 @@ public class DashboardService {
                             return macMatch || ipMatch;
                         }).toList();
                         return candidates.stream().anyMatch(pc -> pc.getLastSeen() != null
-                                && pc.getLastSeen().isAfter(LocalDateTime.now().minusMinutes(5)));
+                                && pc.getLastSeen().isAfter(fiveMinutesAgo));
                     });
                     teacherStatus = anyOnlineTeacher ? "ONLINE" : "OFFLINE";
                 }
@@ -110,6 +124,7 @@ public class DashboardService {
     }
 
     public List<PcStatusDto> getPcStatuses(Long groupId) {
+        // 최적화: 특정 그룹의 PCs만 로드 (메모리 효율성)
         List<PcMaster> pcs = pcMasterRepository.findByGroupId(groupId);
         return pcs.stream().map(pc -> {
             PcStatusDto dto = new PcStatusDto();
