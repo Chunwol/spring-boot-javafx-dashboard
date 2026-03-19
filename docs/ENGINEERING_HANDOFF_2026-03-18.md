@@ -475,6 +475,14 @@ DashboardController의 1,226줄을 4개 전문 서비스로 분해하고, 성능
 - **git**: `test(integration): add E2E tests for dashboard workflows`
 
 ### Step 5-3: 성능 프로파일링 (2시간)
+- **진행 상태 (2026-03-19)**: 진행 중 (1차 완료)
+- **완료 항목**:
+  - `scripts/profile-dashboard.ps1` 추가
+  - `docs/PERFORMANCE_BASELINE.md` 추가
+  - 실측 베이스라인 수집 완료
+    - Unified refresh avg 38.93ms
+    - Backend Working Set 119.45MB
+    - Backend Private Memory 422.12MB
 - **측정 항목**:
   - 초기 로드 시간 (목표: <2초)
   - HTTP 요청 수 및 대역폭 (목표: 95% ↓)

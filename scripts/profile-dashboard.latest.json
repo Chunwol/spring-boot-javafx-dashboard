@@ -1,0 +1,50 @@
+{
+  "MeasuredAt": "2026-03-19 11:38:59",
+  "BaseUrl": "http://localhost:8080/api/v1",
+  "Iterations": 5,
+  "Warmup": 1,
+  "Endpoints": [
+    {
+      "Name": "Unified refresh",
+      "Path": "/dashboard/refresh",
+      "AvgMs": 38.93,
+      "MinMs": 33.52,
+      "MaxMs": 49.11,
+      "PayloadBytes": 1542,
+      "Samples": "49.11, 41.4, 33.52, 36.79, 33.82"
+    },
+    {
+      "Name": "Classrooms",
+      "Path": "/dashboard/classrooms",
+      "AvgMs": 19.8,
+      "MinMs": 17.58,
+      "MaxMs": 23.17,
+      "PayloadBytes": 1455,
+      "Samples": "23.17, 21.34, 18.99, 17.58, 17.93"
+    },
+    {
+      "Name": "Texts",
+      "Path": "/dashboard/texts",
+      "AvgMs": 12.93,
+      "MinMs": 12.01,
+      "MaxMs": 13.79,
+      "PayloadBytes": 2,
+      "Samples": "13.79, 12.71, 12.01, 12.86, 13.28"
+    },
+    {
+      "Name": "Images",
+      "Path": "/dashboard/images",
+      "AvgMs": 11.86,
+      "MinMs": 11.38,
+      "MaxMs": 12.31,
+      "PayloadBytes": 2,
+      "Samples": "11.38, 11.96, 12.31, 11.49, 12.16"
+    }
+  ],
+  "BackendMemory": {
+    "ProcessId": 8420,
+    "WorkingSetMB": 119.45,
+    "PrivateMemoryMB": 422.12,
+    "Note": "java"
+  }
+}
