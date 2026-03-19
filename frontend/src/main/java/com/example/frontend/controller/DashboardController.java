@@ -207,7 +207,7 @@ public class DashboardController {
         });
         dashboardSelector.valueProperty().addListener((obs, oldValue, newValue) -> {
             if (newValue != null) {
-                selectedDashboardId = newValue.getId();
+                setCurrentDashboardId(newValue.getId());
                 loadDashboardPanels();
             }
         });
@@ -289,8 +289,8 @@ public class DashboardController {
                 classroomContainer,
                 textItemMap,
                 imageItemMap,
-                () -> isEditMode && !layoutLocked,
-                () -> snapToGrid,
+            () -> isEditModeActive() && !isLayoutLockedState(),
+            this::isSnapToGridEnabled,
                 this::refreshPanelListAndDashboard
         );
         widgetModule.loadTextItems();
@@ -302,11 +302,11 @@ public class DashboardController {
                 API_BASE_URL,
                 classroomContainer,
                 panelManager,
-                () -> isEditMode && !layoutLocked,
+            () -> isEditModeActive() && !isLayoutLockedState(),
             this::refreshDashboardSnapshot,
-                () -> selectedDashboardId == null ? -1L : selectedDashboardId,
+            () -> currentDashboardId() == null ? -1L : currentDashboardId(),
                 this::loadDashboardPanels,
-                () -> snapToGrid
+            this::isSnapToGridEnabled
         );
 
             dashboardUIService = new DashboardUIService(
@@ -385,13 +385,13 @@ public class DashboardController {
                 new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
                 return;
             }
-            if (selectedDashboardId == null) {
+            if (currentDashboardId() == null) {
                 new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
                 return;
             }
             double[] size = getResponsiveDefaultSize("NETWORK");
             dashboardService.createPanelAsync(
-                    selectedDashboardId,
+                    currentDashboardId(),
                     "NETWORK_TRAFFIC",
                     selected.getGroupId(),
                     60.0,
@@ -446,7 +446,7 @@ public class DashboardController {
 
                 Region spacer = new Region();
                 HBox.setHgrow(spacer, Priority.ALWAYS);
-                Label dragHint = new Label(isEditMode ? "Drag to add" : "");
+                Label dragHint = new Label(isEditModeActive() ? "Drag to add" : "");
                 dragHint.setStyle("-fx-text-fill: #2563eb; -fx-font-size: 11px; -fx-font-weight: 700;");
 
                 HBox row = new HBox(10, textBox, spacer, dragHint);
@@ -455,7 +455,7 @@ public class DashboardController {
 
                 String finalDragKey = dragKey;
                 row.setOnDragDetected(event -> {
-                    if (!isEditMode) {
+                    if (!isEditModeActive()) {
                         return;
                     }
                     Dragboard dragboard = groupListView.startDragAndDrop(TransferMode.COPY);
@@ -498,18 +498,18 @@ public class DashboardController {
                 dashboardViewModel.setEditMode(isEditMode);
             }
             applyEditModeUiState();
-            showToast(isEditMode ? "Edit mode on" : "Edit mode off", false);
+            showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
         });
 
         ToggleButton lockLayoutBtn = new ToggleButton("Lock layout");
         lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        lockLayoutBtn.setSelected(layoutLocked);
+        lockLayoutBtn.setSelected(isLayoutLockedState());
         lockLayoutBtn.setOnAction(e -> {
             layoutLocked = lockLayoutBtn.isSelected();
             if (dashboardViewModel != null) {
                 dashboardViewModel.setLayoutLocked(layoutLocked);
             }
-            showToast(layoutLocked ? "Layout locked" : "Layout unlocked", false);
+            showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
         });
 
         ToggleButton focusModeBtn = new ToggleButton("Focus mode");
@@ -585,13 +585,14 @@ public class DashboardController {
 
         ToggleButton snapToggleBtn = new ToggleButton("Snap");
         snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        snapToggleBtn.setSelected(snapToGrid);
+        snapToggleBtn.setSelected(isSnapToGridEnabled());
         snapToggleBtn.setOnAction(e -> {
             snapToGrid = snapToggleBtn.isSelected();
             if (dashboardViewModel != null) {
                 dashboardViewModel.setSnapToGrid(snapToGrid);
+            } else {
+                preferences.putBoolean("dashboard.snapToGrid", snapToGrid);
             }
-            preferences.putBoolean("dashboard.snapToGrid", snapToGrid);
         });
 
         MenuButton alignMenu = new MenuButton("Align");
@@ -616,7 +617,7 @@ public class DashboardController {
 
         Button zoomOutBtn = new Button("-");
         zoomOutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        zoomOutBtn.setOnAction(e -> applyZoom(zoomScale - 0.1));
+        zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
 
         Button zoomResetBtn = new Button("100%");
         zoomResetBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
@@ -624,7 +625,7 @@ public class DashboardController {
 
         Button zoomInBtn = new Button("+");
         zoomInBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
-        zoomInBtn.setOnAction(e -> applyZoom(zoomScale + 0.1));
+        zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
 
         Button fitAllBtn = new Button("Fit all");
         fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
@@ -659,7 +660,7 @@ public class DashboardController {
         rightToolbar.setPadding(new Insets(4, 4, 4, 4));
 
         canvasModule = new DashboardCanvasModule(
-                () -> isEditMode,
+                this::isEditModeActive,
                 this::saveNodePosition,
                 (groupId, x, y) -> {
                     if (classroomModule != null) {
@@ -680,7 +681,7 @@ public class DashboardController {
 
         classroomContainer = canvasModule.getClassroomContainer();
         classroomContainer.setStyle("-fx-background-color: linear-gradient(to bottom right, #f8fbff, #eef5ff);");
-        applyZoom(zoomScale);
+        applyZoom(currentZoomScale());
 
         ScrollPane canvasScroll = new ScrollPane(classroomContainer);
         dashboardScrollPane = canvasScroll;
@@ -726,9 +727,9 @@ public class DashboardController {
 
     private void applyEditModeUiState() {
         if (dashboardUIService != null) {
-            dashboardUIService.applyEditModeUiState(isEditMode);
+            dashboardUIService.applyEditModeUiState(isEditModeActive());
         } else if (canvasModule != null) {
-            canvasModule.applyEditMode(isEditMode);
+            canvasModule.applyEditMode(isEditModeActive());
         }
         if (groupListView != null) {
             groupListView.refresh();
@@ -757,7 +758,8 @@ public class DashboardController {
         boolean visible = node.isVisible();
 
         Object dashboardPanelIdObj = node.getProperties().get("dashboardPanelId");
-        if (dashboardPanelIdObj != null && selectedDashboardId != null) {
+        Long dashboardId = currentDashboardId();
+        if (dashboardPanelIdObj != null && dashboardId != null) {
             Long panelId;
             try {
                 panelId = Long.valueOf(dashboardPanelIdObj.toString());
@@ -765,7 +767,7 @@ public class DashboardController {
                 panelId = null;
             }
             if (panelId != null) {
-                dashboardService.updatePanelPositionAsync(selectedDashboardId, panelId, x, y, width, height);
+                dashboardService.updatePanelPositionAsync(dashboardId, panelId, x, y, width, height);
                 return;
             }
         }
@@ -828,26 +830,26 @@ public class DashboardController {
             }
             dashboardSelector.getItems().setAll(dashboards);
             if (dashboards.isEmpty()) {
-                selectedDashboardId = null;
+                setCurrentDashboardId(null);
                 return;
             }
             DashboardInfoDto selected = dashboards.stream()
-                    .filter(d -> d.getId() != null && d.getId().equals(selectedDashboardId))
+                    .filter(d -> d.getId() != null && d.getId().equals(currentDashboardId()))
                     .findFirst()
                     .orElse(dashboards.get(0));
             dashboardSelector.getSelectionModel().select(selected);
-            selectedDashboardId = selected.getId();
+            setCurrentDashboardId(selected.getId());
             loadDashboardPanels();
         }));
     }
 
     private void loadDashboardPanels() {
-        if (selectedDashboardId == null) {
+        if (currentDashboardId() == null) {
             cachedDashboardPanels = List.of();
             Platform.runLater(this::refreshPanelListAndDashboard);
             return;
         }
-        dashboardService.fetchDashboardPanelsAsync(selectedDashboardId, panels -> Platform.runLater(() -> {
+        dashboardService.fetchDashboardPanelsAsync(currentDashboardId(), panels -> Platform.runLater(() -> {
             cachedDashboardPanels = panels;
             refreshPanelListAndDashboard();
         }));
@@ -868,7 +870,7 @@ public class DashboardController {
                     showAlert("Dashboard create failed", "Could not create dashboard.");
                     return;
                 }
-                selectedDashboardId = created.getId();
+                setCurrentDashboardId(created.getId());
                 loadDashboards();
             }));
         });
@@ -938,8 +940,9 @@ public class DashboardController {
                 Button deleteBtn = new Button("Delete");
                 deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
                 deleteBtn.setOnAction(e -> {
-                    if (selectedDashboardId != null) {
-                        dashboardService.deletePanelAsync(selectedDashboardId, panelDto.getId(), this::loadDashboardPanels);
+                    Long dashboardId = currentDashboardId();
+                    if (dashboardId != null) {
+                        dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), this::loadDashboardPanels);
                     }
                 });
 
@@ -973,11 +976,15 @@ public class DashboardController {
     private void makeDashboardPanelInteractive(VBox panel, Long panelId) {
         dashboardInteractionService.attachDragHandlers(
                 panel,
-                () -> isEditMode && !layoutLocked && selectedDashboardId != null,
+                () -> isEditModeActive() && !isLayoutLockedState() && currentDashboardId() != null,
                 this::applySnap,
                 () -> {
+                    Long dashboardId = currentDashboardId();
+                    if (dashboardId == null) {
+                        return;
+                    }
                     dashboardService.updatePanelPositionAsync(
-                            selectedDashboardId,
+                            dashboardId,
                             panelId,
                             panel.getLayoutX(),
                             panel.getLayoutY(),
@@ -1005,11 +1012,15 @@ public class DashboardController {
                 handle,
                 320,
                 220,
-                () -> isEditMode && !layoutLocked && selectedDashboardId != null,
+                () -> isEditModeActive() && !isLayoutLockedState() && currentDashboardId() != null,
                 this::applySnap,
                 () -> {
+                    Long dashboardId = currentDashboardId();
+                    if (dashboardId == null) {
+                        return;
+                    }
                     dashboardService.updatePanelPositionAsync(
-                            selectedDashboardId,
+                            dashboardId,
                             panelId,
                             panel.getLayoutX(),
                             panel.getLayoutY(),
@@ -1026,8 +1037,9 @@ public class DashboardController {
         zoomScale = clamped;
         if (dashboardViewModel != null) {
             dashboardViewModel.setZoom(clamped);
+        } else {
+            preferences.putDouble("dashboard.zoomScale", zoomScale);
         }
-        preferences.putDouble("dashboard.zoomScale", zoomScale);
         if (dashboardUIService != null) {
             dashboardUIService.applyZoom(zoomScale);
         } else if (classroomContainer != null) {
@@ -1081,10 +1093,11 @@ public class DashboardController {
         double targetScale = Math.min(viewportW / contentW, viewportH / contentH);
         applyZoom(targetScale);
 
-        double scaledW = Math.max(1, classroomContainer.getPrefWidth() * zoomScale);
-        double scaledH = Math.max(1, classroomContainer.getPrefHeight() * zoomScale);
-        double centerX = ((minX + maxX) / 2.0) * zoomScale;
-        double centerY = ((minY + maxY) / 2.0) * zoomScale;
+        double currentScale = currentZoomScale();
+        double scaledW = Math.max(1, classroomContainer.getPrefWidth() * currentScale);
+        double scaledH = Math.max(1, classroomContainer.getPrefHeight() * currentScale);
+        double centerX = ((minX + maxX) / 2.0) * currentScale;
+        double centerY = ((minY + maxY) / 2.0) * currentScale;
 
         double hRange = Math.max(1, scaledW - viewportW);
         double vRange = Math.max(1, scaledH - viewportH);
@@ -1111,14 +1124,14 @@ public class DashboardController {
     }
 
     private double applySnap(double value) {
-        if (!snapToGrid) {
+        if (!isSnapToGridEnabled()) {
             return value;
         }
         return Math.round(value / GRID_SIZE) * GRID_SIZE;
     }
 
     private void arrangePanels(String mode) {
-        if (!isEditMode || layoutLocked) {
+        if (!isEditModeActive() || isLayoutLockedState()) {
             showToast("Arrange is available only in edit mode", true);
             return;
         }
@@ -1224,6 +1237,36 @@ public class DashboardController {
                 + "; -fx-text-fill: " + textColor
                 + "; -fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 8 12 8 12;");
         return button;
+    }
+
+    private Long currentDashboardId() {
+        if (dashboardViewModel != null) {
+            return dashboardViewModel.getSelectedDashboardId();
+        }
+        return selectedDashboardId;
+    }
+
+    private void setCurrentDashboardId(Long id) {
+        selectedDashboardId = id;
+        if (dashboardViewModel != null) {
+            dashboardViewModel.setSelectedDashboardId(id);
+        }
+    }
+
+    private boolean isEditModeActive() {
+        return dashboardViewModel != null ? dashboardViewModel.isEditMode() : isEditMode;
+    }
+
+    private boolean isLayoutLockedState() {
+        return dashboardViewModel != null ? dashboardViewModel.isLayoutLocked() : layoutLocked;
+    }
+
+    private boolean isSnapToGridEnabled() {
+        return dashboardViewModel != null ? dashboardViewModel.isSnapToGrid() : snapToGrid;
+    }
+
+    private double currentZoomScale() {
+        return dashboardViewModel != null ? dashboardViewModel.getZoomScale() : zoomScale;
     }
 
     @FXML
