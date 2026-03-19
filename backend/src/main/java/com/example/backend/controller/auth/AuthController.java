@@ -4,15 +4,19 @@ import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.model.user.User;
 import com.example.backend.repository.user.UserRepository;
+import com.example.backend.util.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 인증 관련 API
@@ -25,10 +29,12 @@ public class AuthController {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
-    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jwtUtil = jwtUtil;
     }
 
     /**
@@ -51,16 +57,18 @@ public class AuthController {
     )
     @ApiResponse(responseCode = "400", description = "잘못된 자격증명 (사용자명 또는 비밀번호 오류)")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
-        // 간단한 로그인 로직
+        // Legacy plaintext fallback is kept temporarily for backward compatibility with old seeded users.
         var userOpt = userRepository.findByUsername(loginRequest.getUsername());
         if (userOpt.isPresent()) {
             var user = userOpt.get();
             boolean matches = passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())
                     || loginRequest.getPassword().equals(user.getPassword());
             if (matches) {
-                return ResponseEntity.ok(new LoginResponse("dummy-token", "Login successful"));
+                String token = jwtUtil.generateToken(user.getUsername());
+                return ResponseEntity.ok(new LoginResponse(user.getUsername(), token));
             }
         }
-        throw new IllegalArgumentException("Invalid credentials");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "Invalid credentials"));
     }
 }

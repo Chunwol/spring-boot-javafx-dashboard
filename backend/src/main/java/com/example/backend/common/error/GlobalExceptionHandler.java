@@ -3,6 +3,8 @@ package com.example.backend.common.error;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +19,8 @@ import java.util.NoSuchElementException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+        private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleMethodArgumentNotValid(
@@ -126,6 +130,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception ex,
             HttpServletRequest request) {
+        log.error("Unhandled exception at {} {}", request.getMethod(), request.getRequestURI(), ex);
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
