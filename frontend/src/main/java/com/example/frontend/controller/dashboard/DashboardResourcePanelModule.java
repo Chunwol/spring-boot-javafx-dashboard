@@ -277,7 +277,7 @@ public class DashboardResourcePanelModule {
     }
 
     private Button createAddDisconnectStatusButton() {
-        Button button = iconButton("Add disconnect status", "mdi2a-alert-circle-outline", "#b91c1c");
+        Button button = iconButton("접속현황 패널 추가", "mdi2a-alert-circle-outline", "#b91c1c");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> {
             if (currentDashboardId.get() == null) {

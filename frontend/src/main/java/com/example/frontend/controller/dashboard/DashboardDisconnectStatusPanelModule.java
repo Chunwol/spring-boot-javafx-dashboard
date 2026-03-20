@@ -2,23 +2,38 @@ package com.example.frontend.controller.dashboard;
 
 import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardPanelDto;
+import com.example.dto.dashboard.PcStatusDto;
+import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.DashboardService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleUnaryOperator;
@@ -26,10 +41,13 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * 접속 종료(오프라인) 현황 전용 패널 모듈.
+ * 접속현황(실시간 ON/OFF 이벤트 로그) 전용 패널 모듈.
  */
 public class DashboardDisconnectStatusPanelModule {
 
+    private static final DateTimeFormatter LOG_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private final ApiClient apiClient = ApiClient.getInstance();
     private final DashboardService dashboardService;
     private final DashboardInteractionService interactionService;
     private final BooleanSupplier canInteract;
@@ -41,6 +59,9 @@ public class DashboardDisconnectStatusPanelModule {
     private final javafx.scene.layout.Pane classroomContainer;
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
+    private final Map<String, String> previousStatusByMac = new HashMap<>();
+    private final ObservableList<ConnectionLogRow> logRows = FXCollections.observableArrayList();
+    private final AtomicBoolean pollingInFlight = new AtomicBoolean(false);
 
     public DashboardDisconnectStatusPanelModule(
             DashboardService dashboardService,
@@ -64,11 +85,11 @@ public class DashboardDisconnectStatusPanelModule {
     }
 
     public void update(List<ClassroomSummaryDto> classrooms, List<DashboardPanelDto> allPanels) {
-        List<DashboardPanelDto> disconnectPanels = allPanels.stream()
+        List<DashboardPanelDto> statusPanels = allPanels.stream()
                 .filter(p -> "DISCONNECT_STATUS".equalsIgnoreCase(p.getPanelType()))
                 .toList();
 
-        List<Long> activeIds = disconnectPanels.stream().map(DashboardPanelDto::getId).toList();
+        List<Long> activeIds = statusPanels.stream().map(DashboardPanelDto::getId).toList();
         new ArrayList<>(panelMap.keySet()).forEach(id -> {
             if (!activeIds.contains(id)) {
                 VBox node = panelMap.remove(id);
@@ -78,7 +99,7 @@ public class DashboardDisconnectStatusPanelModule {
             }
         });
 
-        for (DashboardPanelDto panelDto : disconnectPanels) {
+        for (DashboardPanelDto panelDto : statusPanels) {
             VBox existing = panelMap.get(panelDto.getId());
             if (existing == null) {
                 VBox panel = buildPanel(panelDto, classrooms);
@@ -87,9 +108,11 @@ public class DashboardDisconnectStatusPanelModule {
                 classroomContainer.getChildren().add(panel);
             } else {
                 updateLayout(existing, panelDto);
-                refreshContent(existing, classrooms);
+                refreshSummary(existing, classrooms);
             }
         }
+
+        pollAndAppendConnectionLogs(classrooms);
     }
 
     public Collection<VBox> getPanelViews() {
@@ -97,7 +120,7 @@ public class DashboardDisconnectStatusPanelModule {
     }
 
     private VBox buildPanel(DashboardPanelDto panelDto, List<ClassroomSummaryDto> classrooms) {
-        Label title = new Label("접속 종료 현황");
+        Label title = new Label("접속현황 패널");
         title.setStyle("-fx-font-weight: 800; -fx-font-size: 15px; -fx-text-fill: #0f172a;");
 
         Region spacer = new Region();
@@ -116,14 +139,15 @@ public class DashboardDisconnectStatusPanelModule {
         header.setAlignment(Pos.CENTER_LEFT);
 
         Label summary = new Label();
-        summary.setStyle("-fx-font-size: 13px; -fx-font-weight: 700;");
+        summary.setStyle("-fx-font-size: 12px; -fx-font-weight: 700;");
 
-        VBox listBox = new VBox(6);
+        TableView<ConnectionLogRow> table = createLogTable();
+        table.setItems(logRows);
+        VBox.setVgrow(table, Priority.ALWAYS);
 
-        VBox wrapper = new VBox(8, header, summary, listBox);
+        VBox wrapper = new VBox(8, header, summary, table);
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
         wrapper.getProperties().put("summaryLabel", summary);
-        wrapper.getProperties().put("listBox", listBox);
         wrapper.setPadding(new Insets(12));
         wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #cbd5e1; -fx-border-radius: 10;");
 
@@ -133,38 +157,116 @@ public class DashboardDisconnectStatusPanelModule {
         wrapper.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : defaultSize[0]);
         wrapper.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : defaultSize[1]);
 
-        refreshContent(wrapper, classrooms);
+        refreshSummary(wrapper, classrooms);
         return wrapper;
     }
 
-    private void refreshContent(VBox panel, List<ClassroomSummaryDto> classrooms) {
+    private TableView<ConnectionLogRow> createLogTable() {
+        TableView<ConnectionLogRow> table = new TableView<>();
+        table.setPlaceholder(new Label("아직 접속 상태 변경 로그가 없습니다."));
+
+        TableColumn<ConnectionLogRow, String> timeCol = new TableColumn<>("시간");
+        timeCol.setPrefWidth(150);
+        timeCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().time()));
+
+        TableColumn<ConnectionLogRow, String> classroomCol = new TableColumn<>("강의실");
+        classroomCol.setPrefWidth(120);
+        classroomCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().classroom()));
+
+        TableColumn<ConnectionLogRow, String> pcCol = new TableColumn<>("PC명");
+        pcCol.setPrefWidth(160);
+        pcCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().pcName()));
+
+        TableColumn<ConnectionLogRow, String> statusCol = new TableColumn<>("이벤트");
+        statusCol.setPrefWidth(110);
+        statusCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().event()));
+
+        table.getColumns().addAll(timeCol, classroomCol, pcCol, statusCol);
+        return table;
+    }
+
+    private void refreshSummary(VBox panel, List<ClassroomSummaryDto> classrooms) {
         Label summary = (Label) panel.getProperties().get("summaryLabel");
-        @SuppressWarnings("unchecked")
-        VBox listBox = (VBox) panel.getProperties().get("listBox");
-        if (summary == null || listBox == null) {
+        if (summary == null) {
             return;
         }
 
         long total = classrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
         long online = classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
         long offline = Math.max(0, total - online);
-        summary.setText("전체 " + total + "대 / 온라인 " + online + "대 / 접속종료 " + offline + "대");
+        summary.setText("전체 " + total + "대 / 온라인 " + online + "대 / 오프라인 " + offline + "대");
         summary.setTextFill(offline > 0 ? Color.web("#b91c1c") : Color.web("#15803d"));
+    }
 
-        listBox.getChildren().clear();
-        classrooms.stream()
-                .sorted((a, b) -> Integer.compare(
-                        Math.max(0, b.getTotalPcs() - b.getOnlinePcs()),
-                        Math.max(0, a.getTotalPcs() - a.getOnlinePcs())
-                ))
-                .limit(8)
-                .forEach(c -> {
-                    int off = Math.max(0, c.getTotalPcs() - c.getOnlinePcs());
-                    Label row = new Label(c.getGroupName() + " : " + off + "대 종료");
-                    row.setStyle("-fx-font-size: 12px; -fx-font-weight: 600;");
-                    row.setTextFill(off > 0 ? Color.web("#dc2626") : Color.web("#64748b"));
-                    listBox.getChildren().add(row);
-                });
+    private void pollAndAppendConnectionLogs(List<ClassroomSummaryDto> classrooms) {
+        if (classrooms == null || classrooms.isEmpty()) {
+            return;
+        }
+        if (!pollingInFlight.compareAndSet(false, true)) {
+            return;
+        }
+
+        List<String> classroomNames = new ArrayList<>();
+        List<CompletableFuture<List<PcStatusDto>>> futures = new ArrayList<>();
+
+        for (ClassroomSummaryDto c : classrooms) {
+            if (c == null || c.getGroupId() == null) continue;
+            classroomNames.add(c.getGroupName() == null ? "-" : c.getGroupName());
+            futures.add(apiClient.getPagedList("/dashboard/classrooms/" + c.getGroupId() + "/pcs",
+                    new TypeReference<List<PcStatusDto>>() {}));
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenAccept(v -> {
+                    List<ConnectionLogRow> newRows = new ArrayList<>();
+                    for (int i = 0; i < futures.size(); i++) {
+                        String classroom = i < classroomNames.size() ? classroomNames.get(i) : "-";
+                        List<PcStatusDto> pcs = futures.get(i).getNow(List.of());
+                        for (PcStatusDto pc : pcs) {
+                            if (pc == null || pc.getMacAddress() == null || pc.getMacAddress().isBlank()) continue;
+
+                            String now = normalizeStatus(pc.getStatus());
+                            String before = previousStatusByMac.put(pc.getMacAddress(), now);
+                            if (before == null || before.equals(now)) {
+                                continue;
+                            }
+
+                            boolean wasOnline = "ONLINE".equals(before);
+                            boolean isOnline = "ONLINE".equals(now);
+                            if (wasOnline == isOnline) {
+                                continue;
+                            }
+
+                            String event = isOnline ? "켜짐(ONLINE)" : "꺼짐(OFFLINE)";
+                            String pcName = (pc.getHostname() == null || pc.getHostname().isBlank())
+                                    ? (pc.getIpAddress() == null ? pc.getMacAddress() : pc.getIpAddress())
+                                    : pc.getHostname();
+
+                            newRows.add(new ConnectionLogRow(
+                                    LocalDateTime.now().format(LOG_TIME_FMT),
+                                    classroom,
+                                    pcName,
+                                    event
+                            ));
+                        }
+                    }
+
+                    if (!newRows.isEmpty()) {
+                        Platform.runLater(() -> {
+                            logRows.addAll(0, newRows);
+                            if (logRows.size() > 300) {
+                                logRows.remove(300, logRows.size());
+                            }
+                        });
+                    }
+                })
+                .exceptionally(ex -> null)
+                .whenComplete((r, t) -> pollingInFlight.set(false));
+    }
+
+    private String normalizeStatus(String status) {
+        if (status == null) return "";
+        return status.trim().toUpperCase(Locale.ROOT);
     }
 
     private void updateLayout(VBox existing, DashboardPanelDto panelDto) {
@@ -184,14 +286,15 @@ public class DashboardDisconnectStatusPanelModule {
 
         Label handle = new Label("◢");
         handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
-        panel.getChildren().add(handle);
-        VBox.setMargin(handle, new Insets(0, 0, 0, 0));
+        StackPane handleHolder = new StackPane(handle);
+        StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
+        panel.getChildren().add(handleHolder);
 
         interactionService.attachResizeHandlers(
                 panel,
                 handle,
-                320,
-                220,
+                380,
+                240,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
                 () -> persistPosition(panel, panelId)
@@ -211,6 +314,8 @@ public class DashboardDisconnectStatusPanelModule {
                 panel.getPrefWidth(),
                 panel.getPrefHeight()
         );
-        showToast.accept("접속 종료 현황 패널 저장됨", false);
+        showToast.accept("접속현황 패널 저장됨", false);
     }
+
+    private record ConnectionLogRow(String time, String classroom, String pcName, String event) {}
 }

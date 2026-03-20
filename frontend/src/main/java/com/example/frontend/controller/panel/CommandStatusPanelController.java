@@ -2,7 +2,9 @@ package com.example.frontend.controller.panel;
 
 import com.example.frontend.service.ApiClient;
 import com.fasterxml.jackson.core.type.TypeReference;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -26,7 +28,7 @@ public class CommandStatusPanelController {
     private final ApiClient apiClient = ApiClient.getInstance();
 
     private VBox rootPanel;
-    private VBox commandListBox;
+    private TableView<Map<String, Object>> commandTable;
     private Label summaryLabel;
     private ScheduledExecutorService scheduler;
 
@@ -44,16 +46,15 @@ public class CommandStatusPanelController {
     private VBox buildPanel() {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(12));
-        panel.setStyle("-fx-background-color: #1e2a3a; -fx-background-radius: 6;");
+        panel.setStyle("-fx-background-color: #f8fafc; -fx-background-radius: 8; -fx-border-color: #cbd5e1; -fx-border-radius: 8;");
         panel.setPrefSize(400, 260);
 
-        // ─── 헤더 ──────────────────────────────────────────────
-        Label title = new Label("⚙ 명령 진행 현황");
+        Label title = new Label("Command Status");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        title.setTextFill(Color.WHITE);
+        title.setTextFill(Color.web("#0f172a"));
 
         Button refreshBtn = new Button("↺");
-        refreshBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaa;");
+        refreshBtn.setStyle("-fx-background-color: #e2e8f0; -fx-text-fill: #0f172a; -fx-font-weight: 700;");
         refreshBtn.setOnAction(e -> refresh());
 
         Region spacer = new Region();
@@ -63,16 +64,12 @@ public class CommandStatusPanelController {
 
         summaryLabel = new Label("조회 중...");
         summaryLabel.setFont(Font.font("Segoe UI", 11));
-        summaryLabel.setTextFill(Color.web("#aaaaaa"));
+        summaryLabel.setTextFill(Color.web("#334155"));
 
-        // ─── 명령 목록 ─────────────────────────────────────────
-        commandListBox = new VBox(6);
-        ScrollPane scrollPane = new ScrollPane(commandListBox);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
-        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        commandTable = createCommandTable();
+        VBox.setVgrow(commandTable, Priority.ALWAYS);
 
-        panel.getChildren().addAll(header, summaryLabel, new Separator(), scrollPane);
+        panel.getChildren().addAll(header, summaryLabel, new Separator(), commandTable);
 
         // 자동 폴링 (10초)
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -102,73 +99,90 @@ public class CommandStatusPanelController {
                 });
     }
 
+    private TableView<Map<String, Object>> createCommandTable() {
+        TableView<Map<String, Object>> table = new TableView<>();
+        table.setPlaceholder(new Label("명령 로그가 없습니다."));
+
+        TableColumn<Map<String, Object>, String> timeCol = new TableColumn<>("Time");
+        timeCol.setPrefWidth(150);
+        timeCol.setCellValueFactory(data -> new SimpleStringProperty(extractTime(data.getValue())));
+
+        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("Type");
+        typeCol.setPrefWidth(100);
+        typeCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "commandType", "type")));
+
+        TableColumn<Map<String, Object>, String> targetCol = new TableColumn<>("Target");
+        targetCol.setPrefWidth(120);
+        targetCol.setCellValueFactory(data -> new SimpleStringProperty(extractTarget(data.getValue())));
+
+        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("Status");
+        statusCol.setPrefWidth(100);
+        statusCol.setCellValueFactory(data -> new SimpleStringProperty(normalizeStatus(asText(data.getValue(), "status"))));
+
+        TableColumn<Map<String, Object>, String> exitCol = new TableColumn<>("Exit");
+        exitCol.setPrefWidth(70);
+        exitCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "exitCode")));
+
+        table.getColumns().addAll(timeCol, typeCol, targetCol, statusCol, exitCol);
+        return table;
+    }
+
     private void updateUI(List<Map<String, Object>> commands) {
-        commandListBox.getChildren().clear();
+        List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(120).toList();
 
-        List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(80).toList();
-
-        long queued = recent.stream().filter(c -> "QUEUED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-        long delivered = recent.stream().filter(c -> "DELIVERED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-        long acked = recent.stream().filter(c -> "ACKED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-        long completed = recent.stream().filter(c -> "COMPLETED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-        long failed = recent.stream().filter(c -> "FAILED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+        long queued = recent.stream().filter(c -> "QUEUED".equals(normalizeStatus(asText(c, "status")))).count();
+        long delivered = recent.stream().filter(c -> "DELIVERED".equals(normalizeStatus(asText(c, "status")))).count();
+        long acked = recent.stream().filter(c -> "ACKED".equals(normalizeStatus(asText(c, "status")))).count();
+        long completed = recent.stream().filter(c -> "COMPLETED".equals(normalizeStatus(asText(c, "status")))).count();
+        long failed = recent.stream().filter(c -> "FAILED".equals(normalizeStatus(asText(c, "status")))).count();
         long activeTotal = queued + delivered + acked;
 
         if (recent.isEmpty()) {
-            Label empty = new Label("진행 중인 명령 없음");
-            empty.setTextFill(Color.web("#888"));
-            commandListBox.getChildren().add(empty);
             summaryLabel.setText("대기 중인 명령 없음");
+            commandTable.setItems(FXCollections.observableArrayList());
             return;
         }
 
         summaryLabel.setText(String.format(
-                "최근 80건 기준: 진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
+                "최근 120건: 진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
                 activeTotal, queued, delivered, acked, completed, failed));
+        commandTable.setItems(FXCollections.observableArrayList(recent));
+    }
 
-        Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
-        for (Map<String, Object> cmd : recent) {
-            String type = String.valueOf(cmd.getOrDefault("commandType", cmd.getOrDefault("type", "UNKNOWN")));
-            grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(cmd);
-        }
-
-        for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
-            String type = entry.getKey();
-            List<Map<String, Object>> group = entry.getValue();
-
-            long q = group.stream().filter(c -> "QUEUED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-            long d = group.stream().filter(c -> "DELIVERED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-            long a = group.stream().filter(c -> "ACKED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
-            long c = group.stream().filter(x -> "COMPLETED".equalsIgnoreCase(String.valueOf(x.getOrDefault("status", "")))).count();
-            long f = group.stream().filter(x -> "FAILED".equalsIgnoreCase(String.valueOf(x.getOrDefault("status", "")))).count();
-            long active = q + d + a;
-            long total = group.size();
-
-            if (active == 0 && c == 0 && f == 0) {
-                continue;
+    private String asText(Map<String, Object> row, String... keys) {
+        if (row == null) return "";
+        for (String key : keys) {
+            Object value = row.get(key);
+            if (value != null) {
+                String s = value.toString();
+                if (!s.isBlank()) return s;
             }
-
-            VBox cmdBox = new VBox(4);
-            cmdBox.setStyle("-fx-background-color: #2a3a4a; -fx-background-radius: 4; -fx-padding: 8;");
-
-            Label cmdLabel = new Label(type + "  → 총 " + total + "건");
-            cmdLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-            cmdLabel.setTextFill(Color.WHITE);
-
-            ProgressBar bar = new ProgressBar(total > 0 ? (double) (c + f) / total : 0);
-            bar.setMaxWidth(Double.MAX_VALUE);
-            bar.setStyle(f > 0
-                    ? "-fx-accent: #e74c3c;"
-                    : "-fx-accent: #2ecc71;");
-
-            Label statLabel = new Label(String.format(
-                    "Q:%d D:%d A:%d  완료:%d 실패:%d", q, d, a, c, f));
-            statLabel.setFont(Font.font("Segoe UI", 11));
-            statLabel.setTextFill(Color.web("#aaaaaa"));
-
-            cmdBox.getChildren().addAll(cmdLabel, bar, statLabel);
-            commandListBox.getChildren().add(cmdBox);
         }
+        return "";
+    }
+
+    private String normalizeStatus(String status) {
+        return status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String extractTarget(Map<String, Object> row) {
+        String mac = asText(row, "macAddress");
+        if (!mac.isBlank()) return mac;
+        String ip = asText(row, "ipAddress");
+        if (!ip.isBlank()) return ip;
+        String groupId = asText(row, "groupId");
+        if (!groupId.isBlank()) return "GROUP:" + groupId;
+        return "-";
+    }
+
+    private String extractTime(Map<String, Object> row) {
+        String completed = asText(row, "completedAt");
+        if (!completed.isBlank()) return completed;
+        String acked = asText(row, "ackedAt");
+        if (!acked.isBlank()) return acked;
+        String created = asText(row, "createdAt");
+        if (!created.isBlank()) return created;
+        return "-";
     }
 
     public void shutdown() {
