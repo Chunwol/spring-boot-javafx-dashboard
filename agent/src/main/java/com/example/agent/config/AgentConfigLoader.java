@@ -22,10 +22,18 @@ public class AgentConfigLoader {
     private final Path configPath;
 
     public AgentConfigLoader() {
-        String appData = System.getenv("APPDATA");
-        Path baseDir = appData != null
-                ? Path.of(appData, "PCAgent")
-                : Path.of(System.getProperty("user.home"), ".pcagent");
+        // -Dpcagent.config.dir=<path> 시스템 속성으로 경로 재정의 가능
+        // (Task Scheduler로 SYSTEM 계정 실행 시 %APPDATA% 경로 문제 방지)
+        String configDirProp = System.getProperty("pcagent.config.dir");
+        Path baseDir;
+        if (configDirProp != null && !configDirProp.isBlank()) {
+            baseDir = Path.of(configDirProp);
+        } else {
+            String appData = System.getenv("APPDATA");
+            baseDir = appData != null
+                    ? Path.of(appData, "PCAgent")
+                    : Path.of(System.getProperty("user.home"), ".pcagent");
+        }
         this.configPath = baseDir.resolve("config.json");
     }
 

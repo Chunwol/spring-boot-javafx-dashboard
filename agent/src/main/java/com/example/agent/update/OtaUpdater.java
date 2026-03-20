@@ -92,7 +92,9 @@ public class OtaUpdater {
             Files.copy(selfPath, backup, StandardCopyOption.REPLACE_EXISTING);
             log.info("OTA: 백업 완료 → {}", backup);
 
-            // 교체 후 서비스 재시작 (지연 실행)
+            // 교체 후 재시작 (지연 실행)
+            // Windows: 파일 교체만 하면 워치독(agent-watchdog.ps1)이 자동으로 재시작해 줌
+            // Linux: systemctl restart
             String os = System.getProperty("os.name", "").toLowerCase();
             String[] cmd;
             if (os.contains("win")) {
@@ -100,9 +102,7 @@ public class OtaUpdater {
                 String newer = newFile.toString().replace("/", "\\");
                 cmd = new String[]{
                         "cmd", "/c",
-                        "timeout /T 3 /NOBREAK && " +
-                        "move /Y \"" + newer + "\" \"" + self + "\" && " +
-                        "net stop PCAgent && net start PCAgent"
+                        "timeout /T 3 /NOBREAK && move /Y \"" + newer + "\" \"" + self + "\""
                 };
             } else {
                 cmd = new String[]{
