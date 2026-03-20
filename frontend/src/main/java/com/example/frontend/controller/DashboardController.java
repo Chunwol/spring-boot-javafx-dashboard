@@ -17,10 +17,12 @@ import com.example.frontend.controller.dashboard.DashboardWidgetModule;
 import com.example.frontend.controller.dashboard.DashboardNetworkPanelModule;
 import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
+import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import javafx.fxml.FXMLLoader;
 import javafx.animation.PauseTransition;
 import javafx.animation.RotateTransition;
 import javafx.application.Platform;
@@ -28,6 +30,8 @@ import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ColorPicker;
@@ -200,6 +204,9 @@ public class DashboardController {
         Button addDashboardBtn = createIconActionButton("+ Dashboard", "mdi2p-plus", "#16a34a", "white");
         addDashboardBtn.setOnAction(e -> handleCreateDashboard());
 
+        Button logoutBtn = createIconActionButton("Logout", "mdi2l-logout", "#b91c1c", "white");
+        logoutBtn.setOnAction(e -> handleLogout());
+
         statusSummaryLabel = new Label("Classrooms 0, Online 0/0");
         statusSummaryLabel.setTextFill(Color.web("#d9e8f8"));
         statusSummaryLabel.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
@@ -219,12 +226,56 @@ public class DashboardController {
                 titleBox,
                 dashboardSelector,
                 addDashboardBtn,
+                logoutBtn,
                 statusSummaryLabel,
                 connectivityLabel,
                 spacer,
                 clockLabel
         );
         return topBar;
+    }
+
+    private void handleLogout() {
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                "로그아웃 하시겠습니까?",
+                javafx.scene.control.ButtonType.YES,
+                javafx.scene.control.ButtonType.NO);
+        confirm.showAndWait().ifPresent(type -> {
+            if (type != javafx.scene.control.ButtonType.YES) {
+                return;
+            }
+            try {
+                ApiClient.getInstance().setBearerToken(null);
+                var fxmlUrl = getClass().getResource("/fxml/login.fxml");
+                if (fxmlUrl == null) {
+                    showToast("로그인 화면을 찾을 수 없습니다.", true);
+                    return;
+                }
+
+                FXMLLoader loader = new FXMLLoader(fxmlUrl);
+                Parent loginRoot = loader.load();
+                LoginController loginController = loader.getController();
+
+                if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
+                    showToast("윈도우 핸들을 찾을 수 없습니다.", true);
+                    return;
+                }
+
+                loginController.setPrimaryStage(stage);
+                Scene loginScene = new Scene(loginRoot, 420, 320);
+                var css = getClass().getResource("/dashboard-theme.css");
+                if (css != null) {
+                    loginScene.getStylesheets().add(css.toExternalForm());
+                }
+                stage.setScene(loginScene);
+                stage.setTitle("Smart Classroom Dashboard - Login");
+                stage.setMinWidth(420);
+                stage.setMinHeight(320);
+                stage.setMaximized(false);
+            } catch (Exception ex) {
+                showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
+            }
+        });
     }
 
     private Node buildTabs() {
