@@ -467,7 +467,7 @@ public class DashboardController {
         canvasScroll.setFitToWidth(false);
         canvasScroll.setFitToHeight(false);
         canvasScroll.setPannable(true);
-        canvasScroll.setStyle("-fx-background-color: transparent;");
+        canvasScroll.setStyle("-fx-background: #f8fbff; -fx-background-color: #f8fbff;");
         VBox.setVgrow(canvasScroll, Priority.ALWAYS);
 
         toastContainer = new VBox(8);
@@ -562,6 +562,9 @@ public class DashboardController {
                     (int) (color.getGreen() * 255),
                     (int) (color.getBlue() * 255));
             classroomContainer.setStyle("-fx-background-color: " + hex + ";");
+            if (dashboardScrollPane != null) {
+                dashboardScrollPane.setStyle("-fx-background: " + hex + "; -fx-background-color: " + hex + ";");
+            }
         });
         return bgColorPicker;
     }
