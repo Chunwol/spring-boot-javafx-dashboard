@@ -132,9 +132,8 @@ public class DashboardDisconnectStatusPanelModule {
 
         Button deleteBtn = new Button("삭제");
         deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
-        deleteBtn.setVisible(canInteract.getAsBoolean());
-        deleteBtn.setManaged(canInteract.getAsBoolean());
-        deleteBtnMap.put(panelDto.getId(), deleteBtn);
+        deleteBtn.setVisible(false);
+        deleteBtn.setManaged(false);
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
