@@ -53,6 +53,7 @@ public class DashboardClassroomModule {
     private final BooleanSupplier snapModeSupplier;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
+    private final Map<Long, Button> gridSettingsBtns = new HashMap<>();
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private static final double GRID_SIZE = 20.0;
 
@@ -234,6 +235,10 @@ public class DashboardClassroomModule {
             btn.setVisible(editMode);
             btn.setManaged(editMode);
         });
+        gridSettingsBtns.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
     }
 
     public void handleAddNetworkPanel(ClassroomSummaryDto selected) {
@@ -279,7 +284,17 @@ public class DashboardClassroomModule {
             });
         });
         classroomDeleteBtns.put(panelDto.getId(), deleteBtn);
-        HBox header = new HBox(8, nameLabel, headerSpacer, deleteBtn);
+        Button gridSettingsBtn = new Button("⚙");
+        gridSettingsBtn.setStyle("-fx-background-color: #555e6d; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        gridSettingsBtn.setVisible(editModeSupplier.getAsBoolean());
+        gridSettingsBtn.setManaged(editModeSupplier.getAsBoolean());
+        gridSettingsBtn.setOnAction(e -> {
+            e.consume();
+            GridPane pg = (GridPane) panel.getProperties().get("pcGrid");
+            showGridSettingsDialog(panel, summary.getGroupId(), summary.getTotalPcs(), pg);
+        });
+        gridSettingsBtns.put(panelDto.getId(), gridSettingsBtn);
+        HBox header = new HBox(8, nameLabel, headerSpacer, gridSettingsBtn, deleteBtn);
         header.setAlignment(Pos.CENTER_LEFT);
 
         Label totalLabel = new Label(summary.getTotalPcs() + " 대");
@@ -320,6 +335,9 @@ public class DashboardClassroomModule {
         panel.getProperties().put("onlineLabel", onlineLabel);
         panel.getProperties().put("offlineLabel", offlineLabel);
         panel.getProperties().put("groupId", summary.getGroupId());
+        panel.getProperties().put("gridMinCell", 16);
+        panel.getProperties().put("gridMaxCell", 56);
+        panel.getProperties().put("gridMaxCols", 20);
 
         renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid, panel);
         fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
@@ -427,6 +445,10 @@ public class DashboardClassroomModule {
         int count = Math.max(0, totalCount);
         List<PcStatusDto> list = pcs == null ? List.of() : pcs;
 
+        int minCell = panel != null ? (int) panel.getProperties().getOrDefault("gridMinCell", 16) : 16;
+        int maxCell = panel != null ? (int) panel.getProperties().getOrDefault("gridMaxCell", 56) : 56;
+        int maxColsLimit = panel != null ? (int) panel.getProperties().getOrDefault("gridMaxCols", 20) : 20;
+
         double gap = 6.0;
         double panelW = panel != null ? panel.getWidth() : 0;
         if (panelW <= 0 && panel != null) panelW = panel.getPrefWidth();
@@ -439,7 +461,7 @@ public class DashboardClassroomModule {
         double availableW = Math.max(120, panelW - 32);
         double availableH = Math.max(90, panelH - 260);
 
-        int maxCols = Math.max(1, Math.min(count, 20));
+        int maxCols = Math.max(1, Math.min(count, maxColsLimit));
         int bestCols = 1;
         double bestCell = 0;
         for (int cols = 1; cols <= maxCols; cols++) {
@@ -457,7 +479,7 @@ public class DashboardClassroomModule {
         int rows = (int) Math.ceil((double) Math.max(1, count) / columns);
         double cellW = (availableW - (columns - 1) * gap) / columns;
         double cellH = (availableH - (rows - 1) * gap) / rows;
-        double cellSize = Math.max(16, Math.min(56, Math.min(cellW, cellH)));
+        double cellSize = Math.max(minCell, Math.min(maxCell, Math.min(cellW, cellH)));
         int fontSize = (int) Math.max(10, Math.min(22, cellSize * 0.34));
 
         for (int i = 0; i < count; i++) {
@@ -478,6 +500,49 @@ public class DashboardClassroomModule {
             cell.setStyle("-fx-background-color: " + bg + "; -fx-background-radius: 4;");
             pcGrid.add(cell, i % columns, i / columns);
         }
+    }
+
+    private void showGridSettingsDialog(VBox panel, Long groupId, int totalCount, GridPane pcGrid) {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("PC 그리드 설정");
+        dialog.setHeaderText(null);
+
+        int curMin = (int) panel.getProperties().getOrDefault("gridMinCell", 16);
+        int curMax = (int) panel.getProperties().getOrDefault("gridMaxCell", 56);
+        int curCols = (int) panel.getProperties().getOrDefault("gridMaxCols", 20);
+
+        Spinner<Integer> minSpinner = new Spinner<>(8, 80, curMin, 2);
+        minSpinner.setEditable(true);
+        minSpinner.setPrefWidth(85);
+        Spinner<Integer> maxSpinner = new Spinner<>(16, 120, curMax, 2);
+        maxSpinner.setEditable(true);
+        maxSpinner.setPrefWidth(85);
+        Spinner<Integer> colsSpinner = new Spinner<>(1, 50, curCols, 1);
+        colsSpinner.setEditable(true);
+        colsSpinner.setPrefWidth(85);
+
+        GridPane form = new GridPane();
+        form.setHgap(12);
+        form.setVgap(8);
+        form.setPadding(new Insets(12));
+        form.add(new Label("셀 최소 크기 (px):"), 0, 0);
+        form.add(minSpinner, 1, 0);
+        form.add(new Label("셀 최대 크기 (px):"), 0, 1);
+        form.add(maxSpinner, 1, 1);
+        form.add(new Label("최대 열 수:"), 0, 2);
+        form.add(colsSpinner, 1, 2);
+
+        dialog.getDialogPane().setContent(form);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.OK) {
+                panel.getProperties().put("gridMinCell", minSpinner.getValue());
+                panel.getProperties().put("gridMaxCell", maxSpinner.getValue());
+                panel.getProperties().put("gridMaxCols", colsSpinner.getValue());
+                renderPcGrid(totalCount, pcCacheByGroupId.get(groupId), pcGrid, panel);
+            }
+        });
     }
 
     private void showClassroomDetailModal(ClassroomSummaryDto summary) {
