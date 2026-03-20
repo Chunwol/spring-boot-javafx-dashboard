@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * 관리자 단편 API
@@ -104,6 +103,14 @@ public class AdminController {
     @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다.")
     public ResponseEntity<List<Map<String, Object>>> listAgents() {
         List<PcMaster> pcs = pcMasterRepository.findAll();
+        List<AgentAuthToken> tokens = agentAuthTokenRepository.findAll();
+        Map<String, AgentAuthToken> tokenByMac = new LinkedHashMap<>();
+        for (AgentAuthToken token : tokens) {
+            if (token.getMacAddress() != null && !tokenByMac.containsKey(token.getMacAddress())) {
+                tokenByMac.put(token.getMacAddress(), token);
+            }
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (PcMaster pc : pcs) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -113,10 +120,10 @@ public class AdminController {
             row.put("status", pc.getStatus());
             row.put("role", pc.getRole());
             row.put("lastSeen", pc.getLastSeen());
-            Optional<AgentAuthToken> tok = agentAuthTokenRepository.findByMacAddress(pc.getMacAddress());
-            row.put("tokenActive", tok.map(t -> !t.isRevoked()).orElse(false));
-            row.put("tokenIssuedAt", tok.map(AgentAuthToken::getIssuedAt).orElse(null));
-            row.put("tokenLastUsedAt", tok.map(AgentAuthToken::getLastUsedAt).orElse(null));
+            AgentAuthToken tok = tokenByMac.get(pc.getMacAddress());
+            row.put("tokenActive", tok != null && !tok.isRevoked());
+            row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
+            row.put("tokenLastUsedAt", tok != null ? tok.getLastUsedAt() : null);
             result.add(row);
         }
         return ResponseEntity.ok(result);
