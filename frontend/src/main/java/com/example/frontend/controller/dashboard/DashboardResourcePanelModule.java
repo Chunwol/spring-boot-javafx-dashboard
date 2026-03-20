@@ -199,14 +199,20 @@ public class DashboardResourcePanelModule {
         if (item instanceof Map<?, ?> rawMap) {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) rawMap;
-            Long id = ((Number) map.get("id")).longValue();
-            if (map.containsKey("text")) {
-                String text = map.get("text").toString();
-                String sub = text.substring(0, Math.min(24, text.length()));
-                return new ResourceRowModel("TEXT_ADD:" + id, "Text widget", sub);
+            Object idObj = map.get("id");
+            if (!(idObj instanceof Number idNum)) {
+                return new ResourceRowModel("", "Unknown", "");
             }
-            if (map.containsKey("imageUrl")) {
-                return new ResourceRowModel("IMAGE_ADD:" + id, "Image widget #" + id, "Move/delete from canvas");
+            Long id = idNum.longValue();
+            String type = String.valueOf(map.getOrDefault("type", "")).toUpperCase();
+
+            if ("TEXT".equals(type) || map.containsKey("text")) {
+                String text = String.valueOf(map.getOrDefault("text", "Text #" + id));
+                String sub = text.substring(0, Math.min(24, text.length()));
+                return new ResourceRowModel("TEXT_ADD:" + id, "Text widget #" + id, sub);
+            }
+            if ("IMAGE".equals(type) || map.containsKey("imageUrl")) {
+                return new ResourceRowModel("IMAGE_ADD:" + id, "Image widget #" + id, "Drag to place on canvas");
             }
         }
         return new ResourceRowModel("", "Unknown", "");

@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 명령 진행 현황 패널.
- * GET /api/v1/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=100 로 최근 명령을 폴링하고,
- * 진행 중(QUEUED/DELIVERED/ACKED)인 타입만 표시하여 실제 완료율을 계산한다.
+ * GET /api/v1/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=200 로 최근 명령을 폴링하고,
+ * 상태별 집계와 타입별 진행중(QUEUED/DELIVERED/ACKED) 수를 표시한다.
  */
 public class CommandStatusPanelController {
 
@@ -93,8 +93,7 @@ public class CommandStatusPanelController {
 
     /** 서버에서 최근 명령 목록을 가져와 UI를 갱신한다. */
     public void refresh() {
-        // 모든 상태를 조회해야 완료/실패 카운트가 가능
-        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=100",
+        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=200",
                 new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(commands -> Platform.runLater(() -> updateUI(commands)))
                 .exceptionally(ex -> {
@@ -106,24 +105,14 @@ public class CommandStatusPanelController {
     private void updateUI(List<Map<String, Object>> commands) {
         commandListBox.getChildren().clear();
 
-        // 명령 유형별 그룹화
-        Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
-        for (Map<String, Object> cmd : commands) {
-            String type = String.valueOf(cmd.getOrDefault("commandType", "UNKNOWN"));
-            grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(cmd);
-        }
+        long queued = commands.stream().filter(c -> "QUEUED".equals(c.get("status"))).count();
+        long delivered = commands.stream().filter(c -> "DELIVERED".equals(c.get("status"))).count();
+        long acked = commands.stream().filter(c -> "ACKED".equals(c.get("status"))).count();
+        long completed = commands.stream().filter(c -> "COMPLETED".equals(c.get("status"))).count();
+        long failed = commands.stream().filter(c -> "FAILED".equals(c.get("status"))).count();
+        long activeTotal = queued + delivered + acked;
 
-        // 진행 중(QUEUED/DELIVERED/ACKED)이 있는 타입만 표시
-        List<String> activeTypes = new ArrayList<>();
-        for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
-            boolean hasActive = entry.getValue().stream().anyMatch(c -> {
-                String s = String.valueOf(c.getOrDefault("status", ""));
-                return "QUEUED".equals(s) || "DELIVERED".equals(s) || "ACKED".equals(s);
-            });
-            if (hasActive) activeTypes.add(entry.getKey());
-        }
-
-        if (activeTypes.isEmpty()) {
+        if (commands.isEmpty()) {
             Label empty = new Label("진행 중인 명령 없음");
             empty.setTextFill(Color.web("#888"));
             commandListBox.getChildren().add(empty);
@@ -131,35 +120,47 @@ public class CommandStatusPanelController {
             return;
         }
 
-        summaryLabel.setText("진행 중 유형: " + activeTypes.size() + "건");
+        summaryLabel.setText(String.format(
+                "진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
+                activeTotal, queued, delivered, acked, completed, failed));
 
-        for (String type : activeTypes) {
-            List<Map<String, Object>> group = grouped.get(type);
+        Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
+        for (Map<String, Object> cmd : commands) {
+            String type = String.valueOf(cmd.getOrDefault("commandType", "UNKNOWN"));
+            grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(cmd);
+        }
 
-            long done = group.stream()
-                    .filter(c -> "COMPLETED".equals(c.get("status")))
-                    .count();
-            long failed = group.stream()
-                    .filter(c -> "FAILED".equals(c.get("status")))
-                    .count();
+        for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
+            String type = entry.getKey();
+            List<Map<String, Object>> group = entry.getValue();
+
+            long q = group.stream().filter(c -> "QUEUED".equals(c.get("status"))).count();
+            long d = group.stream().filter(c -> "DELIVERED".equals(c.get("status"))).count();
+            long a = group.stream().filter(c -> "ACKED".equals(c.get("status"))).count();
+            long c = group.stream().filter(x -> "COMPLETED".equals(x.get("status"))).count();
+            long f = group.stream().filter(x -> "FAILED".equals(x.get("status"))).count();
+            long active = q + d + a;
             long total = group.size();
-            long inProgress = total - done - failed;
+
+            if (active == 0 && c == 0 && f == 0) {
+                continue;
+            }
 
             VBox cmdBox = new VBox(4);
             cmdBox.setStyle("-fx-background-color: #2a3a4a; -fx-background-radius: 4; -fx-padding: 8;");
 
-            Label cmdLabel = new Label(type + "  → " + total + "개 대상");
+            Label cmdLabel = new Label(type + "  → 총 " + total + "건");
             cmdLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
             cmdLabel.setTextFill(Color.WHITE);
 
-            ProgressBar bar = new ProgressBar(total > 0 ? (double) done / total : 0);
+            ProgressBar bar = new ProgressBar(total > 0 ? (double) (c + f) / total : 0);
             bar.setMaxWidth(Double.MAX_VALUE);
-            bar.setStyle(failed > 0
+            bar.setStyle(f > 0
                     ? "-fx-accent: #e74c3c;"
                     : "-fx-accent: #2ecc71;");
 
             Label statLabel = new Label(String.format(
-                    "완료: %d  실패: %d  대기: %d", done, failed, inProgress));
+                    "Q:%d D:%d A:%d  완료:%d 실패:%d", q, d, a, c, f));
             statLabel.setFont(Font.font("Segoe UI", 11));
             statLabel.setTextFill(Color.web("#aaaaaa"));
 

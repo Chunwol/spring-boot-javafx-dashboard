@@ -13,6 +13,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
@@ -138,17 +139,18 @@ public class DashboardWidgetModule {
             return;
         }
 
-        Map<String, Object> payload = Map.of(
-                "text", text,
-                "x", 50,
-                "y", 50,
-                "width", 280,
-                "height", 180,
-                "fontSize", 14,
-                "fontColor", "#000000",
-                "backgroundColor", "#ffffff",
-                "visible", true
-        );
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("text", text);
+        payload.put("x", 50);
+        payload.put("y", 50);
+        payload.put("width", 280);
+        payload.put("height", 180);
+        payload.put("fontSize", 14);
+        payload.put("bold", false);
+        payload.put("italic", false);
+        payload.put("fontColor", "#000000");
+        payload.put("backgroundColor", "#ffffff");
+        payload.put("visible", true);
         apiClient.postJson("/dashboard/texts", payload)
                 .thenAccept(resp -> Platform.runLater(() -> {
                     loadTextItems();
@@ -201,12 +203,20 @@ public class DashboardWidgetModule {
             double w = item.getOrDefault("width", 220.0) instanceof Number ? ((Number) item.get("width")).doubleValue() : 220.0;
             double h = item.getOrDefault("height", 120.0) instanceof Number ? ((Number) item.get("height")).doubleValue() : 120.0;
             String text = "New Text";
+            int fontSize = item.getOrDefault("fontSize", 14) instanceof Number ? ((Number) item.get("fontSize")).intValue() : 14;
+            boolean bold = Boolean.TRUE.equals(item.get("bold"))
+                    || "BOLD".equalsIgnoreCase(String.valueOf(item.getOrDefault("fontWeight", "")));
+            boolean italic = Boolean.TRUE.equals(item.get("italic"))
+                    || "ITALIC".equalsIgnoreCase(String.valueOf(item.getOrDefault("fontStyle", "")));
             try {
                 if (item.containsKey("config") && item.get("config") != null) {
                     String cfg = item.get("config").toString();
                     if (!cfg.isBlank()) {
                         Map<String, Object> parsed = objectMapper.readValue(cfg, new TypeReference<Map<String, Object>>() {});
                         if (parsed.containsKey("text")) text = parsed.get("text").toString();
+                        if (parsed.containsKey("fontSize") && parsed.get("fontSize") instanceof Number n) fontSize = n.intValue();
+                        if (parsed.containsKey("bold")) bold = Boolean.TRUE.equals(parsed.get("bold"));
+                        if (parsed.containsKey("italic")) italic = Boolean.TRUE.equals(parsed.get("italic"));
                     }
                 }
                 if (item.containsKey("text")) text = item.get("text").toString();
@@ -222,11 +232,49 @@ public class DashboardWidgetModule {
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteTextItem(id));
                 textDeleteBtns.put(id, deleteBtn);
-                VBox header = new VBox(deleteBtn);
+                Button boldBtn = new Button("B");
+                Button italicBtn = new Button("I");
+                Button sizeDownBtn = new Button("A-");
+                Button sizeUpBtn = new Button("A+");
+                HBox header = new HBox(4, deleteBtn, boldBtn, italicBtn, sizeDownBtn, sizeUpBtn);
+
                 TextArea textArea = new TextArea(text);
                 textArea.setWrapText(true);
+                textArea.getProperties().put("fontSize", fontSize);
+                textArea.getProperties().put("bold", bold);
+                textArea.getProperties().put("italic", italic);
+                applyTextStyle(textArea);
                 textArea.setPrefWidth(w);
-                textArea.setPrefHeight(Math.max(80, h - 34));
+                textArea.setPrefHeight(Math.max(80, h - 64));
+                final VBox targetBox = box;
+
+                boldBtn.setOnAction(e -> {
+                    boolean next = !Boolean.TRUE.equals(textArea.getProperties().get("bold"));
+                    textArea.getProperties().put("bold", next);
+                    applyTextStyle(textArea);
+                    updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
+                });
+                italicBtn.setOnAction(e -> {
+                    boolean next = !Boolean.TRUE.equals(textArea.getProperties().get("italic"));
+                    textArea.getProperties().put("italic", next);
+                    applyTextStyle(textArea);
+                    updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
+                });
+                sizeDownBtn.setOnAction(e -> {
+                    int current = (int) textArea.getProperties().getOrDefault("fontSize", 14);
+                    int next = Math.max(10, current - 1);
+                    textArea.getProperties().put("fontSize", next);
+                    applyTextStyle(textArea);
+                    updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
+                });
+                sizeUpBtn.setOnAction(e -> {
+                    int current = (int) textArea.getProperties().getOrDefault("fontSize", 14);
+                    int next = Math.min(48, current + 1);
+                    textArea.getProperties().put("fontSize", next);
+                    applyTextStyle(textArea);
+                    updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
+                });
+
                 box.getChildren().addAll(header, textArea);
                 box.setPrefSize(w, h);
                 makeTextItemInteractive(box, textArea, id);
@@ -237,8 +285,12 @@ public class DashboardWidgetModule {
             } else {
                 TextArea textArea = (TextArea) box.getChildren().get(1);
                 textArea.setText(text);
+                textArea.getProperties().put("fontSize", fontSize);
+                textArea.getProperties().put("bold", bold);
+                textArea.getProperties().put("italic", italic);
+                applyTextStyle(textArea);
                 textArea.setPrefWidth(w);
-                textArea.setPrefHeight(Math.max(80, h - 34));
+                textArea.setPrefHeight(Math.max(80, h - 64));
                 box.setPrefSize(w, h);
             }
             box.setLayoutX(x);
@@ -278,13 +330,30 @@ public class DashboardWidgetModule {
     }
 
     private void updateTextItem(Long id, String text, double x, double y, double w, double h) {
-        apiClient.putJson("/dashboard/texts/" + id, Map.of(
-            "text", text,
-            "x", x,
-            "y", y,
-            "width", w,
-            "height", h
-        )).exceptionally(ex -> null);
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("text", text);
+        payload.put("x", x);
+        payload.put("y", y);
+        payload.put("width", w);
+        payload.put("height", h);
+
+        VBox box = textItemMap.get(id);
+        if (box != null && box.getChildren().size() > 1 && box.getChildren().get(1) instanceof TextArea ta) {
+            payload.put("fontSize", ta.getProperties().getOrDefault("fontSize", 14));
+            payload.put("bold", ta.getProperties().getOrDefault("bold", false));
+            payload.put("italic", ta.getProperties().getOrDefault("italic", false));
+        }
+
+        apiClient.putJson("/dashboard/texts/" + id, payload).exceptionally(ex -> null);
+    }
+
+    private void applyTextStyle(TextArea textArea) {
+        int fontSize = ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue();
+        boolean bold = Boolean.TRUE.equals(textArea.getProperties().get("bold"));
+        boolean italic = Boolean.TRUE.equals(textArea.getProperties().get("italic"));
+        String weight = bold ? "bold" : "normal";
+        String posture = italic ? "italic" : "normal";
+        textArea.setStyle("-fx-font-size: " + fontSize + "px; -fx-font-weight: " + weight + "; -fx-font-style: " + posture + ";");
     }
 
     public void handleDeleteTextItem(Long id) {
@@ -532,7 +601,7 @@ public class DashboardWidgetModule {
                 this::applySnap,
                 (w, h) -> {
                     textArea.setPrefWidth(w);
-                    textArea.setPrefHeight(Math.max(80, h - 34));
+                    textArea.setPrefHeight(Math.max(80, h - 64));
                 },
                 () -> updateTextItem(
                         id,

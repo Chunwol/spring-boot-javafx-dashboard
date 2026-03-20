@@ -441,21 +441,9 @@ public class DashboardController {
         canvasModule = new DashboardCanvasModule(
                 this::isEditModeActive,
                 this::saveNodePosition,
-                (groupId, x, y) -> {
-                    if (classroomModule != null) {
-                        classroomModule.updateGroupPosition(groupId, x, y, 300.0, 300.0, true);
-                    }
-                },
-                (id, x, y) -> {
-                    if (widgetModule != null) {
-                        widgetModule.updateTextItemPosition(id, x, y, 200.0, 100.0, true);
-                    }
-                },
-                (id, x, y) -> {
-                    if (widgetModule != null) {
-                        widgetModule.updateImageItemPosition(id, x, y, 300.0, 200.0, true);
-                    }
-                }
+                this::handleGroupDrop,
+                this::handleTextDrop,
+                this::handleImageDrop
         );
 
         classroomContainer = canvasModule.getClassroomContainer();
@@ -948,6 +936,55 @@ public class DashboardController {
             return value;
         }
         return Math.round(value / GRID_SIZE) * GRID_SIZE;
+    }
+
+    private void handleGroupDrop(Long groupId, double x, double y) {
+        if (groupId == null || classroomModule == null) {
+            return;
+        }
+        ClassroomSummaryDto selected = dashboardViewModel.getCachedClassrooms().stream()
+                .filter(c -> c.getGroupId() != null && c.getGroupId().equals(groupId))
+                .findFirst()
+                .orElse(null);
+        if (selected == null) {
+            showToast("강의실 정보를 찾을 수 없습니다.", true);
+            return;
+        }
+
+        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
+        DashboardPanelDto existing = panels.stream()
+                .filter(p -> "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType()))
+                .filter(p -> p.getRefGroupId() != null && p.getRefGroupId().equals(groupId))
+                .findFirst()
+                .orElse(null);
+
+        if (existing != null && currentDashboardId() != null) {
+            double w = existing.getWidth() != null ? existing.getWidth() : 360.0;
+            double h = existing.getHeight() != null ? existing.getHeight() : 280.0;
+            dashboardService.updatePanelPositionAsync(currentDashboardId(), existing.getId(), x, y, w, h);
+            updateCachedPanelPosition(existing.getId(), x, y, w, h);
+            refreshPanelListAndDashboard();
+            return;
+        }
+
+        double[] size = getResponsiveDefaultSize("CLASSROOM");
+        classroomModule.addClassroomPanel(selected, x, y, size[0], size[1]);
+    }
+
+    private void handleTextDrop(Long id, double x, double y) {
+        if (id == null || widgetModule == null) {
+            return;
+        }
+        widgetModule.updateTextItemPosition(id, x, y, 280.0, 180.0, true);
+        widgetModule.loadTextItems();
+    }
+
+    private void handleImageDrop(Long id, double x, double y) {
+        if (id == null || widgetModule == null) {
+            return;
+        }
+        widgetModule.updateImageItemPosition(id, x, y, 360.0, 240.0, true);
+        widgetModule.loadImageItems();
     }
 
     private void arrangePanels(String mode) {
