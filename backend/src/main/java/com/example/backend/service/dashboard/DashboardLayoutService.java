@@ -112,8 +112,9 @@ public class DashboardLayoutService {
         if (request.getConfigJson() != null) panel.setConfigJson(request.getConfigJson());
         if (request.getX() != null) panel.setX(request.getX());
         if (request.getY() != null) panel.setY(request.getY());
-        if (request.getWidth() != null) panel.setWidth(request.getWidth());
-        if (request.getHeight() != null) panel.setHeight(request.getHeight());
+        // width/height: 양수 값일 때만 적용 (prefWidth(-1) 같은 JavaFX 기본값 무시)
+        if (request.getWidth() != null && request.getWidth() > 0) panel.setWidth(request.getWidth());
+        if (request.getHeight() != null && request.getHeight() > 0) panel.setHeight(request.getHeight());
         if (request.getZIndex() != null) panel.setZIndex(request.getZIndex());
         if (request.getVisible() != null) panel.setVisible(request.getVisible());
 

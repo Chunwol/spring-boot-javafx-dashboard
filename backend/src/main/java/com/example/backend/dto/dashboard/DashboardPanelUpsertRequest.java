@@ -1,6 +1,5 @@
 package com.example.backend.dto.dashboard;
 
-import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
@@ -14,11 +13,7 @@ public class DashboardPanelUpsertRequest {
     private String configJson;
     private Double x;
     private Double y;
-
-    @DecimalMin(value = "1.0", message = "width는 1.0 이상이어야 합니다.")
     private Double width;
-
-    @DecimalMin(value = "1.0", message = "height는 1.0 이상이어야 합니다.")
     private Double height;
 
     @Min(value = 0, message = "zIndex는 0 이상이어야 합니다.")

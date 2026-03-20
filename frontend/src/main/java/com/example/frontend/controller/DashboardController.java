@@ -633,8 +633,11 @@ public class DashboardController {
 
         double x = node.getLayoutX();
         double y = node.getLayoutY();
-        double width = node.prefWidth(-1);
-        double height = node.prefHeight(-1);
+        // prefWidth(-1)은 setPrefWidth가 없으면 -1 반환 → boundsInParent로 대체
+        double pw = node.prefWidth(-1);
+        double ph = node.prefHeight(-1);
+        double width  = pw  > 0 ? pw  : node.getBoundsInParent().getWidth();
+        double height = ph > 0 ? ph : node.getBoundsInParent().getHeight();
         boolean visible = node.isVisible();
 
         Object dashboardPanelIdObj = node.getProperties().get("dashboardPanelId");
