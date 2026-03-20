@@ -16,7 +16,6 @@ class DashboardViewModelTest {
         Preferences prefs = Preferences.userNodeForPackage(DashboardViewModel.class);
         prefs.remove("zoomScale");
         prefs.remove("snapToGrid");
-        prefs.remove("layoutLocked");
         prefs.remove("dashboardOnlyMode");
         prefs.flush();
     }
@@ -39,10 +38,6 @@ class DashboardViewModelTest {
         vm.setSnapToGrid(true);
         vm.toggleSnapToGrid();
         assertThat(vm.isSnapToGrid()).isFalse();
-
-        vm.setLayoutLocked(false);
-        vm.toggleLayoutLocked();
-        assertThat(vm.isLayoutLocked()).isTrue();
 
         vm.setEditMode(false);
         vm.toggleEditMode();
@@ -69,13 +64,11 @@ class DashboardViewModelTest {
         DashboardViewModel first = new DashboardViewModel();
         first.setZoom(1.7);
         first.setSnapToGrid(false);
-        first.setLayoutLocked(true);
         first.setDashboardOnlyMode(true);
 
         DashboardViewModel second = new DashboardViewModel();
         assertThat(second.getZoomScale()).isEqualTo(1.7);
         assertThat(second.isSnapToGrid()).isFalse();
-        assertThat(second.isLayoutLocked()).isTrue();
         assertThat(second.isDashboardOnlyMode()).isTrue();
     }
 }

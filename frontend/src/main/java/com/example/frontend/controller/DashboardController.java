@@ -323,7 +323,7 @@ public class DashboardController {
                 classroomContainer,
                 textItemMap,
                 imageItemMap,
-            () -> isEditModeActive() && !isLayoutLockedState(),
+            this::isEditModeActive,
             this::isSnapToGridEnabled,
                 this::refreshPanelListAndDashboard
         );
@@ -336,7 +336,7 @@ public class DashboardController {
                 API_BASE_URL,
                 classroomContainer,
                 panelManager,
-            () -> isEditModeActive() && !isLayoutLockedState(),
+            this::isEditModeActive,
             this::refreshDashboardSnapshot,
             () -> currentDashboardId() == null ? -1L : currentDashboardId(),
                 this::loadDashboardPanels,
@@ -373,7 +373,7 @@ public class DashboardController {
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
-                () -> isEditModeActive() && !isLayoutLockedState(),
+                this::isEditModeActive,
                 this::applySnap,
                 this::currentDashboardId,
                 this::showToast,
@@ -385,7 +385,7 @@ public class DashboardController {
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
-                () -> isEditModeActive() && !isLayoutLockedState(),
+                this::isEditModeActive,
                 this::applySnap,
                 this::currentDashboardId,
                 this::showToast,
@@ -408,7 +408,6 @@ public class DashboardController {
         rightPane.setPadding(new Insets(4, 8, 8, 8));
 
         ToggleButton editModeBtn = createEditModeToggleButton();
-        ToggleButton lockLayoutBtn = createLockLayoutToggleButton();
         ToggleButton focusModeBtn = createFocusModeToggleButton();
         ToggleButton dashboardOnlyBtn = createDashboardOnlyToggleButton();
         Button fullScreenBtn = createFullScreenButton();
@@ -429,15 +428,13 @@ public class DashboardController {
                 gridToggleBtn,
                 snapToggleBtn,
                 alignMenu,
-                arrangeMenu,
-                lockLayoutBtn,
-                zoomOutBtn,
-                zoomResetBtn,
-                zoomInBtn,
-                fitAllBtn
+                arrangeMenu
         );
         editOnlyToolbar.setManaged(false);
         editOnlyToolbar.setVisible(false);
+
+        HBox zoomToolbar = new HBox(4, zoomOutBtn, zoomResetBtn, zoomInBtn, fitAllBtn);
+        zoomToolbar.setAlignment(Pos.CENTER_RIGHT);
 
         HBox rightToolbar = new HBox(
                 10,
@@ -447,6 +444,7 @@ public class DashboardController {
                 fullScreenBtn,
                 dashboardOnlyBtn,
                 editOnlyToolbar,
+                zoomToolbar,
                 refreshBtn
         );
         rightToolbar.setAlignment(Pos.CENTER_RIGHT);
@@ -494,17 +492,6 @@ public class DashboardController {
             showToast(isEditModeActive() ? "Edit mode on" : "Edit mode off", false);
         });
         return editModeBtn;
-    }
-
-    private ToggleButton createLockLayoutToggleButton() {
-        ToggleButton lockLayoutBtn = new ToggleButton("Lock layout");
-        lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
-        lockLayoutBtn.setSelected(isLayoutLockedState());
-        lockLayoutBtn.setOnAction(e -> {
-            dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
-            showToast(isLayoutLockedState() ? "Layout locked" : "Layout unlocked", false);
-        });
-        return lockLayoutBtn;
     }
 
     private ToggleButton createFocusModeToggleButton() {
@@ -1012,7 +999,7 @@ public class DashboardController {
     }
 
     private void arrangePanels(String mode) {
-        if (!isEditModeActive() || isLayoutLockedState()) {
+        if (!isEditModeActive()) {
             showToast("Arrange is available only in edit mode", true);
             return;
         }
@@ -1152,10 +1139,6 @@ public class DashboardController {
 
     private boolean isEditModeActive() {
         return viewModel().isEditMode();
-    }
-
-    private boolean isLayoutLockedState() {
-        return viewModel().isLayoutLocked();
     }
 
     private boolean isSnapToGridEnabled() {

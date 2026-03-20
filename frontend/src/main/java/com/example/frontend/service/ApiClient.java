@@ -241,6 +241,12 @@ public class ApiClient {
         if (code >= 200 && code < 300) {
             return response;
         }
+        if (code == 401) {
+            throw new CompletionException(new ApiClientException(code, "인증이 필요합니다. 다시 로그인해주세요."));
+        }
+        if (code == 403) {
+            throw new CompletionException(new ApiClientException(code, "권한이 없거나 로그인 세션이 만료되었습니다."));
+        }
         throw new CompletionException(new ApiClientException(code, extractMessage(response.body())));
     }
 
@@ -254,7 +260,7 @@ public class ApiClient {
 
     private String extractMessage(String body) {
         if (body == null || body.isBlank()) {
-            return "빈 응답이 반환되었습니다.";
+            return "서버가 빈 응답을 반환했습니다. (HTTP 오류 응답)";
         }
         try {
             Map<String, Object> map = parseObject(body);

@@ -34,7 +34,6 @@ public class DashboardViewModel {
     // UI State Properties
     private final DoubleProperty zoomScale = new SimpleDoubleProperty(1.0);
     private final BooleanProperty snapToGrid = new SimpleBooleanProperty(true);
-    private final BooleanProperty layoutLocked = new SimpleBooleanProperty(false);
     private final BooleanProperty dashboardOnlyMode = new SimpleBooleanProperty(false);
     private final BooleanProperty focusMode = new SimpleBooleanProperty(false);
     private final BooleanProperty isEditMode = new SimpleBooleanProperty(false);
@@ -67,7 +66,6 @@ public class DashboardViewModel {
     private void loadPreferences() {
         zoomScale.set(preferences.getDouble("zoomScale", 1.0));
         snapToGrid.set(preferences.getBoolean("snapToGrid", true));
-        layoutLocked.set(preferences.getBoolean("layoutLocked", false));
         dashboardOnlyMode.set(preferences.getBoolean("dashboardOnlyMode", false));
     }
 
@@ -77,7 +75,6 @@ public class DashboardViewModel {
     public void savePreferences() {
         preferences.putDouble("zoomScale", zoomScale.get());
         preferences.putBoolean("snapToGrid", snapToGrid.get());
-        preferences.putBoolean("layoutLocked", layoutLocked.get());
         preferences.putBoolean("dashboardOnlyMode", dashboardOnlyMode.get());
     }
 
@@ -108,11 +105,6 @@ public class DashboardViewModel {
     // Toggle commands
     public void toggleSnapToGrid() {
         snapToGrid.set(!snapToGrid.get());
-        savePreferences();
-    }
-
-    public void toggleLayoutLocked() {
-        layoutLocked.set(!layoutLocked.get());
         savePreferences();
     }
 
@@ -160,19 +152,6 @@ public class DashboardViewModel {
 
     public void setSnapToGrid(boolean value) {
         snapToGrid.set(value);
-        savePreferences();
-    }
-
-    public BooleanProperty layoutLockedProperty() {
-        return layoutLocked;
-    }
-
-    public boolean isLayoutLocked() {
-        return layoutLocked.get();
-    }
-
-    public void setLayoutLocked(boolean value) {
-        layoutLocked.set(value);
         savePreferences();
     }
 

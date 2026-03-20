@@ -16,6 +16,7 @@ spring:
     show-sql: ${JPA_SHOW_SQL:false}
   flyway:
     enabled: true
+    validate-on-migrate: false
   mail:
     host: ${MAIL_HOST:smtp.example.com}
     port: ${MAIL_PORT:587}
@@ -26,8 +27,8 @@ spring:
       mail.smtp.starttls.enable: true
   servlet:
     multipart:
-      max-file-size: ${MAX_FILE_SIZE:10485760}
-      max-request-size: ${MAX_FILE_SIZE:10485760}
+      max-file-size: ${MAX_FILE_SIZE:20971520}
+      max-request-size: ${MAX_FILE_SIZE:20971520}
 
 server:
   port: ${SERVER_PORT:8080}

@@ -16,6 +16,7 @@ spring:
     show-sql: ${JPA_SHOW_SQL:false}
   flyway:
     enabled: true
+    validate-on-migrate: false
   mail:
     host: ${MAIL_HOST:smtp.example.com}
     port: ${MAIL_PORT:587}

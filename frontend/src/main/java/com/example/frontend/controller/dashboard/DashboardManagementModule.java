@@ -1,6 +1,7 @@
 package com.example.frontend.controller.dashboard;
 
 import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.PcStatusDto;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.model.dashboard.IpRangeItem;
 import com.example.frontend.model.dashboard.TeacherDeviceItem;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
@@ -450,43 +452,107 @@ public class DashboardManagementModule {
         }
     }
 
-    /** IP 대역의 개별 IP 제어 팝업을 표시한다. */
+    /** IP 대역의 개별 PC 제어 팝업을 표시한다. */
     private void showIndividualControlDialog(IpRangeItem item) {
-        String title = "개별 IP 제어 — " + item.getGroupName()
+        String title = "개별 PC 제어 — " + item.getGroupName()
                 + " [" + item.getStartIp() + " ~ " + item.getEndIp() + "]";
 
-        VBox content = new VBox(6);
-        content.setPadding(new Insets(12));
+        TableColumn<PcStatusDto, String> nameCol = new TableColumn<>("PC명");
+        nameCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().getHostname() != null ? d.getValue().getHostname() : "-"));
+        nameCol.setPrefWidth(160);
 
-        List<String> ips = enumerateIps(item.getStartIp(), item.getEndIp());
-        if (ips.isEmpty()) {
-            content.getChildren().add(new Label("IP를 계산할 수 없습니다."));
-        }
+        TableColumn<PcStatusDto, String> ipCol = new TableColumn<>("IP 주소");
+        ipCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().getIpAddress() != null ? d.getValue().getIpAddress() : "-"));
+        ipCol.setPrefWidth(130);
 
-        for (String ip : ips) {
-            Label ipLabel = new Label(ip);
-            ipLabel.setMinWidth(140);
-            ipLabel.setFont(Font.font("Monospaced", 12));
+        TableColumn<PcStatusDto, String> statusCol = new TableColumn<>("상태");
+        statusCol.setCellValueFactory(d -> {
+            String s = d.getValue().getStatus();
+            if (s == null || s.isBlank()) s = d.getValue().isOnline() ? "ONLINE" : "OFFLINE";
+            return new SimpleStringProperty(s);
+        });
+        statusCol.setCellFactory(col -> new TableCell<>() {
+            @Override protected void updateItem(String status, boolean empty) {
+                super.updateItem(status, empty);
+                if (empty || status == null) { setText(null); setStyle(""); return; }
+                setText(status);
+                setStyle("ONLINE".equalsIgnoreCase(status)
+                        ? "-fx-text-fill: #16a34a; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+            }
+        });
+        statusCol.setPrefWidth(80);
 
-            Button shutdownBtn = makeCommandBtn("종료", "#e74c3c", ip, "SHUTDOWN");
-            Button rebootBtn   = makeCommandBtn("재시작", "#e67e22", ip, "REBOOT");
-            Button wolBtn      = makeCommandBtn("켜기(WOL)", "#27ae60", ip, "WOL");
-            Button lockBtn     = makeCommandBtn("화면잠금", "#8e44ad", ip, "LOCK_SCREEN");
+        TableColumn<PcStatusDto, Void> actionCol = new TableColumn<>("제어");
+        actionCol.setCellFactory(col -> new TableCell<>() {
+            private final Button shutdownBtn = new Button("종료");
+            private final Button rebootBtn   = new Button("재시작");
+            private final Button wolBtn      = new Button("켜기(WOL)");
+            private final HBox box           = new HBox(4, shutdownBtn, rebootBtn, wolBtn);
+            {
+                shutdownBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                rebootBtn.setStyle("-fx-background-color: #e67e22; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                wolBtn.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                box.setAlignment(Pos.CENTER);
+                shutdownBtn.setOnAction(e -> {
+                    PcStatusDto pc = getTableView().getItems().get(getIndex());
+                    if (pc != null) sendCommandToIp(pc.getIpAddress(), "SHUTDOWN");
+                });
+                rebootBtn.setOnAction(e -> {
+                    PcStatusDto pc = getTableView().getItems().get(getIndex());
+                    if (pc != null) sendCommandToIp(pc.getIpAddress(), "REBOOT");
+                });
+                wolBtn.setOnAction(e -> {
+                    PcStatusDto pc = getTableView().getItems().get(getIndex());
+                    if (pc != null) sendCommandToIp(pc.getIpAddress(), "WOL");
+                });
+            }
+            @Override protected void updateItem(Void v, boolean empty) {
+                super.updateItem(v, empty);
+                setGraphic(empty ? null : box);
+            }
+        });
+        actionCol.setPrefWidth(210);
 
-            HBox row = new HBox(6, ipLabel, shutdownBtn, rebootBtn, wolBtn, lockBtn);
-            row.setAlignment(Pos.CENTER_LEFT);
-            row.setPadding(new Insets(2, 0, 2, 0));
-            content.getChildren().add(row);
-        }
+        @SuppressWarnings("unchecked")
+        TableView<PcStatusDto> table = new TableView<>();
+        table.getColumns().addAll(nameCol, ipCol, statusCol, actionCol);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.setPlaceholder(new Label("PC 정보를 불러오는 중..."));
+        table.setStyle("-fx-background-color: white; -fx-font-size: 13px;");
+        table.setPrefHeight(440);
 
-        ScrollPane scrollPane = new ScrollPane(content);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setPrefViewportHeight(420);
+        VBox root = new VBox(8);
+        root.setPadding(new Insets(12));
+        root.setStyle("-fx-background-color: #f8fafc;");
+        Label headerLabel = new Label(title);
+        headerLabel.setStyle("-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #1e293b;");
+        root.getChildren().addAll(headerLabel, table);
 
         javafx.stage.Stage dialog = new javafx.stage.Stage();
         dialog.setTitle(title);
-        dialog.setScene(new javafx.scene.Scene(scrollPane, 680, 460));
+        dialog.setScene(new javafx.scene.Scene(root, 700, 500));
         dialog.show();
+
+        if (item.getGroupId() != null) {
+            apiClient.getPagedList("/dashboard/classrooms/" + item.getGroupId() + "/pcs",
+                            new TypeReference<List<PcStatusDto>>() {})
+                    .thenAccept(pcs -> Platform.runLater(() -> {
+                        if (pcs != null && !pcs.isEmpty()) {
+                            table.getItems().setAll(pcs);
+                        }
+                        table.setPlaceholder(new Label("해당 강의실에 등록된 PC가 없습니다."));
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> table.setPlaceholder(
+                                new Label("PC 목록 조회 실패: " + errorMessage(ex))));
+                        return null;
+                    });
+        } else {
+            table.setPlaceholder(new Label("그룹 ID가 없어 PC 목록을 가져올 수 없습니다."));
+        }
     }
 
     private Button makeCommandBtn(String label, String color, String ip, String commandType) {
