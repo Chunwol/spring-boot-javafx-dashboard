@@ -469,7 +469,7 @@ public class DashboardClassroomModule {
             put("width", width);
             put("height", height);
             put("visible", visible);
-        }}).exceptionally(ex -> {
+        }}).thenAccept(resp -> Platform.runLater(refreshPanelCallback)).exceptionally(ex -> {
             Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
             Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "패널 위치 저장 실패: " + cause.getMessage()).show());
             return null;

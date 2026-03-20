@@ -702,6 +702,7 @@ public class DashboardController {
             }
             if (panelId != null) {
                 dashboardService.updatePanelPositionAsync(dashboardId, panelId, x, y, width, height);
+                updateCachedPanelPosition(panelId, x, y, width, height);
                 return;
             }
         }
@@ -831,6 +832,25 @@ public class DashboardController {
             networkPanelModule.update(classrooms, panels);
         }
         updateTopSummary();
+    }
+
+    private void updateCachedPanelPosition(Long panelId, double x, double y, double width, double height) {
+        if (panelId == null || dashboardViewModel == null) {
+            return;
+        }
+        List<DashboardPanelDto> panels = dashboardViewModel.getCachedDashboardPanels();
+        if (panels == null || panels.isEmpty()) {
+            return;
+        }
+        for (DashboardPanelDto panel : panels) {
+            if (panel != null && panelId.equals(panel.getId())) {
+                panel.setX(x);
+                panel.setY(y);
+                panel.setWidth(width);
+                panel.setHeight(height);
+                break;
+            }
+        }
     }
 
     private void applyZoom(double targetScale) {
