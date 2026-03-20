@@ -105,14 +105,16 @@ public class CommandStatusPanelController {
     private void updateUI(List<Map<String, Object>> commands) {
         commandListBox.getChildren().clear();
 
-        long queued = commands.stream().filter(c -> "QUEUED".equals(c.get("status"))).count();
-        long delivered = commands.stream().filter(c -> "DELIVERED".equals(c.get("status"))).count();
-        long acked = commands.stream().filter(c -> "ACKED".equals(c.get("status"))).count();
-        long completed = commands.stream().filter(c -> "COMPLETED".equals(c.get("status"))).count();
-        long failed = commands.stream().filter(c -> "FAILED".equals(c.get("status"))).count();
+        List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(80).toList();
+
+        long queued = recent.stream().filter(c -> "QUEUED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+        long delivered = recent.stream().filter(c -> "DELIVERED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+        long acked = recent.stream().filter(c -> "ACKED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+        long completed = recent.stream().filter(c -> "COMPLETED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+        long failed = recent.stream().filter(c -> "FAILED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
         long activeTotal = queued + delivered + acked;
 
-        if (commands.isEmpty()) {
+        if (recent.isEmpty()) {
             Label empty = new Label("진행 중인 명령 없음");
             empty.setTextFill(Color.web("#888"));
             commandListBox.getChildren().add(empty);
@@ -121,12 +123,12 @@ public class CommandStatusPanelController {
         }
 
         summaryLabel.setText(String.format(
-                "진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
+                "최근 80건 기준: 진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
                 activeTotal, queued, delivered, acked, completed, failed));
 
         Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
-        for (Map<String, Object> cmd : commands) {
-            String type = String.valueOf(cmd.getOrDefault("commandType", "UNKNOWN"));
+        for (Map<String, Object> cmd : recent) {
+            String type = String.valueOf(cmd.getOrDefault("commandType", cmd.getOrDefault("type", "UNKNOWN")));
             grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(cmd);
         }
 
@@ -134,11 +136,11 @@ public class CommandStatusPanelController {
             String type = entry.getKey();
             List<Map<String, Object>> group = entry.getValue();
 
-            long q = group.stream().filter(c -> "QUEUED".equals(c.get("status"))).count();
-            long d = group.stream().filter(c -> "DELIVERED".equals(c.get("status"))).count();
-            long a = group.stream().filter(c -> "ACKED".equals(c.get("status"))).count();
-            long c = group.stream().filter(x -> "COMPLETED".equals(x.get("status"))).count();
-            long f = group.stream().filter(x -> "FAILED".equals(x.get("status"))).count();
+            long q = group.stream().filter(c -> "QUEUED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+            long d = group.stream().filter(c -> "DELIVERED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+            long a = group.stream().filter(c -> "ACKED".equalsIgnoreCase(String.valueOf(c.getOrDefault("status", "")))).count();
+            long c = group.stream().filter(x -> "COMPLETED".equalsIgnoreCase(String.valueOf(x.getOrDefault("status", "")))).count();
+            long f = group.stream().filter(x -> "FAILED".equalsIgnoreCase(String.valueOf(x.getOrDefault("status", "")))).count();
             long active = q + d + a;
             long total = group.size();
 

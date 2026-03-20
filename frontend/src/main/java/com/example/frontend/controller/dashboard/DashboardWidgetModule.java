@@ -281,7 +281,7 @@ public class DashboardWidgetModule {
                 addTextResizeHandle(box, textArea, id);
                 textItemMap.put(id, box);
                 classroomContainer.getChildren().add(box);
-                box.toBack();
+                box.toFront();
             } else {
                 TextArea textArea = (TextArea) box.getChildren().get(1);
                 textArea.setText(text);
@@ -484,6 +484,7 @@ public class DashboardWidgetModule {
                 imageItemMap.put(id, newBox);
                 classroomContainer.getChildren().add(newBox);
                 addImageResizeHandle(newBox, id, imageUrlFinal);
+                newBox.toFront();
                 box = newBox;
             } else {
                 if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
