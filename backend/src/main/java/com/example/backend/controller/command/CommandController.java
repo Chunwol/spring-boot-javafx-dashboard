@@ -10,17 +10,20 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.stream.Collectors;
 /**
  * 원격 명령 관리 API
  * PC에 종료, 재부팅, WOL, PS1 스크립트 실행 등의 명령을 발행하고 결과를 수집합니다.
@@ -40,6 +43,7 @@ public class CommandController {
     private final CommandQueueRepository commandQueueRepository;
     private final PcMasterRepository pcMasterRepository;
     private final AuditService auditService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 명령 발행 (POST /api/v1/commands)
@@ -65,6 +69,7 @@ public class CommandController {
     )
     @ApiResponse(responseCode = "202", description = "명령 발행 성공 (큐에 저장됨)")
     @ApiResponse(responseCode = "400", description = "잘못된 요청 (필수 파라미터 누락, scope 또는 type 오류)")
+    @Transactional
     public ResponseEntity<Map<String, Object>> enqueue(@Valid @RequestBody CommandRequestDto req) {
         String scope = req.getScope() == null ? "" : req.getScope().toUpperCase(Locale.ROOT);
         String role = req.getRole() == null ? "ALL" : req.getRole().toUpperCase(Locale.ROOT);
@@ -91,9 +96,19 @@ public class CommandController {
             }
             String payloadJson = req.getPayloadJson();
             if (payloadJson == null || payloadJson.isBlank()) {
-                payloadJson = "{\"targetMacs\":\"" + String.join(",", macs) + "\"}";
+                try {
+                    // ObjectMapper로 안전하게 직렬화 (JSON 인젝션 방지)
+                    // broadcastIp: 요청에 명시된 값 또는 서브넷 브로드캐스트로 계산 가능하도록 전달
+                    String broadcastIp = (req.getBroadcastIp() != null && !req.getBroadcastIp().isBlank())
+                            ? req.getBroadcastIp() : "255.255.255.255";
+                    Map<String, String> wolPayload = new LinkedHashMap<>();
+                    wolPayload.put("targetMacs", String.join(",", macs));
+                    wolPayload.put("broadcastIp", broadcastIp);
+                    payloadJson = objectMapper.writeValueAsString(wolPayload);
+                } catch (Exception e) {
+                    return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
+                }
             }
-
             CommandQueue c = new CommandQueue();
             c.setMacAddress(leader.getMacAddress());
             c.setCommandType("WOL_RELAY");
@@ -130,7 +145,7 @@ public class CommandController {
             return ResponseEntity.badRequest().body(Map.of("message", "scope must be SINGLE or GROUP"));
         }
 
-        List<Long> taskIds = new ArrayList<>();
+        List<CommandQueue> commands = new ArrayList<>();
         for (PcMaster pc : targets) {
             if (pc.getMacAddress() == null) continue;
             CommandQueue c = new CommandQueue();
@@ -141,9 +156,14 @@ public class CommandController {
             c.setStatus("QUEUED");
             c.setCreatedAt(LocalDateTime.now());
             c.setIsExecuted(false);
-            CommandQueue saved = commandQueueRepository.save(c);
-            taskIds.add(saved.getTaskId());
+            commands.add(c);
         }
+
+        List<CommandQueue> saved = commands.isEmpty() ? List.of() : commandQueueRepository.saveAll(commands);
+        List<Long> taskIds = saved.stream()
+                .map(CommandQueue::getTaskId)
+                .filter(Objects::nonNull)
+                .toList();
 
         return ResponseEntity.accepted().body(Map.of(
                 "queued", taskIds.size(),
@@ -217,6 +237,7 @@ public class CommandController {
         c.setCompletedAt(LocalDateTime.now());
         String newStatus = exitCode != null && exitCode == 0 ? "COMPLETED" : "FAILED";
         c.setStatus(newStatus);
+        c.setIsExecuted(true);
         commandQueueRepository.save(c);
 
         String agentMac = (String) request.getAttribute("agentMac");
@@ -228,6 +249,45 @@ public class CommandController {
 
     private static String truncate(String s, int max) {
         return s == null || s.length() <= max ? s : s.substring(0, max);
+    }
+
+    /**
+     * IP 기반 단일 명령 발행 (POST /api/v1/commands/to-ip)
+     * IP 주소로 특정 PC를 찾아 명령을 큐에 삽입한다.
+     * PC가 등록되어 있지 않으면 404를 반환한다.
+     */
+    @PostMapping("/commands/to-ip")
+    @Operation(summary = "IP 기반 PC 명령 발행",
+               description = "IP 주소로 PC를 조회하여 명령을 발행합니다.")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> enqueueToIp(@RequestBody Map<String, Object> body) {
+        String ipAddress = body.containsKey("ipAddress") ? body.get("ipAddress").toString().trim() : null;
+        String type = body.containsKey("type") ? body.get("type").toString().toUpperCase(java.util.Locale.ROOT) : null;
+        if (ipAddress == null || ipAddress.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "ipAddress is required"));
+        }
+        if (type == null || type.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "type is required"));
+        }
+        Optional<PcMaster> pcOpt = pcMasterRepository.findByIpAddress(ipAddress);
+        if (pcOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("message", "PC not found for IP: " + ipAddress));
+        }
+        PcMaster pc = pcOpt.get();
+        CommandQueue c = new CommandQueue();
+        c.setMacAddress(pc.getMacAddress());
+        c.setCommandType(type);
+        c.setScriptUrl(body.containsKey("scriptUrl") ? body.get("scriptUrl").toString() : null);
+        c.setPayloadJson(body.containsKey("payloadJson") ? body.get("payloadJson").toString() : null);
+        c.setStatus("QUEUED");
+        c.setCreatedAt(LocalDateTime.now());
+        c.setIsExecuted(false);
+        CommandQueue saved = commandQueueRepository.save(c);
+        return ResponseEntity.accepted().body(Map.of(
+                "queued", 1,
+                "macAddress", pc.getMacAddress(),
+                "taskId", saved.getTaskId()
+        ));
     }
 
     /**
@@ -252,22 +312,17 @@ public class CommandController {
         }
 
         List<String> statuses = status != null && !status.isBlank()
-                ? Arrays.asList(status.split(","))
+            ? Arrays.stream(status.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toList())
                 : List.of("QUEUED", "DELIVERED", "ACKED");
 
-        List<CommandQueue> result = commandQueueRepository.findByStatusInOrderByCreatedAtDesc(statuses);
-        
-        // 메모리에서 페이지네이션 처리
-        int totalElements = result.size();
-        int fromIndex = page * size;
-        int toIndex = Math.min(fromIndex + size, totalElements);
-        
-        if (fromIndex > totalElements) {
-            return ResponseEntity.ok(new PageImpl<>(List.of(), PageRequest.of(page, size), totalElements));
-        }
-        
-        List<CommandQueue> pageContent = result.subList(fromIndex, toIndex);
-        Page<CommandQueue> pageResult = new PageImpl<>(pageContent, PageRequest.of(page, size), totalElements);
+        Page<CommandQueue> pageResult = commandQueueRepository.findByStatusInOrderByCreatedAtDesc(
+                statuses,
+                PageRequest.of(Math.max(0, page), Math.max(1, size))
+        );
         return ResponseEntity.ok(pageResult);
     }
 }

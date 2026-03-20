@@ -50,15 +50,19 @@ public class IpRangeApiController {
     @GetMapping
     @Operation(
         summary = "IP 범위 목록 조회",
-        description = "등록된 모든 강의실의 IP 범위(CIDR 형식)를 조회합니다. 페이지네이션을 지원합니다."
+        description = "등록된 강의실의 IP 범위를 조회합니다. groupId 지정 시 해당 강의실만 필터링합니다."
     )
     @ApiResponse(responseCode = "200", description = "IP 범위 목록 조회 성공")
     public ResponseEntity<Page<ClassroomIpRange>> getAllIpRanges(
+            @Parameter(description = "강의실 ID (옵션 필터)")
+            @RequestParam(required = false) Long groupId,
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "50")
             @RequestParam(defaultValue = "50") int size) {
-        List<ClassroomIpRange> all = ipRangeRepository.findAll();
+        List<ClassroomIpRange> all = (groupId != null)
+                ? ipRangeRepository.findByGroupId(groupId)
+                : ipRangeRepository.findAll();
         int total = all.size();
         int from = Math.min(page * size, total);
         int to = Math.min(from + size, total);

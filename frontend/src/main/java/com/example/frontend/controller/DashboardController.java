@@ -15,6 +15,7 @@ import com.example.frontend.controller.dashboard.DashboardUIService;
 import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
 import com.example.frontend.controller.dashboard.DashboardNetworkPanelModule;
+import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
@@ -66,6 +67,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DashboardController {
 
@@ -100,6 +102,7 @@ public class DashboardController {
     private ComboBox<DashboardInfoDto> dashboardSelector;
 
     private NetworkPanelController networkPanelController;
+    private CommandStatusPanelController commandStatusPanelController;
     private final DashboardPanelManager panelManager = new DashboardPanelManager();
     private final Map<Long, VBox> textItemMap = new HashMap<>();
     private final Map<Long, VBox> imageItemMap = new HashMap<>();
@@ -114,6 +117,7 @@ public class DashboardController {
         return t;
     });
     private volatile boolean shutdownRequested = false;
+    private final AtomicBoolean snapshotRefreshInFlight = new AtomicBoolean(false);
 
     private static final String API_BASE_URL = com.example.frontend.service.ApiClient.DEFAULT_BASE_URL;
 
@@ -233,9 +237,12 @@ public class DashboardController {
         networkPanelController = new NetworkPanelController(null);
         Tab networkTab = new Tab("Network Traffic", networkPanelController.getPanel());
 
+        commandStatusPanelController = new CommandStatusPanelController();
+        Tab commandTab = new Tab("Command Status", commandStatusPanelController.getPanel());
+
         Tab manageTab = new Tab("Management", createManagementView());
 
-        tabPane.getTabs().addAll(mainTab, networkTab, manageTab);
+        tabPane.getTabs().addAll(mainTab, networkTab, commandTab, manageTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
         return tabPane;
     }
@@ -598,6 +605,12 @@ public class DashboardController {
         } else if (canvasModule != null) {
             canvasModule.applyEditMode(isEditModeActive());
         }
+        if (widgetModule != null) {
+            widgetModule.applyEditMode(isEditModeActive());
+        }
+        if (classroomModule != null) {
+            classroomModule.applyEditMode(isEditModeActive());
+        }
         if (resourcePanelModule != null) {
             resourcePanelModule.refreshListView();
         }
@@ -663,29 +676,36 @@ public class DashboardController {
     }
 
     private void refreshDashboardSnapshot() {
+        if (!snapshotRefreshInFlight.compareAndSet(false, true)) {
+            return;
+        }
         dashboardViewModel.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
     }
 
     private void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
-        if (snapshot == null) {
-            return;
-        }
-
-        if (widgetModule != null) {
-            widgetModule.applySnapshot(snapshot.getTexts(), snapshot.getImages());
-        }
-
-        NetworkTrafficDto traffic = snapshot.getTraffic();
-        if (traffic != null) {
-            if (networkPanelController != null) {
-                networkPanelController.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps());
+        try {
+            if (snapshot == null) {
+                return;
             }
-            if (networkPanelModule != null) {
-                networkPanelModule.updateNetworkTraffic(traffic.getInboundMbps(), traffic.getOutboundMbps());
-            }
-        }
 
-        refreshPanelListAndDashboard();
+            if (widgetModule != null) {
+                widgetModule.applySnapshot(snapshot.getTexts(), snapshot.getImages());
+            }
+
+            NetworkTrafficDto traffic = snapshot.getTraffic();
+            if (traffic != null) {
+                if (networkPanelController != null) {
+                    networkPanelController.updateNetworkChart(traffic.getInboundMbps(), traffic.getOutboundMbps());
+                }
+                if (networkPanelModule != null) {
+                    networkPanelModule.updateNetworkTraffic(traffic.getInboundMbps(), traffic.getOutboundMbps());
+                }
+            }
+
+            refreshPanelListAndDashboard();
+        } finally {
+            snapshotRefreshInFlight.set(false);
+        }
     }
 
     private void loadDashboards() {
@@ -1048,6 +1068,9 @@ public class DashboardController {
         scheduler.shutdownNow();
         if (realtimeModule != null) {
             realtimeModule.stop();
+        }
+        if (commandStatusPanelController != null) {
+            commandStatusPanelController.shutdown();
         }
     }
 

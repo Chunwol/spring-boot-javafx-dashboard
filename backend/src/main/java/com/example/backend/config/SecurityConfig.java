@@ -37,6 +37,7 @@ public class SecurityConfig {
                     "/api/v1/agent/register",
                     "/api/v1/heartbeat",
                     "/api/v1/heartbeat/**",
+                    "/api/v1/files/**",
                     "/ws/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",

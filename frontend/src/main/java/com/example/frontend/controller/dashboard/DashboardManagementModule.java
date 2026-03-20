@@ -23,7 +23,6 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
@@ -39,10 +38,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -95,7 +94,7 @@ public class DashboardManagementModule {
 
     private VBox buildScriptBox() {
         Label scriptTitle = new Label("원격 명령 및 스크립트 배포");
-        scriptTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
+        scriptTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
         Button uploadPs1Btn = new Button("PowerShell(.ps1) 파일 선택 및 배포...");
         uploadPs1Btn.setStyle("-fx-background-color: #8e44ad; -fx-text-fill: white; -fx-font-size: 14px;");
@@ -108,35 +107,29 @@ public class DashboardManagementModule {
 
     private VBox buildIpRangeBox() {
         Label ipTitle = new Label("강의실 IP 대역 관리");
-        ipTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
-        Label ipHint = new Label("지원 형식: 시작/끝 IP 또는 다중 대역(예: 10-20,30-40 / 10.0.1.10-10.0.1.20)");
+        ipTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        Label ipHint = new Label("강의실을 선택하면 해당 강의실 IP 대역만 표시됩니다.");
         ipHint.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
 
         groupComboBox = buildClassroomComboBox();
-        groupComboBox.setPromptText("강의실 선택");
+        groupComboBox.setPromptText("강의실 선택 (전체)");
         groupComboBox.setPrefWidth(180);
+        // 강의실 선택 시 해당 IP 대역만 필터링
+        groupComboBox.valueProperty().addListener((obs, oldVal, newVal) -> loadIpRangesForGroup(newVal));
 
         TextField startIpField = new TextField();
-        startIpField.setPromptText("학생 시작 IP");
-        startIpField.setPrefWidth(160);
+        startIpField.setPromptText("시작 IP (예: 192.168.1.10)");
+        startIpField.setPrefWidth(170);
         TextField endIpField = new TextField();
-        endIpField.setPromptText("학생 끝 IP");
-        endIpField.setPrefWidth(160);
-        TextField basePrefixField = new TextField();
-        basePrefixField.setPromptText("Base Prefix (예: 10.0.1.)");
-        basePrefixField.setPrefWidth(170);
-        TextArea rangeSpecArea = new TextArea();
-        rangeSpecArea.setPromptText("다중 대역 입력\n예) 10-20,30-40 또는 10.0.1.10-10.0.1.20,10.0.1.30-10.0.1.40");
-        rangeSpecArea.setPrefRowCount(2);
-        rangeSpecArea.setWrapText(true);
-        rangeSpecArea.setPrefWidth(360);
+        endIpField.setPromptText("끝 IP (예: 192.168.1.30)");
+        endIpField.setPrefWidth(170);
         TextField descField = new TextField();
         descField.setPromptText("설명");
         descField.setPrefWidth(180);
         Button addIpRangeBtn = new Button("대역 추가");
-        addIpRangeBtn.setOnAction(e -> addIpRange(startIpField, endIpField, basePrefixField, rangeSpecArea, descField));
+        addIpRangeBtn.setOnAction(e -> addIpRange(startIpField, endIpField, descField));
 
-        HBox ipForm = new HBox(10, groupComboBox, startIpField, endIpField, basePrefixField, descField, addIpRangeBtn);
+        HBox ipForm = new HBox(10, groupComboBox, startIpField, endIpField, descField, addIpRangeBtn);
         ipForm.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(descField, javafx.scene.layout.Priority.ALWAYS);
 
@@ -146,28 +139,34 @@ public class DashboardManagementModule {
 
         TableColumn<IpRangeItem, Long> idCol = new TableColumn<>("ID");
         idCol.setCellValueFactory(new PropertyValueFactory<>("id"));
+        idCol.setMaxWidth(60);
         TableColumn<IpRangeItem, String> groupNameCol = new TableColumn<>("강의실");
         groupNameCol.setCellValueFactory(new PropertyValueFactory<>("groupName"));
-        TableColumn<IpRangeItem, String> cidrCol = new TableColumn<>("CIDR");
-        cidrCol.setCellValueFactory(new PropertyValueFactory<>("cidr"));
         TableColumn<IpRangeItem, String> startCol = new TableColumn<>("Start IP");
         startCol.setCellValueFactory(new PropertyValueFactory<>("startIp"));
         TableColumn<IpRangeItem, String> endCol = new TableColumn<>("End IP");
         endCol.setCellValueFactory(new PropertyValueFactory<>("endIp"));
         TableColumn<IpRangeItem, String> descCol = new TableColumn<>("Desc");
         descCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        TableColumn<IpRangeItem, Void> actionCol = new TableColumn<>("Action");
+        TableColumn<IpRangeItem, Void> actionCol = new TableColumn<>("액션");
+        actionCol.setMinWidth(220);
         actionCol.setCellFactory(param -> new TableCell<>() {
+            private final Button controlBtn = new Button("▶ 개별 제어");
             private final Button deleteBtn = new Button("삭제");
+            private final HBox box = new HBox(6, controlBtn, deleteBtn);
             {
+                box.setAlignment(Pos.CENTER_LEFT);
+                controlBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white;");
+                controlBtn.setOnAction(event -> {
+                    IpRangeItem item = getTableView().getItems().get(getIndex());
+                    showIndividualControlDialog(item);
+                });
                 deleteBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
                 deleteBtn.setOnAction(event -> {
                     IpRangeItem item = getTableView().getItems().get(getIndex());
                     Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "정말 삭제하시겠습니까?", ButtonType.YES, ButtonType.NO);
                     alert.showAndWait().ifPresent(type -> {
-                        if (type == ButtonType.YES) {
-                            deleteIpRange(item);
-                        }
+                        if (type == ButtonType.YES) deleteIpRange(item);
                     });
                 });
             }
@@ -175,25 +174,20 @@ public class DashboardManagementModule {
             @Override
             protected void updateItem(Void item, boolean empty) {
                 super.updateItem(item, empty);
-                setGraphic(empty ? null : deleteBtn);
+                setGraphic(empty ? null : box);
             }
         });
 
-        ipRangeTable.getColumns().add(idCol);
-        ipRangeTable.getColumns().add(groupNameCol);
-        ipRangeTable.getColumns().add(cidrCol);
-        ipRangeTable.getColumns().add(startCol);
-        ipRangeTable.getColumns().add(endCol);
-        ipRangeTable.getColumns().add(descCol);
-        ipRangeTable.getColumns().add(actionCol);
-        VBox ipBox = new VBox(10, ipTitle, ipHint, ipForm, rangeSpecArea, ipRangeTable);
+        ipRangeTable.getColumns().addAll(idCol, groupNameCol, startCol, endCol, descCol, actionCol);
+
+        VBox ipBox = new VBox(10, ipTitle, ipHint, ipForm, ipRangeTable);
         ipBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return ipBox;
     }
 
     private VBox buildTeacherBox() {
         Label teacherTitle = new Label("교사 PC 관리");
-        teacherTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
+        teacherTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
         teacherGroupCombo = buildClassroomComboBox();
         teacherGroupCombo.setPromptText("강의실 선택");
@@ -227,12 +221,13 @@ public class DashboardManagementModule {
                 deleteBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
                 deleteBtn.setOnAction(event -> {
                     TeacherDeviceItem item = getTableView().getItems().get(getIndex());
-                    HttpRequest req = HttpRequest.newBuilder()
-                            .uri(URI.create(apiBaseUrl + "/dashboard/classrooms/teacher-devices/" + item.getId()))
-                            .DELETE()
-                            .build();
-                    httpClient.sendAsync(req, HttpResponse.BodyHandlers.discarding())
-                            .thenAccept(r -> Platform.runLater(this::refreshTeacherDevices));
+                    apiClient.delete("/dashboard/classrooms/teacher-devices/" + item.getId())
+                        .thenAccept(r -> Platform.runLater(this::refreshTeacherDevices))
+                        .exceptionally(ex -> {
+                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "교사 PC 삭제 실패: " + errorMessage(ex)).show());
+                        return null;
+                        });
                 });
             }
 
@@ -254,7 +249,7 @@ public class DashboardManagementModule {
         teacherDeviceTable.getColumns().add(teacherActionCol);
 
         Label brokenTitle = new Label("고장 PC 등록");
-        brokenTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
+        brokenTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
         TextField brokenMacField = new TextField();
         brokenMacField.setPromptText("MAC 주소");
         TextField brokenNoteField = new TextField();
@@ -271,7 +266,7 @@ public class DashboardManagementModule {
 
     private VBox buildReportBox() {
         Label reportTitle = new Label("주간/월간 보고서");
-        reportTitle.setFont(Font.font("Arial", FontWeight.BOLD, 18));
+        reportTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
         HBox reportBtns = new HBox(15);
         Button weekBtn = new Button("주간 보고서 생성");
@@ -308,36 +303,44 @@ public class DashboardManagementModule {
         apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
             .thenAccept(classrooms -> {
                 try {
-                        Map<Long, String> groupMap = classrooms.stream().collect(java.util.stream.Collectors.toMap(ClassroomSummaryDto::getGroupId, ClassroomSummaryDto::getGroupName));
+                    Platform.runLater(() -> {
+                        groupComboBox.getItems().setAll(classrooms);
+                        teacherGroupCombo.getItems().setAll(classrooms);
+                        if (!classrooms.isEmpty()) {
+                            teacherGroupCombo.getSelectionModel().selectFirst();
+                            loadTeacherDevices();
+                        }
+                    });
+                    // 초기에는 전체 IP 대역 로드
+                    loadIpRangesForGroup(null);
+                } catch (Exception e) {
+                    log.warn("Failed while preparing classroom list", e);
+                }
+            })
+            .exceptionally(ex -> {
+                log.warn("Failed to load classrooms", ex);
+                Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                        "강의실 목록 조회 실패: " + errorMessage(ex)).show());
+                return null;
+            });
+    }
 
-                        Platform.runLater(() -> {
-                            groupComboBox.getItems().setAll(classrooms);
-                            teacherGroupCombo.getItems().setAll(classrooms);
-                            if (!classrooms.isEmpty()) {
-                                teacherGroupCombo.getSelectionModel().selectFirst();
-                                loadTeacherDevices();
-                            }
-                        });
-
-                        apiClient.getPagedList("/ip-ranges", new TypeReference<List<IpRangeItem>>() {})
-                                .thenAccept(items -> {
-                                    items.forEach(item -> item.setGroupName(groupMap.getOrDefault(item.getGroupId(), "N/A")));
-                                    Platform.runLater(() -> ipRangeTable.getItems().setAll(items));
-                                })
-                                .exceptionally(ex -> {
-                                    log.warn("Failed to load IP ranges", ex);
-                                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                            "IP 대역 목록 조회 실패: " + errorMessage(ex)).show());
-                                    return null;
-                                });
-                    } catch (Exception e) {
-                        log.warn("Failed while preparing classroom/IP mapping", e);
+    /** 선택한 강의실의 IP 대역만 조회. group == null 이면 전체. */
+    private void loadIpRangesForGroup(ClassroomSummaryDto group) {
+        String path = (group != null)
+                ? "/ip-ranges?groupId=" + group.getGroupId()
+                : "/ip-ranges";
+        apiClient.getPagedList(path, new TypeReference<List<IpRangeItem>>() {})
+                .thenAccept(items -> {
+                    if (group != null) {
+                        items.forEach(item -> item.setGroupName(group.getGroupName()));
                     }
+                    Platform.runLater(() -> ipRangeTable.getItems().setAll(items));
                 })
                 .exceptionally(ex -> {
-                    log.warn("Failed to load classrooms", ex);
+                    log.warn("Failed to load IP ranges for group {}", group, ex);
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            "강의실 목록 조회 실패: " + errorMessage(ex)).show());
+                            "IP 대역 목록 조회 실패: " + errorMessage(ex)).show());
                     return null;
                 });
     }
@@ -409,7 +412,7 @@ public class DashboardManagementModule {
                 });
     }
 
-    private void addIpRange(TextField startIp, TextField endIp, TextField basePrefix, TextArea rangeSpec, TextField desc) {
+    private void addIpRange(TextField startIp, TextField endIp, TextField desc) {
         ClassroomSummaryDto selectedGroup = groupComboBox.getValue();
         if (selectedGroup == null) {
             new Alert(Alert.AlertType.ERROR, "강의실을 선택하세요.").show();
@@ -419,33 +422,23 @@ public class DashboardManagementModule {
         try {
             String start = startIp.getText() == null ? "" : startIp.getText().trim();
             String end = endIp.getText() == null ? "" : endIp.getText().trim();
-            String multi = rangeSpec.getText() == null ? "" : rangeSpec.getText().trim();
-
-            CompletableFuture<String> future;
-            if (!multi.isBlank()) {
-                Map<String, Object> payload = new LinkedHashMap<>();
-                payload.put("groupId", selectedGroup.getGroupId());
-                payload.put("basePrefix", basePrefix.getText());
-                payload.put("rangeSpec", multi);
-                payload.put("description", desc.getText());
-                future = apiClient.postJson("/ip-ranges/batch", payload);
-            } else {
-                Map<String, Object> payload = new LinkedHashMap<>();
-                payload.put("groupId", selectedGroup.getGroupId());
-                payload.put("startIp", start);
-                payload.put("endIp", end);
-                payload.put("description", desc.getText());
-                future = apiClient.postJson("/ip-ranges", payload);
+            if (start.isBlank() || end.isBlank()) {
+                new Alert(Alert.AlertType.ERROR, "시작 IP와 끝 IP를 모두 입력하세요.").show();
+                return;
             }
 
-            future.thenAccept(resp -> Platform.runLater(() -> {
-                        groupComboBox.getSelectionModel().clearSelection();
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("groupId", selectedGroup.getGroupId());
+            payload.put("startIp", start);
+            payload.put("endIp", end);
+            payload.put("description", desc.getText());
+
+            apiClient.postJson("/ip-ranges", payload)
+                    .thenAccept(resp -> Platform.runLater(() -> {
                         startIp.clear();
                         endIp.clear();
-                        basePrefix.clear();
-                        rangeSpec.clear();
                         desc.clear();
-                        loadIpRangesAndGroups();
+                        loadIpRangesForGroup(selectedGroup);
                     }))
                     .exceptionally(ex -> {
                         Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
@@ -455,6 +448,96 @@ public class DashboardManagementModule {
         } catch (Exception e) {
             new Alert(Alert.AlertType.ERROR, "입력 값을 확인하세요.").show();
         }
+    }
+
+    /** IP 대역의 개별 IP 제어 팝업을 표시한다. */
+    private void showIndividualControlDialog(IpRangeItem item) {
+        String title = "개별 IP 제어 — " + item.getGroupName()
+                + " [" + item.getStartIp() + " ~ " + item.getEndIp() + "]";
+
+        VBox content = new VBox(6);
+        content.setPadding(new Insets(12));
+
+        List<String> ips = enumerateIps(item.getStartIp(), item.getEndIp());
+        if (ips.isEmpty()) {
+            content.getChildren().add(new Label("IP를 계산할 수 없습니다."));
+        }
+
+        for (String ip : ips) {
+            Label ipLabel = new Label(ip);
+            ipLabel.setMinWidth(140);
+            ipLabel.setFont(Font.font("Monospaced", 12));
+
+            Button shutdownBtn = makeCommandBtn("종료", "#e74c3c", ip, "SHUTDOWN");
+            Button rebootBtn   = makeCommandBtn("재시작", "#e67e22", ip, "REBOOT");
+            Button wolBtn      = makeCommandBtn("켜기(WOL)", "#27ae60", ip, "WOL");
+            Button lockBtn     = makeCommandBtn("화면잠금", "#8e44ad", ip, "LOCK_SCREEN");
+
+            HBox row = new HBox(6, ipLabel, shutdownBtn, rebootBtn, wolBtn, lockBtn);
+            row.setAlignment(Pos.CENTER_LEFT);
+            row.setPadding(new Insets(2, 0, 2, 0));
+            content.getChildren().add(row);
+        }
+
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setPrefViewportHeight(420);
+
+        javafx.stage.Stage dialog = new javafx.stage.Stage();
+        dialog.setTitle(title);
+        dialog.setScene(new javafx.scene.Scene(scrollPane, 680, 460));
+        dialog.show();
+    }
+
+    private Button makeCommandBtn(String label, String color, String ip, String commandType) {
+        Button btn = new Button(label);
+        btn.setStyle("-fx-background-color: " + color + "; -fx-text-fill: white; -fx-font-size: 11px;");
+        btn.setOnAction(e -> sendCommandToIp(ip, commandType));
+        return btn;
+    }
+
+    private void sendCommandToIp(String ip, String commandType) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("ipAddress", ip);
+        payload.put("type", commandType);
+        apiClient.postJson("/commands/to-ip", payload)
+                .thenAccept(resp -> log.info("Command {} queued for {}", commandType, ip))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            ip + " 명령 전송 실패: " + errorMessage(ex)).show());
+                    return null;
+                });
+    }
+
+    /** startIp ~ endIp 범위의 IP 목록을 반환. 최대 255개 제한. */
+    private List<String> enumerateIps(String startIp, String endIp) {
+        List<String> ips = new ArrayList<>();
+        if (startIp == null || endIp == null || startIp.isBlank() || endIp.isBlank()) return ips;
+        try {
+            long start = ipToLong(startIp.trim());
+            long end   = ipToLong(endIp.trim());
+            long limit = Math.min(end, start + 254); // 최대 255개
+            for (long i = start; i <= limit; i++) {
+                ips.add(longToIp(i));
+            }
+        } catch (Exception e) {
+            log.warn("IP 열거 실패 {} ~ {}", startIp, endIp, e);
+        }
+        return ips;
+    }
+
+    private long ipToLong(String ip) {
+        String[] parts = ip.split("\\.");
+        long result = 0;
+        for (String part : parts) {
+            result = result * 256 + Long.parseLong(part.trim());
+        }
+        return result;
+    }
+
+    private String longToIp(long ip) {
+        return ((ip >> 24) & 0xFF) + "." + ((ip >> 16) & 0xFF) + "."
+                + ((ip >> 8) & 0xFF) + "." + (ip & 0xFF);
     }
 
     private void deleteIpRange(IpRangeItem item) {
@@ -567,7 +650,7 @@ public class DashboardManagementModule {
         scene.setCursor(Cursor.WAIT);
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiBaseUrl + "/reports?type=" + type))
+            .uri(URI.create(apiBaseUrl + "/reports/pdf?type=" + type))
                 .GET()
                 .build();
 

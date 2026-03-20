@@ -2,13 +2,21 @@ package com.example.backend.controller.dashboard;
 
 import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
+import com.example.backend.service.storage.FileStorageService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,10 +29,16 @@ public class DashboardWidgetApiController {
     private static final Logger log = LoggerFactory.getLogger(DashboardWidgetApiController.class);
 
     private final DashboardWidgetItemRepository repository;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public DashboardWidgetApiController(DashboardWidgetItemRepository repository) {
+    @Value("${SERVER_BASE_URL:http://localhost:8080}")
+    private String serverBaseUrl;
+
+    public DashboardWidgetApiController(DashboardWidgetItemRepository repository,
+                                        FileStorageService fileStorageService) {
         this.repository = repository;
+        this.fileStorageService = fileStorageService;
     }
 
     // ---- 레거시/신규 공통 ----
@@ -161,6 +175,69 @@ public class DashboardWidgetApiController {
         if (!repository.existsById(id)) return ResponseEntity.notFound().build();
         repository.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * POST /api/v1/dashboard/images/upload
+     * 이미지 파일을 업로드하고 IMAGE 위젯으로 등록한다.
+     */
+    @PostMapping(value = "/dashboard/images/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> uploadImageFile(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(defaultValue = "100") double x,
+            @RequestParam(defaultValue = "100") double y,
+            @RequestParam(defaultValue = "360") double width,
+            @RequestParam(defaultValue = "240") double height) {
+        try {
+            String filename = fileStorageService.store(file);
+            String imageUrl = serverBaseUrl + "/api/v1/files/" + filename;
+            Map<String, Object> req = new LinkedHashMap<>();
+            req.put("imageUrl", imageUrl);
+            req.put("x", x);
+            req.put("y", y);
+            req.put("width", width);
+            req.put("height", height);
+            req.put("visible", true);
+            DashboardWidgetItem item = new DashboardWidgetItem();
+            item.setType("IMAGE");
+            applyCommon(item, req, 100.0, 100.0, 360.0, 240.0, true);
+            item.setConfig(writeConfig(req));
+            DashboardWidgetItem saved = repository.save(item);
+            return ResponseEntity.status(201).body(toImageMap(saved));
+        } catch (Exception e) {
+            log.error("Image upload failed", e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * GET /api/v1/files/{filename}
+     * 업로드된 파일을 서빙한다.
+     */
+    @GetMapping("/files/{filename}")
+    public ResponseEntity<Resource> serveFile(@PathVariable String filename,
+                                              HttpServletRequest request) {
+        // Path traversal 방지: filename에 경로 구분자 불허
+        if (filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            Resource resource = fileStorageService.loadAsResource(filename);
+            String contentType;
+            try {
+                contentType = request.getServletContext().getMimeType(resource.getFile().getAbsolutePath());
+            } catch (IOException e) {
+                contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+            }
+            if (contentType == null) contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .body(resource);
+        } catch (Exception e) {
+            log.warn("File not found: {}", filename);
+            return ResponseEntity.notFound().build();
+        }
     }
 
     // ---- helper ----

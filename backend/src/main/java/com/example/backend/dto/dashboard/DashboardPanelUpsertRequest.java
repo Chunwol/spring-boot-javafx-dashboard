@@ -2,15 +2,11 @@ package com.example.backend.dto.dashboard;
 
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public class DashboardPanelUpsertRequest {
 
-    @NotBlank(message = "panelType은 필수입니다.")
-    @Pattern(regexp = "^(CLASSROOM_HEARTBEAT|NETWORK_TRAFFIC|TEXT|IMAGE|COMMAND_STATUS)$",
-            message = "panelType 값이 올바르지 않습니다.")
+    // panelType은 Create 시에만 필수 — Service의 applyPanelRequest(createMode=true)에서 검증
     private String panelType;
     private Long refGroupId;
 

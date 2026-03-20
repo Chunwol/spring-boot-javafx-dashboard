@@ -18,11 +18,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 명령 진행 현황 패널.
- * GET /api/v1/commands?status=QUEUED,DELIVERED,ACKED 로 진행 중인 명령을 폴링하여 표시한다.
+ * GET /api/v1/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=100 로 최근 명령을 폴링하고,
+ * 진행 중(QUEUED/DELIVERED/ACKED)인 타입만 표시하여 실제 완료율을 계산한다.
  */
 public class CommandStatusPanelController {
-
-    private static final String[] ACTIVE_STATUSES = {"QUEUED", "DELIVERED", "ACKED"};
 
     private final ApiClient apiClient = ApiClient.getInstance();
 
@@ -50,7 +49,7 @@ public class CommandStatusPanelController {
 
         // ─── 헤더 ──────────────────────────────────────────────
         Label title = new Label("⚙ 명령 진행 현황");
-        title.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         title.setTextFill(Color.WHITE);
 
         Button refreshBtn = new Button("↺");
@@ -63,7 +62,7 @@ public class CommandStatusPanelController {
         header.setAlignment(Pos.CENTER_LEFT);
 
         summaryLabel = new Label("조회 중...");
-        summaryLabel.setFont(Font.font("Arial", 11));
+        summaryLabel.setFont(Font.font("Segoe UI", 11));
         summaryLabel.setTextFill(Color.web("#aaaaaa"));
 
         // ─── 명령 목록 ─────────────────────────────────────────
@@ -92,9 +91,11 @@ public class CommandStatusPanelController {
         return panel;
     }
 
-    /** 서버에서 진행 중인 명령 목록을 가져와 UI를 갱신한다. */
+    /** 서버에서 최근 명령 목록을 가져와 UI를 갱신한다. */
     public void refresh() {
-        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED", new TypeReference<List<Map<String, Object>>>() {})
+        // 모든 상태를 조회해야 완료/실패 카운트가 가능
+        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=100",
+                new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(commands -> Platform.runLater(() -> updateUI(commands)))
                 .exceptionally(ex -> {
                     Platform.runLater(() -> summaryLabel.setText("서버 연결 오류"));
@@ -105,16 +106,6 @@ public class CommandStatusPanelController {
     private void updateUI(List<Map<String, Object>> commands) {
         commandListBox.getChildren().clear();
 
-        if (commands.isEmpty()) {
-            Label empty = new Label("진행 중인 명령 없음");
-            empty.setTextFill(Color.web("#888"));
-            commandListBox.getChildren().add(empty);
-            summaryLabel.setText("대기 중인 명령 없음");
-            return;
-        }
-
-        summaryLabel.setText("진행 중: " + commands.size() + "건");
-
         // 명령 유형별 그룹화
         Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
         for (Map<String, Object> cmd : commands) {
@@ -122,9 +113,28 @@ public class CommandStatusPanelController {
             grouped.computeIfAbsent(type, k -> new ArrayList<>()).add(cmd);
         }
 
+        // 진행 중(QUEUED/DELIVERED/ACKED)이 있는 타입만 표시
+        List<String> activeTypes = new ArrayList<>();
         for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
-            String type = entry.getKey();
-            List<Map<String, Object>> group = entry.getValue();
+            boolean hasActive = entry.getValue().stream().anyMatch(c -> {
+                String s = String.valueOf(c.getOrDefault("status", ""));
+                return "QUEUED".equals(s) || "DELIVERED".equals(s) || "ACKED".equals(s);
+            });
+            if (hasActive) activeTypes.add(entry.getKey());
+        }
+
+        if (activeTypes.isEmpty()) {
+            Label empty = new Label("진행 중인 명령 없음");
+            empty.setTextFill(Color.web("#888"));
+            commandListBox.getChildren().add(empty);
+            summaryLabel.setText("대기 중인 명령 없음");
+            return;
+        }
+
+        summaryLabel.setText("진행 중 유형: " + activeTypes.size() + "건");
+
+        for (String type : activeTypes) {
+            List<Map<String, Object>> group = grouped.get(type);
 
             long done = group.stream()
                     .filter(c -> "COMPLETED".equals(c.get("status")))
@@ -133,16 +143,15 @@ public class CommandStatusPanelController {
                     .filter(c -> "FAILED".equals(c.get("status")))
                     .count();
             long total = group.size();
+            long inProgress = total - done - failed;
 
             VBox cmdBox = new VBox(4);
             cmdBox.setStyle("-fx-background-color: #2a3a4a; -fx-background-radius: 4; -fx-padding: 8;");
 
             Label cmdLabel = new Label(type + "  → " + total + "개 대상");
-            cmdLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+            cmdLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
             cmdLabel.setTextFill(Color.WHITE);
 
-            // 진행률 바
-            long inProgress = total - done - failed;
             ProgressBar bar = new ProgressBar(total > 0 ? (double) done / total : 0);
             bar.setMaxWidth(Double.MAX_VALUE);
             bar.setStyle(failed > 0
@@ -151,7 +160,7 @@ public class CommandStatusPanelController {
 
             Label statLabel = new Label(String.format(
                     "완료: %d  실패: %d  대기: %d", done, failed, inProgress));
-            statLabel.setFont(Font.font("Arial", 11));
+            statLabel.setFont(Font.font("Segoe UI", 11));
             statLabel.setTextFill(Color.web("#aaaaaa"));
 
             cmdBox.getChildren().addAll(cmdLabel, bar, statLabel);

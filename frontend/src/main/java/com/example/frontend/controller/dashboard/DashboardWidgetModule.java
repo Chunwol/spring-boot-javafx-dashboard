@@ -11,7 +11,6 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.Pane;
@@ -48,6 +47,10 @@ public class DashboardWidgetModule {
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private static final double GRID_SIZE = 20.0;
 
+    // 삭제 버튼 추적 (editMode 연동)
+    private final Map<Long, Button> textDeleteBtns = new java.util.HashMap<>();
+    private final Map<Long, Button> imageDeleteBtns = new java.util.HashMap<>();
+
     private List<Map<String, Object>> cachedTexts = new ArrayList<>();
     private List<Map<String, Object>> cachedImages = new ArrayList<>();
 
@@ -74,6 +77,18 @@ public class DashboardWidgetModule {
 
     public List<Map<String, Object>> getCachedTexts() { return cachedTexts; }
     public List<Map<String, Object>> getCachedImages() { return cachedImages; }
+
+    /** editMode 연동: 삭제 버튼 visibility 토글 */
+    public void applyEditMode(boolean editMode) {
+        textDeleteBtns.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
+        imageDeleteBtns.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
+    }
 
     public void applySnapshot(List<Map<String, Object>> texts, List<Map<String, Object>> images) {
         cachedTexts = texts == null ? List.of() : texts;
@@ -170,6 +185,7 @@ public class DashboardWidgetModule {
         textItemMap.keySet().removeIf(id -> {
             if (!visibleIds.contains(id)) {
                 classroomContainer.getChildren().remove(textItemMap.get(id));
+                textDeleteBtns.remove(id);
                 return true;
             }
             return false;
@@ -202,7 +218,10 @@ public class DashboardWidgetModule {
                 box = new VBox();
                 Button deleteBtn = new Button("삭제");
                 deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                deleteBtn.setVisible(editModeSupplier.getAsBoolean());
+                deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteTextItem(id));
+                textDeleteBtns.put(id, deleteBtn);
                 VBox header = new VBox(deleteBtn);
                 TextArea textArea = new TextArea(text);
                 textArea.setWrapText(true);
@@ -286,61 +305,25 @@ public class DashboardWidgetModule {
     // ─────────── 이미지 아이템 ───────────
 
     public void handleAddImageItem() {
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("이미지 위젯 추가");
-        dialog.setHeaderText("이미지 URL을 입력하세요");
-        TextField input = new TextField("https://via.placeholder.com/640x360.png?text=Dashboard");
-        dialog.getDialogPane().setContent(input);
-        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-
-        ValidationSupport validationSupport = new ValidationSupport();
-        validationSupport.registerValidator(
-                input,
-                Validator.createPredicateValidator(
-                        (TextField textField) -> {
-                            if (textField == null || textField.getText() == null) {
-                                return false;
-                            }
-                            String value = textField.getText().trim();
-                            return value.startsWith("http://") || value.startsWith("https://");
-                        },
-                        "http:// 또는 https:// 형식의 URL을 입력하세요."
-                )
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("이미지 파일 선택");
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("이미지 파일", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp"),
+                new FileChooser.ExtensionFilter("모든 파일", "*.*")
         );
-        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
-        if (okButton != null) {
-            okButton.disableProperty().bind(Bindings.createBooleanBinding(
-                    validationSupport::isInvalid,
-                    validationSupport.invalidProperty()
-            ));
-        }
-
-        ButtonType result = dialog.showAndWait().orElse(ButtonType.CANCEL);
-        if (result != ButtonType.OK) {
-            return;
-        }
-        String imageUrl = input.getText() == null ? "" : input.getText().trim();
-        if (imageUrl.isBlank()) {
-            new Alert(Alert.AlertType.WARNING, "이미지 URL을 입력하세요.").showAndWait();
-            return;
-        }
-
-        Map<String, Object> payload = Map.of(
-                "imageUrl", imageUrl,
-                "x", 100,
-                "y", 100,
-                "width", 360,
-                "height", 240,
-                "visible", true
+        File file = fileChooser.showOpenDialog(
+                classroomContainer.getScene() != null ? classroomContainer.getScene().getWindow() : null
         );
-        apiClient.postJson("/dashboard/images", payload)
+        if (file == null) return;
+
+        apiClient.uploadImageFile("/dashboard/images/upload", file)
                 .thenAccept(resp -> Platform.runLater(() -> {
                     loadImageItems();
-                    new Alert(Alert.AlertType.INFORMATION, "이미지 패널이 추가되었습니다.").showAndWait();
+                    new Alert(Alert.AlertType.INFORMATION, "이미지 파일이 대시보드에 추가되었습니다.").showAndWait();
                 }))
                 .exceptionally(ex -> {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "네트워크 오류 또는 서버 응답 실패: " + cause.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이미지 업로드 실패: " + cause.getMessage()).showAndWait());
                     return null;
                 });
     }
@@ -369,6 +352,7 @@ public class DashboardWidgetModule {
         imageItemMap.keySet().removeIf(id -> {
             if (!visibleIds.contains(id)) {
                 classroomContainer.getChildren().remove(imageItemMap.get(id));
+                imageDeleteBtns.remove(id);
                 return true;
             }
             return false;
@@ -404,7 +388,10 @@ public class DashboardWidgetModule {
                 newBox.setStyle("-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;");
                 Button deleteBtn = new Button("삭제");
                 deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                deleteBtn.setVisible(editModeSupplier.getAsBoolean());
+                deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteImageItem(id));
+                imageDeleteBtns.put(id, deleteBtn);
                 ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true));
                 imageView.setFitWidth(widthFinal);
                 imageView.setFitHeight(heightFinal);

@@ -52,6 +52,7 @@ public class DashboardClassroomModule {
     private final Runnable refreshPanelCallback;
     private final BooleanSupplier snapModeSupplier;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
+    private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
     private static final double GRID_SIZE = 20.0;
 
     public DashboardClassroomModule(
@@ -105,6 +106,7 @@ public class DashboardClassroomModule {
                 if (panel != null) {
                     classroomContainer.getChildren().remove(panel);
                 }
+                classroomDeleteBtns.remove(panelId);
                 panelManager.removePanel(panelId);
             }
         }
@@ -225,6 +227,14 @@ public class DashboardClassroomModule {
         // legacy no-op: classroom panel layout is now persisted via dashboard panels
     }
 
+    /** editMode 연동: 삭제 버튼 visibility 토글 */
+    public void applyEditMode(boolean editMode) {
+        classroomDeleteBtns.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
+    }
+
     public void handleAddNetworkPanel(ClassroomSummaryDto selected) {
         NetworkPanelController controller = new NetworkPanelController(selected);
         VBox networkPanel = controller.getPanel();
@@ -251,15 +261,19 @@ public class DashboardClassroomModule {
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         Button deleteBtn = new Button("삭제");
         deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setVisible(editModeSupplier.getAsBoolean());
+        deleteBtn.setManaged(editModeSupplier.getAsBoolean());
         deleteBtn.setOnAction(e -> {
             e.consume();
             Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "이 강의실 패널을 대시보드에서 제거하시겠습니까?", ButtonType.YES, ButtonType.NO);
             confirm.showAndWait().ifPresent(type -> {
                 if (type == ButtonType.YES) {
+                    classroomDeleteBtns.remove(panelDto.getId());
                     deleteClassroomPanel(panelDto.getId());
                 }
             });
         });
+        classroomDeleteBtns.put(panelDto.getId(), deleteBtn);
         HBox header = new HBox(8, nameLabel, headerSpacer, deleteBtn);
         header.setAlignment(Pos.CENTER_LEFT);
 
