@@ -2,6 +2,7 @@ package com.example.backend.dto.heartbeat;
 
 import com.example.backend.model.pc.ClientPosition;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 import java.util.List;
 
@@ -10,9 +11,21 @@ public class HeartbeatDto {
     private String macAddress;
     private String hostname;
     private String ipAddress;
-    // 에이전트는 마지막 하트비트 이후의 트래픽 '증가량'을 보낸다고 가정합니다.
-    private double inboundMbps;
-    private double outboundMbps;
+
+    /**
+     * 하위 호환용 트래픽 필드.
+     * - 신규/에이전트: inboundKbps/outboundKbps
+     * - 구버전/일부 클라이언트: inboundMbps/outboundMbps
+     */
+    @JsonAlias({"inboundKbps"})
+    private Double inboundKbps;
+
+    @JsonAlias({"outboundKbps"})
+    private Double outboundKbps;
+
+    private Double inboundMbps;
+    private Double outboundMbps;
+
     private List<ClientPosition> positions;
     private List<NetworkTrafficDto> traffic;
 }

@@ -3,6 +3,7 @@ package com.example.backend.controller.status;
 import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.pc.PcMasterRepository;
+import com.example.backend.service.status.PerformanceStatusService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -29,10 +30,13 @@ import java.util.stream.Collectors;
 public class StatusController {
 
     private final PcMasterRepository pcMasterRepository;
+    private final PerformanceStatusService performanceStatusService;
 
     @Autowired
-    public StatusController(PcMasterRepository pcMasterRepository) {
+    public StatusController(PcMasterRepository pcMasterRepository,
+                            PerformanceStatusService performanceStatusService) {
         this.pcMasterRepository = pcMasterRepository;
+        this.performanceStatusService = performanceStatusService;
     }
 
     /**
@@ -67,6 +71,20 @@ public class StatusController {
         return pcMasterRepository.findById(mac)
                 .map(p -> ResponseEntity.ok(toDto(p)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * 실시간 성능/부하 스냅샷 조회.
+     * 830대 규모 운영에서 큐 적체, stale 명령, 캐시 hit-rate 등을 즉시 확인한다.
+     */
+    @GetMapping("/performance")
+    @Operation(
+        summary = "실시간 성능 스냅샷",
+        description = "PC 온라인 비율, 명령 큐 적체, stale 명령, 토큰 상태, 캐시 hit-rate를 반환합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "성능 스냅샷 조회 성공")
+    public ResponseEntity<java.util.Map<String, Object>> performance() {
+        return ResponseEntity.ok(performanceStatusService.snapshot());
     }
 
     private PcStatusDto toDto(PcMaster p) {

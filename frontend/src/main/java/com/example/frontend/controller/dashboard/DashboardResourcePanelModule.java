@@ -263,7 +263,7 @@ public class DashboardResourcePanelModule {
     }
 
     private Button createAddImageButton() {
-        Button button = iconButton("Add image", "mdi2i-image-plus-outline", "#334155");
+        Button button = iconButton("Add image", "mdi2i-image-plus", "#334155");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleAddImageItem());
         return button;
@@ -341,10 +341,15 @@ public class DashboardResourcePanelModule {
 
     private Button iconButton(String text, String iconLiteral, String bgColor) {
         Button button = actionButton(text, bgColor);
-        FontIcon icon = new FontIcon(iconLiteral);
-        icon.setIconSize(14);
-        icon.setIconColor(Color.WHITE);
-        button.setGraphic(icon);
+        try {
+            FontIcon icon = new FontIcon(iconLiteral);
+            icon.setIconSize(14);
+            icon.setIconColor(Color.WHITE);
+            button.setGraphic(icon);
+        } catch (IllegalArgumentException ex) {
+            // 아이콘 리터럴이 잘못돼도 화면 전환이 실패하지 않도록 버튼 텍스트만 표시한다.
+            button.setGraphic(null);
+        }
         return button;
     }
 

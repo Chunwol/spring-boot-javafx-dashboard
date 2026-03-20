@@ -26,6 +26,9 @@ public class DefaultUserInitializer implements ApplicationRunner {
     @Value("${DEFAULT_ADMIN_EMAIL:admin@example.com}")
     private String defaultAdminEmail;
 
+    @Value("${DEFAULT_ADMIN_SYNC_ON_STARTUP:true}")
+    private boolean defaultAdminSyncOnStartup;
+
     public DefaultUserInitializer(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -33,8 +36,34 @@ public class DefaultUserInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (!defaultAdminSyncOnStartup) {
+            logger.info("DEFAULT_ADMIN_SYNC_ON_STARTUP is false. Skipping admin sync.");
+            return;
+        }
+
         userRepository.findByUsername(defaultAdminUsername).ifPresentOrElse(user -> {
-            logger.info("Default admin user already exists: {}", defaultAdminUsername);
+            boolean changed = false;
+
+            // ENV 비밀번호와 DB 해시를 매칭하고, 불일치하면 ENV 값으로 재암호화 갱신
+            boolean passwordMatches = passwordEncoder.matches(defaultAdminPassword, user.getPassword());
+            if (!passwordMatches) {
+                user.setPassword(passwordEncoder.encode(defaultAdminPassword));
+                changed = true;
+                logger.warn("Default admin password mismatch. Updated from ENV for user={}", defaultAdminUsername);
+            }
+
+            if (defaultAdminEmail != null && !defaultAdminEmail.isBlank()
+                    && !defaultAdminEmail.equals(user.getEmail())) {
+                user.setEmail(defaultAdminEmail);
+                changed = true;
+                logger.info("Default admin email updated from ENV for user={}", defaultAdminUsername);
+            }
+
+            if (changed) {
+                userRepository.save(user);
+            } else {
+                logger.info("Default admin user is already in sync with ENV: {}", defaultAdminUsername);
+            }
         }, () -> {
             String encodedPassword = passwordEncoder.encode(defaultAdminPassword);
             User admin = new User(defaultAdminUsername, encodedPassword, defaultAdminEmail);

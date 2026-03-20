@@ -14,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
-import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -71,7 +70,11 @@ public class AgentRegistrationService {
         if (requestInstallKey == null || requestInstallKey.isBlank()) {
             throw new IllegalArgumentException("설치키가 누락되었습니다.");
         }
-        if (!Objects.equals(installKey, requestInstallKey)) {
+        // 타이밍 어택 방지: MessageDigest.isEqual로 상수 시간 비교
+        boolean match = MessageDigest.isEqual(
+                requestInstallKey.getBytes(StandardCharsets.UTF_8),
+                installKey.getBytes(StandardCharsets.UTF_8));
+        if (!match) {
             throw new IllegalArgumentException("설치키가 유효하지 않습니다.");
         }
     }

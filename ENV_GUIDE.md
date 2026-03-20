@@ -43,6 +43,18 @@ JWT_EXPIRATION=86400000
 - **JWT_SECRET**: JWT 서명 키 (프로덕션에서는 길고 복잡한 문자열 사용)
 - **JWT_EXPIRATION**: 토큰 만료 시간 (밀리초 단위, 86400000 = 24시간)
 
+### 관리자 계정 초기화/동기화 설정
+```
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=change-this-admin-password
+DEFAULT_ADMIN_EMAIL=admin@example.com
+DEFAULT_ADMIN_SYNC_ON_STARTUP=true
+```
+- 애플리케이션 시작 시 `DEFAULT_ADMIN_USERNAME` 사용자를 조회합니다.
+- 사용자가 없으면 `DEFAULT_ADMIN_PASSWORD`를 **BCrypt 해시로 암호화** 후 생성합니다.
+- 사용자가 있으면 ENV 비밀번호와 DB 해시를 매칭하고, **불일치 시 ENV 비밀번호로 재암호화 갱신**합니다.
+- `DEFAULT_ADMIN_SYNC_ON_STARTUP=false`로 설정하면 동기화를 건너뜁니다.
+
 ### 이메일 설정
 ```
 MAIL_HOST=smtp.gmail.com

@@ -32,8 +32,8 @@ public class DashboardService {
             .thenAccept(body -> {
                     try {
                 var node = apiClient.getObjectMapper().readTree(body);
-                        double inTraffic = node.get("inboundMbps").asDouble();
-                        double outTraffic = node.get("outboundMbps").asDouble();
+                        double inTraffic = node.path("inboundMbps").asDouble(0.0);
+                        double outTraffic = node.path("outboundMbps").asDouble(0.0);
                         callback.accept(inTraffic, outTraffic);
                     } catch (Exception e) {
                         log.warn("Failed to parse network traffic response", e);

@@ -84,5 +84,18 @@ public class CommandRequestDto {
     public void setScriptUrl(String scriptUrl) {
         this.scriptUrl = scriptUrl;
     }
+
+    /** WOL 릴레이 대상 서브넷 브로드캐스트 IP (예: 192.168.10.255). null이면 255.255.255.255 사용 */
+    @Pattern(regexp = "^$|^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$",
+             message = "broadcastIp 형식이 올바르지 않습니다.")
+    private String broadcastIp;
+
+    public String getBroadcastIp() {
+        return broadcastIp;
+    }
+
+    public void setBroadcastIp(String broadcastIp) {
+        this.broadcastIp = broadcastIp;
+    }
 }
 

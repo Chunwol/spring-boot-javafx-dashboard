@@ -12,6 +12,7 @@ import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
+import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.backend.repository.pc.PcMasterRepository;
@@ -40,6 +41,7 @@ public class DashboardService {
     private final ClassroomIpRangeRepository ipRangeRepository;
     private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
     private final DashboardWidgetItemRepository dashboardWidgetItemRepository;
+    private final ClassroomResolutionService classroomResolutionService;
     private final ObjectMapper objectMapper;
 
     public DashboardService(ClassroomGroupRepository classroomGroupRepository,
@@ -47,12 +49,14 @@ public class DashboardService {
                            ClassroomIpRangeRepository ipRangeRepository,
                            ClassroomTeacherDeviceRepository teacherDeviceRepository,
                            DashboardWidgetItemRepository dashboardWidgetItemRepository,
+                           ClassroomResolutionService classroomResolutionService,
                            ObjectMapper objectMapper) {
         this.classroomGroupRepository = classroomGroupRepository;
         this.pcMasterRepository = pcMasterRepository;
         this.ipRangeRepository = ipRangeRepository;
         this.teacherDeviceRepository = teacherDeviceRepository;
         this.dashboardWidgetItemRepository = dashboardWidgetItemRepository;
+        this.classroomResolutionService = classroomResolutionService;
         this.objectMapper = objectMapper;
     }
 
@@ -204,11 +208,14 @@ public class DashboardService {
     }
 
     public ClassroomIpRange saveClassroomIpRange(ClassroomIpRange range) {
-        return ipRangeRepository.save(range);
+        ClassroomIpRange saved = ipRangeRepository.save(range);
+        classroomResolutionService.evictIpRangeCache();
+        return saved;
     }
 
     public void deleteClassroomIpRange(Long id) {
         ipRangeRepository.deleteById(id);
+        classroomResolutionService.evictIpRangeCache();
     }
 
     public List<ClassroomTeacherDevice> getTeacherDevices(Long groupId) {

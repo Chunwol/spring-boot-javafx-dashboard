@@ -111,7 +111,11 @@ public class CommandExecutor {
 
     private CommandResult executeShell(String command) throws IOException, InterruptedException {
         Process proc = Runtime.getRuntime().exec(new String[]{"cmd.exe", "/c", command});
-        proc.waitFor(30, TimeUnit.SECONDS);
+        boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
+        if (!finished) {
+            proc.destroyForcibly();
+            return new CommandResult(124, "", "명령 실행 타임아웃 (30초)");
+        }
         String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
         String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
         return new CommandResult(proc.exitValue(), stdout, stderr);
@@ -167,7 +171,13 @@ public class CommandExecutor {
                 args
         ).redirectErrorStream(false).start();
 
-        proc.waitFor(5, TimeUnit.MINUTES);
+        boolean finished = proc.waitFor(5, TimeUnit.MINUTES);
+        if (!finished) {
+            proc.destroyForcibly();
+            Files.deleteIfExists(tmpFile);
+            Files.deleteIfExists(tmpDir);
+            return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
+        }
         String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
         String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
         int exit = proc.exitValue();

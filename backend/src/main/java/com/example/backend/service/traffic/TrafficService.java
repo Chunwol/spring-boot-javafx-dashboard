@@ -1,35 +1,33 @@
 package com.example.backend.service.traffic;
 
-import com.example.backend.event.AlertEvent;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+/**
+ * 트래픽 로그 저장 및 이상 감지 서비스.
+ * 임계값은 application.yml의 app.traffic.alert-threshold-mbps 설정을 따른다.
+ * 트래픽 알림은 SchedulerService.scanForTrafficAnomalies()에서 일괄 처리하므로
+ * 여기서는 AlertEvent를 발행하지 않는다 (중복 알림 방지).
+ */
 @Service
 public class TrafficService {
 
     private final PcMasterRepository pcMasterRepository;
     private final TrafficLogRepository trafficLogRepository;
-    private final ApplicationEventPublisher eventPublisher;
-
-    // threshold in KBps (convert from Mbps); default detection: 500 Mbps -> 500 * 1024 KBps ~ 512000 KBps
-    private final long thresholdKb = 500L * 1024L;
 
     @Autowired
     public TrafficService(PcMasterRepository pcMasterRepository,
-                          TrafficLogRepository trafficLogRepository,
-                          ApplicationEventPublisher eventPublisher) {
+                          TrafficLogRepository trafficLogRepository) {
         this.pcMasterRepository = pcMasterRepository;
         this.trafficLogRepository = trafficLogRepository;
-        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -53,14 +51,9 @@ public class TrafficService {
             Long outKb = traffic.getOrDefault("out", 0L);
             log.setInboundKbps(inKb);
             log.setOutboundKbps(outKb);
-
-            // check threshold using inbound Kb
-            if (inKb != null && inKb > thresholdKb) {
-                String msg = String.format("High inbound traffic detected: %d KB/s > %d KB/s", inKb, thresholdKb);
-                eventPublisher.publishEvent(new AlertEvent(this, mac, msg));
-            }
         }
         log.setTimestamp(LocalDateTime.now());
         trafficLogRepository.save(log);
+        // 트래픽 임계치 알림은 SchedulerService가 주기적으로 처리 (중복 알림 방지)
     }
 }

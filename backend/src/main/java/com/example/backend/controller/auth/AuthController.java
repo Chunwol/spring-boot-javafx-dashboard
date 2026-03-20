@@ -55,12 +55,10 @@ public class AuthController {
     )
     @ApiResponse(responseCode = "400", description = "잘못된 자격증명 (사용자명 또는 비밀번호 오류)")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
-        // Legacy plaintext fallback is kept temporarily for backward compatibility with old seeded users.
         var userOpt = userRepository.findByUsername(loginRequest.getUsername());
         if (userOpt.isPresent()) {
             var user = userOpt.get();
-            boolean matches = passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())
-                    || loginRequest.getPassword().equals(user.getPassword());
+            boolean matches = passwordEncoder.matches(loginRequest.getPassword(), user.getPassword());
             if (matches) {
                 String token = jwtUtil.generateToken(user.getUsername());
                 return ResponseEntity.ok(new LoginResponse(user.getUsername(), token));

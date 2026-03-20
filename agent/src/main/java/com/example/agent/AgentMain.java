@@ -125,12 +125,23 @@ public class AgentMain {
             try {
                 // 토큰이 초기화(재등록 필요) 되었는지 확인
                 if (config.getAgentToken() == null || config.getAgentToken().isBlank()) {
-                    log.info("토큰 초기화됨 → 재등록 시도...");
-                    heartbeat.register();
+                    log.info("토큰 초기화됨 → 재등록 시도 (최대 3회)...");
+                    boolean reRegistered = false;
+                    for (int i = 1; i <= 3; i++) {
+                        if (heartbeat.register()) {
+                            reRegistered = true;
+                            log.info("재등록 성공.");
+                            break;
+                        }
+                        log.warn("재등록 실패 {}/3", i);
+                        if (i < 3) Thread.sleep(10_000);
+                    }
+                    if (!reRegistered) {
+                        log.error("재등록 3회 모두 실패. 다음 하트비트까지 대기.");
+                        return; // 토큰 없이 하트비트 전송 시도하지 않음
+                    }
                 }
-                if (!config.getAgentToken().isBlank()) {
-                    heartbeat.send();
-                }
+                heartbeat.send();
             } catch (Exception e) {
                 log.error("하트비트 오류: {}", e.getMessage());
             } finally {
