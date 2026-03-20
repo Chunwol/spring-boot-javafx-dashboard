@@ -52,6 +52,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 netsh advfirewall firewall delete rule name="PCAgent Outbound" >nul 2>&1
 echo [OK] 방화벽 규칙 제거 완료
 
+:: ── 전원 정책 원복(보수적 기본값) ──────────────────────────────
+echo [INFO] 전원 정책 원복 중...
+powercfg -change -standby-timeout-ac 30 >nul 2>&1
+powercfg -change -standby-timeout-dc 15 >nul 2>&1
+powercfg -change -hibernate-timeout-ac 180 >nul 2>&1
+powercfg -change -hibernate-timeout-dc 60 >nul 2>&1
+powercfg -hibernate on >nul 2>&1
+powercfg -setacvalueindex scheme_current sub_buttons pbuttonaction 1 >nul 2>&1
+powercfg -setdcvalueindex scheme_current sub_buttons pbuttonaction 1 >nul 2>&1
+powercfg -setacvalueindex scheme_current sub_buttons sbuttonaction 2 >nul 2>&1
+powercfg -setdcvalueindex scheme_current sub_buttons sbuttonaction 2 >nul 2>&1
+powercfg -setactive scheme_current >nul 2>&1
+echo [OK] 전원 정책 원복 완료
+
 :: ── 설치 폴더 제거 ────────────────────────────────────────────
 timeout /T 2 /NOBREAK >nul
 if exist "%INSTALL_DIR%" (

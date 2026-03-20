@@ -122,14 +122,10 @@ public class DashboardManagementModule {
                 content.putString(key);
                 Clipboard.getSystemClipboard().setContent(content);
                 copyKeyBtn.setText("복사됨!");
-                new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2))
-                        .play();
-                copyKeyBtn.setOnAction(ev -> {
-                    ClipboardContent c2 = new ClipboardContent();
-                    c2.putString(installKeyLabel.getText());
-                    Clipboard.getSystemClipboard().setContent(c2);
-                });
-                copyKeyBtn.setText("복사됨!");
+                javafx.animation.PauseTransition reset =
+                        new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
+                reset.setOnFinished(done -> copyKeyBtn.setText("복사"));
+                reset.play();
             }
         });
         Button refreshKeyBtn = new Button("↺");

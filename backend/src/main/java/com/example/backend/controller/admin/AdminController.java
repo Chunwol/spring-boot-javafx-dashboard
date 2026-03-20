@@ -106,7 +106,11 @@ public class AdminController {
         List<AgentAuthToken> tokens = agentAuthTokenRepository.findAll();
         Map<String, AgentAuthToken> tokenByMac = new LinkedHashMap<>();
         for (AgentAuthToken token : tokens) {
-            if (token.getMacAddress() != null && !tokenByMac.containsKey(token.getMacAddress())) {
+            if (token.getMacAddress() == null) {
+                continue;
+            }
+            AgentAuthToken existing = tokenByMac.get(token.getMacAddress());
+            if (existing == null || isPreferredToken(token, existing)) {
                 tokenByMac.put(token.getMacAddress(), token);
             }
         }
@@ -127,6 +131,33 @@ public class AdminController {
             result.add(row);
         }
         return ResponseEntity.ok(result);
+    }
+
+    private boolean isPreferredToken(AgentAuthToken candidate, AgentAuthToken existing) {
+        if (candidate == null) {
+            return false;
+        }
+        if (existing == null) {
+            return true;
+        }
+
+        if (candidate.getLastUsedAt() != null && existing.getLastUsedAt() != null) {
+            if (candidate.getLastUsedAt().isAfter(existing.getLastUsedAt())) {
+                return true;
+            }
+            if (candidate.getLastUsedAt().isBefore(existing.getLastUsedAt())) {
+                return false;
+            }
+        } else if (candidate.getLastUsedAt() != null) {
+            return true;
+        } else if (existing.getLastUsedAt() != null) {
+            return false;
+        }
+
+        if (candidate.getIssuedAt() != null && existing.getIssuedAt() != null) {
+            return candidate.getIssuedAt().isAfter(existing.getIssuedAt());
+        }
+        return candidate.getIssuedAt() != null && existing.getIssuedAt() == null;
     }
 
     @DeleteMapping("/agents/{mac}")
