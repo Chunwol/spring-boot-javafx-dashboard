@@ -261,10 +261,12 @@ public class DashboardClassroomModule {
         panel.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : 280.0);
 
         Label nameLabel = new Label(summary.getGroupName());
-        nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 56));
+        nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 22));
         nameLabel.setTextFill(Color.web("#e5e7eb"));
+        nameLabel.setMaxWidth(Double.MAX_VALUE);
         StackPane titleBanner = new StackPane(nameLabel);
-        titleBanner.setPadding(new Insets(20, 8, 20, 8));
+        titleBanner.setPadding(new Insets(10, 8, 10, 8));
+        VBox.setVgrow(titleBanner, Priority.NEVER);
         titleBanner.setStyle("-fx-background-color: #4d8a3a; -fx-background-radius: 8;");
 
         Region headerSpacer = new Region();
@@ -294,31 +296,31 @@ public class DashboardClassroomModule {
             showGridSettingsDialog(panel, summary.getGroupId(), summary.getTotalPcs(), pg);
         });
         gridSettingsBtns.put(panelDto.getId(), gridSettingsBtn);
-        HBox header = new HBox(8, nameLabel, headerSpacer, gridSettingsBtn, deleteBtn);
-        header.setAlignment(Pos.CENTER_LEFT);
+        HBox header = new HBox(4, headerSpacer, gridSettingsBtn, deleteBtn);
+        header.setAlignment(Pos.CENTER_RIGHT);
 
         Label totalLabel = new Label(summary.getTotalPcs() + " 대");
-        totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         totalLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane totalBox = new StackPane(totalLabel);
-        totalBox.setPadding(new Insets(16));
+        totalBox.setPadding(new Insets(8));
         totalBox.setStyle("-fx-background-color: #979ca3; -fx-background-radius: 4;");
         HBox.setHgrow(totalBox, Priority.ALWAYS);
 
         Label onlineLabel = new Label(summary.getOnlinePcs() + " 대");
-        onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         onlineLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane onlineBox = new StackPane(onlineLabel);
-        onlineBox.setPadding(new Insets(16));
+        onlineBox.setPadding(new Insets(8));
         onlineBox.setStyle("-fx-background-color: #6da657; -fx-background-radius: 4;");
         HBox.setHgrow(onlineBox, Priority.ALWAYS);
 
         int offlineCount = Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs());
         Label offlineLabel = new Label(offlineCount + " 대");
-        offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         offlineLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane offlineBox = new StackPane(offlineLabel);
-        offlineBox.setPadding(new Insets(16));
+        offlineBox.setPadding(new Insets(8));
         offlineBox.setStyle("-fx-background-color: #cf404a; -fx-background-radius: 4;");
         HBox.setHgrow(offlineBox, Priority.ALWAYS);
 
@@ -343,6 +345,12 @@ public class DashboardClassroomModule {
         fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
 
         panel.widthProperty().addListener((obs, ov, nv) -> {
+            double w = nv.doubleValue();
+            nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, (int) Math.max(12, Math.min(36, w * 0.09))));
+            int cntFs = (int) Math.max(10, Math.min(22, w * 0.05));
+            totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
+            onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
+            offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
             List<PcStatusDto> cached = pcCacheByGroupId.get(summary.getGroupId());
             renderPcGrid(summary.getTotalPcs(), cached, pcGrid, panel);
         });

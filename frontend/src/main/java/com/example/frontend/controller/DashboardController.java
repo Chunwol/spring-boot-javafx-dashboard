@@ -487,7 +487,7 @@ public class DashboardController {
 
     private ToggleButton createEditModeToggleButton() {
         ToggleButton editModeBtn = new ToggleButton("Edit mode");
-        editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        editModeBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         editModeBtn.setOnAction(e -> {
             dashboardViewModel.setEditMode(editModeBtn.isSelected());
             applyEditModeUiState();
@@ -498,7 +498,7 @@ public class DashboardController {
 
     private ToggleButton createLockLayoutToggleButton() {
         ToggleButton lockLayoutBtn = new ToggleButton("Lock layout");
-        lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        lockLayoutBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         lockLayoutBtn.setSelected(isLayoutLockedState());
         lockLayoutBtn.setOnAction(e -> {
             dashboardViewModel.setLayoutLocked(lockLayoutBtn.isSelected());
@@ -509,7 +509,7 @@ public class DashboardController {
 
     private ToggleButton createFocusModeToggleButton() {
         ToggleButton focusModeBtn = new ToggleButton("Focus mode");
-        focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        focusModeBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         focusModeBtn.setOnAction(e -> {
             dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             if (leftToolPane != null) {
@@ -525,7 +525,7 @@ public class DashboardController {
 
     private ToggleButton createDashboardOnlyToggleButton() {
         ToggleButton dashboardOnlyBtn = new ToggleButton("Dashboard only");
-        dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        dashboardOnlyBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
             dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
@@ -581,7 +581,7 @@ public class DashboardController {
 
     private ToggleButton createGridToggleButton() {
         ToggleButton gridToggleBtn = new ToggleButton("Grid");
-        gridToggleBtn.setStyle("-fx-background-radius: 8;");
+        gridToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px;");
         gridToggleBtn.setOnAction(e -> {
             if (canvasModule != null) {
                 canvasModule.drawGrid(gridToggleBtn.isSelected());
@@ -592,7 +592,7 @@ public class DashboardController {
 
     private ToggleButton createSnapToggleButton() {
         ToggleButton snapToggleBtn = new ToggleButton("Snap");
-        snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        snapToggleBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         snapToggleBtn.setSelected(isSnapToGridEnabled());
         snapToggleBtn.setOnAction(e -> dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected()));
         return snapToggleBtn;
@@ -600,6 +600,7 @@ public class DashboardController {
 
     private MenuButton createAlignMenu() {
         MenuButton alignMenu = new MenuButton("Align");
+        alignMenu.setStyle("-fx-font-size: 11px;");
         MenuItem alignLeft = new MenuItem("Left");
         alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
         MenuItem alignRight = new MenuItem("Right");
@@ -614,6 +615,7 @@ public class DashboardController {
 
     private MenuButton createArrangeMenu() {
         MenuButton arrangeMenu = new MenuButton("Arrange");
+        arrangeMenu.setStyle("-fx-font-size: 11px;");
         MenuItem gridArrange = new MenuItem("Grid");
         gridArrange.setOnAction(e -> arrangePanels("GRID"));
         MenuItem rowArrange = new MenuItem("Row");
@@ -626,28 +628,28 @@ public class DashboardController {
 
     private Button createZoomOutButton() {
         Button zoomOutBtn = new Button("-");
-        zoomOutBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomOutBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
         return zoomOutBtn;
     }
 
     private Button createZoomResetButton() {
         Button zoomResetBtn = new Button("100%");
-        zoomResetBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomResetBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         zoomResetBtn.setOnAction(e -> applyZoom(1.0));
         return zoomResetBtn;
     }
 
     private Button createZoomInButton() {
         Button zoomInBtn = new Button("+");
-        zoomInBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        zoomInBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
         return zoomInBtn;
     }
 
     private Button createFitAllButton() {
         Button fitAllBtn = new Button("Fit all");
-        fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-weight: bold;");
+        fitAllBtn.setStyle("-fx-background-radius: 8; -fx-font-size: 11px; -fx-font-weight: bold;");
         fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
         return fitAllBtn;
     }
@@ -1120,7 +1122,7 @@ public class DashboardController {
         Button button = new Button(text);
         button.setStyle("-fx-background-color: " + bgColor
                 + "; -fx-text-fill: " + textColor
-                + "; -fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 8 12 8 12;");
+                + "; -fx-font-size: 11px; -fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 6 10 6 10;");
         return button;
     }
 
