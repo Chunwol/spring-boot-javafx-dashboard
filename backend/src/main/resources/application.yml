@@ -57,6 +57,9 @@ app:
   alert:
     email: ${ALERT_EMAIL:}
 
+agent:
+  install-key: ${AGENT_INSTALL_KEY:INST-CHANGE-ME-BEFORE-DEPLOY}
+
 logging:
   level:
     root: ${LOG_LEVEL:INFO}

@@ -1,6 +1,10 @@
 package com.example.backend.controller.admin;
 
 import com.example.backend.dto.command.CommandRequestDto;
+import com.example.backend.model.agent.AgentAuthToken;
+import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.agent.AgentAuthTokenRepository;
+import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.agent.AgentTokenService;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.service.command.CommandService;
@@ -9,11 +13,16 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 관리자 단편 API
@@ -28,6 +37,11 @@ public class AdminController {
     private final CommandService commandService;
     private final AgentTokenService agentTokenService;
     private final AuditService auditService;
+    private final PcMasterRepository pcMasterRepository;
+    private final AgentAuthTokenRepository agentAuthTokenRepository;
+
+    @Value("${agent.install-key:INST-CHANGE-ME-BEFORE-DEPLOY}")
+    private String installKey;
 
     /**
      * 빠른 API로 PC 단일 개에 명령 단큐라는 단순한 방식.
@@ -74,6 +88,48 @@ public class AdminController {
         auditService.log("ADMIN", "REVOKE_TOKEN", "AGENT", mac);
         Map<String, Object> resp = new HashMap<>();
         resp.put("status", "revoked");
+        resp.put("mac", mac);
+        return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/install-key")
+    @Operation(summary = "에이전트 설치키 조회", description = "현재 서버에 설정된 에이전트 설치키를 반환합니다.")
+    public ResponseEntity<Map<String, Object>> getInstallKey() {
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("installKey", installKey);
+        return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/agents")
+    @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다.")
+    public ResponseEntity<List<Map<String, Object>>> listAgents() {
+        List<PcMaster> pcs = pcMasterRepository.findAll();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (PcMaster pc : pcs) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("macAddress", pc.getMacAddress());
+            row.put("pcName", pc.getPcName());
+            row.put("ipAddress", pc.getIpAddress());
+            row.put("status", pc.getStatus());
+            row.put("role", pc.getRole());
+            row.put("lastSeen", pc.getLastSeen());
+            Optional<AgentAuthToken> tok = agentAuthTokenRepository.findByMacAddress(pc.getMacAddress());
+            row.put("tokenActive", tok.map(t -> !t.isRevoked()).orElse(false));
+            row.put("tokenIssuedAt", tok.map(AgentAuthToken::getIssuedAt).orElse(null));
+            row.put("tokenLastUsedAt", tok.map(AgentAuthToken::getLastUsedAt).orElse(null));
+            result.add(row);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    @DeleteMapping("/agents/{mac}")
+    @Operation(summary = "에이전트 강제 삭제", description = "PC 레코드와 토큰을 모두 삭제합니다.")
+    public ResponseEntity<Map<String, Object>> deleteAgent(@PathVariable String mac) {
+        agentAuthTokenRepository.findByMacAddress(mac).ifPresent(agentAuthTokenRepository::delete);
+        pcMasterRepository.findById(mac).ifPresent(pcMasterRepository::delete);
+        auditService.log("ADMIN", "DELETE_AGENT", "AGENT", mac);
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("status", "deleted");
         resp.put("mac", mac);
         return ResponseEntity.ok(resp);
     }
