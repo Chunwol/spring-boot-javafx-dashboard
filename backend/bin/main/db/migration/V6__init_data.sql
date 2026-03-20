@@ -1,5 +1,6 @@
 -- 초기 데이터 삽입
-INSERT INTO users (username, password, email) VALUES ('admin', 'password', 'admin@example.com');
+-- 관리자 계정은 DefaultUserInitializer가 시작 시 .env의 DEFAULT_ADMIN_* 값으로 BCrypt 해시화하여 생성합니다.
+-- 여기에 평문 비밀번호를 하드코딩하지 않습니다.
 
 INSERT INTO classroom_groups (name, description) VALUES ('강의실 101', '1층 강의실');
 INSERT INTO classroom_groups (name, description) VALUES ('강의실 102', '1층 강의실');

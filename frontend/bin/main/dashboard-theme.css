@@ -26,6 +26,13 @@
     -fx-border-radius: 10;
     -fx-border-color: #d7e2ef;
     -fx-background-color: white;
+    -fx-text-fill: #0f172a;
+}
+
+.toggle-button:selected {
+    -fx-background-color: #1e40af;
+    -fx-text-fill: white;
+    -fx-border-color: #1e40af;
 }
 
 .scroll-pane {

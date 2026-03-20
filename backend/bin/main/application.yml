@@ -41,6 +41,10 @@ scheduler:
 app:
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
+  cache:
+    ip-range:
+      maximum-size: ${IP_RANGE_CACHE_MAX_SIZE:10000}
+      expire-minutes: ${IP_RANGE_CACHE_EXPIRE_MINUTES:10}
   jwt:
     secret: ${JWT_SECRET:your-secret-key-change-me-in-production}
     expiration: ${JWT_EXPIRATION:86400000}
