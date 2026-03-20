@@ -312,15 +312,26 @@ public class DashboardClassroomModule {
         GridPane pcGrid = new GridPane();
         pcGrid.setHgap(6);
         pcGrid.setVgap(6);
+        VBox.setVgrow(pcGrid, Priority.ALWAYS);
         panel.getProperties().put("pcGrid", pcGrid);
         panel.getProperties().put("titleBanner", titleBanner);
         panel.getProperties().put("nameLabel", nameLabel);
         panel.getProperties().put("totalLabel", totalLabel);
         panel.getProperties().put("onlineLabel", onlineLabel);
         panel.getProperties().put("offlineLabel", offlineLabel);
+        panel.getProperties().put("groupId", summary.getGroupId());
 
-        renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid);
+        renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid, panel);
         fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
+
+        panel.widthProperty().addListener((obs, ov, nv) -> {
+            List<PcStatusDto> cached = pcCacheByGroupId.get(summary.getGroupId());
+            renderPcGrid(summary.getTotalPcs(), cached, pcGrid, panel);
+        });
+        panel.heightProperty().addListener((obs, ov, nv) -> {
+            List<PcStatusDto> cached = pcCacheByGroupId.get(summary.getGroupId());
+            renderPcGrid(summary.getTotalPcs(), cached, pcGrid, panel);
+        });
 
         HBox buttonBox = new HBox(5);
         Button shutdownAllBtn = new Button("전체 종료");
@@ -371,7 +382,7 @@ public class DashboardClassroomModule {
 
         GridPane pcGrid = (GridPane) panel.getProperties().get("pcGrid");
         if (pcGrid != null) {
-            renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid);
+            renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid, panel);
             fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
         }
 
@@ -404,16 +415,51 @@ public class DashboardClassroomModule {
                             .sorted(Comparator.comparing(PcStatusDto::getHostname, Comparator.nullsLast(String::compareToIgnoreCase)))
                             .toList();
                     pcCacheByGroupId.put(groupId, ordered);
-                    renderPcGrid(totalCount, ordered, pcGrid);
+                    Node parent = pcGrid.getParent();
+                    VBox panel = parent instanceof VBox v ? v : null;
+                    renderPcGrid(totalCount, ordered, pcGrid, panel);
                 }))
                 .exceptionally(ex -> null);
     }
 
-    private void renderPcGrid(int totalCount, List<PcStatusDto> pcs, GridPane pcGrid) {
+    private void renderPcGrid(int totalCount, List<PcStatusDto> pcs, GridPane pcGrid, VBox panel) {
         pcGrid.getChildren().clear();
         int count = Math.max(0, totalCount);
         List<PcStatusDto> list = pcs == null ? List.of() : pcs;
-        int columns = 8;
+
+        double gap = 6.0;
+        double panelW = panel != null ? panel.getWidth() : 0;
+        if (panelW <= 0 && panel != null) panelW = panel.getPrefWidth();
+        if (panelW <= 0) panelW = 420;
+
+        double panelH = panel != null ? panel.getHeight() : 0;
+        if (panelH <= 0 && panel != null) panelH = panel.getPrefHeight();
+        if (panelH <= 0) panelH = 320;
+
+        double availableW = Math.max(120, panelW - 32);
+        double availableH = Math.max(90, panelH - 260);
+
+        int maxCols = Math.max(1, Math.min(count, 20));
+        int bestCols = 1;
+        double bestCell = 0;
+        for (int cols = 1; cols <= maxCols; cols++) {
+            int rows = (int) Math.ceil((double) count / cols);
+            double cellW = (availableW - (cols - 1) * gap) / cols;
+            double cellH = (availableH - (rows - 1) * gap) / rows;
+            double cell = Math.min(cellW, cellH);
+            if (cell > bestCell) {
+                bestCell = cell;
+                bestCols = cols;
+            }
+        }
+
+        int columns = Math.max(1, bestCols);
+        int rows = (int) Math.ceil((double) Math.max(1, count) / columns);
+        double cellW = (availableW - (columns - 1) * gap) / columns;
+        double cellH = (availableH - (rows - 1) * gap) / rows;
+        double cellSize = Math.max(16, Math.min(56, Math.min(cellW, cellH)));
+        int fontSize = (int) Math.max(10, Math.min(22, cellSize * 0.34));
+
         for (int i = 0; i < count; i++) {
             PcStatusDto pc = i < list.size() ? list.get(i) : null;
             String status = pc != null && pc.getStatus() != null ? pc.getStatus().toUpperCase() : "OFFLINE";
@@ -424,11 +470,11 @@ public class DashboardClassroomModule {
             };
 
             Label cell = new Label(String.valueOf(i + 1));
-            cell.setMinSize(36, 36);
-            cell.setPrefSize(36, 36);
+            cell.setMinSize(cellSize, cellSize);
+            cell.setPrefSize(cellSize, cellSize);
             cell.setAlignment(Pos.CENTER);
             cell.setTextFill(Color.web("#f3f4f6"));
-            cell.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+            cell.setFont(Font.font("Segoe UI", FontWeight.BOLD, fontSize));
             cell.setStyle("-fx-background-color: " + bg + "; -fx-background-radius: 4;");
             pcGrid.add(cell, i % columns, i / columns);
         }
