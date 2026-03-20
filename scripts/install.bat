@@ -155,6 +155,28 @@ if %errorLevel% neq 0 (
     echo [INFO] 방화벽 규칙 이미 존재
 )
 
+:: ── 전원 정책 적용 (절전 비활성화 + 버튼 동작 종료) ───────────
+echo [INFO] 전원 정책 적용 중... (절전 비활성화 / 버튼=종료)
+
+:: 절전/최대절전 타이머 비활성화
+powercfg -change -standby-timeout-ac 0 >nul 2>&1
+powercfg -change -standby-timeout-dc 0 >nul 2>&1
+powercfg -change -hibernate-timeout-ac 0 >nul 2>&1
+powercfg -change -hibernate-timeout-dc 0 >nul 2>&1
+
+:: 최대절전 기능 끔 (hiberfil.sys 제거)
+powercfg -hibernate off >nul 2>&1
+
+:: 전원 버튼 / 절전 버튼 동작을 '종료(3)'로 설정 (AC/DC 모두)
+powercfg -setacvalueindex scheme_current sub_buttons pbuttonaction 3 >nul 2>&1
+powercfg -setdcvalueindex scheme_current sub_buttons pbuttonaction 3 >nul 2>&1
+powercfg -setacvalueindex scheme_current sub_buttons sbuttonaction 3 >nul 2>&1
+powercfg -setdcvalueindex scheme_current sub_buttons sbuttonaction 3 >nul 2>&1
+
+:: 변경사항 활성화
+powercfg -setactive scheme_current >nul 2>&1
+echo [OK] 전원 정책 적용 완료
+
 :: ── 에이전트 즉시 시작 ────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "try { Start-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main'; Write-Host '[OK] 에이전트 시작됨' } catch { Write-Host '[경고] 즉시 시작 실패 (재부팅 후 자동 시작됩니다): ' + $_.Exception.Message }"
@@ -165,6 +187,7 @@ echo  설치 완료!
 echo  설치 경로:   %INSTALL_DIR%
 echo  자동 시작:   부팅 시 SYSTEM 계정으로 자동 실행
 echo  자동 재시작: 충돌/종료 시 5초 후 자동 재시작 (좀비 모드)
+echo  전원 정책:   절전 비활성화 / 전원·절전 버튼=종료
 echo  로그 파일:   %INSTALL_DIR%\watchdog.log
 echo.
 echo  [ 중요 ] %INSTALL_DIR%\config.json 에서
