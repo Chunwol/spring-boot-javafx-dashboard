@@ -18,13 +18,13 @@ import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.http.HttpClient;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,6 +53,7 @@ public class DashboardClassroomModule {
     private final BooleanSupplier snapModeSupplier;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
+    private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private static final double GRID_SIZE = 20.0;
 
     public DashboardClassroomModule(
@@ -255,7 +256,11 @@ public class DashboardClassroomModule {
         panel.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : 280.0);
 
         Label nameLabel = new Label(summary.getGroupName());
-        nameLabel.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 56));
+        nameLabel.setTextFill(Color.web("#e5e7eb"));
+        StackPane titleBanner = new StackPane(nameLabel);
+        titleBanner.setPadding(new Insets(20, 8, 20, 8));
+        titleBanner.setStyle("-fx-background-color: #4d8a3a; -fx-background-radius: 8;");
 
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
@@ -277,56 +282,45 @@ public class DashboardClassroomModule {
         HBox header = new HBox(8, nameLabel, headerSpacer, deleteBtn);
         header.setAlignment(Pos.CENTER_LEFT);
 
-        Label ipLabel = new Label(summary.getIpRanges() != null && !summary.getIpRanges().isEmpty()
-                ? String.join(", ", summary.getIpRanges()) : "IP 대역 미설정");
-        ipLabel.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
+        Label totalLabel = new Label(summary.getTotalPcs() + " 대");
+        totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        totalLabel.setTextFill(Color.web("#f3f4f6"));
+        StackPane totalBox = new StackPane(totalLabel);
+        totalBox.setPadding(new Insets(16));
+        totalBox.setStyle("-fx-background-color: #979ca3; -fx-background-radius: 4;");
+        HBox.setHgrow(totalBox, Priority.ALWAYS);
 
-        HBox statusBox = new HBox(10);
-        Label onlineLabel = new Label(String.format("ON: %d / %d",
-                summary.getOnlinePcs(), summary.getTotalPcs()));
-        onlineLabel.setTextFill(Color.web("#2ecc71"));
-        statusBox.getChildren().add(onlineLabel);
+        Label onlineLabel = new Label(summary.getOnlinePcs() + " 대");
+        onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        onlineLabel.setTextFill(Color.web("#f3f4f6"));
+        StackPane onlineBox = new StackPane(onlineLabel);
+        onlineBox.setPadding(new Insets(16));
+        onlineBox.setStyle("-fx-background-color: #6da657; -fx-background-radius: 4;");
+        HBox.setHgrow(onlineBox, Priority.ALWAYS);
 
-        Label teacherStatus = new Label("교사: " + summary.getTeacherPcStatus());
-        teacherStatus.setTextFill("ONLINE".equals(summary.getTeacherPcStatus()) ? Color.BLUE : Color.GRAY);
+        int offlineCount = Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs());
+        Label offlineLabel = new Label(offlineCount + " 대");
+        offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 54));
+        offlineLabel.setTextFill(Color.web("#f3f4f6"));
+        StackPane offlineBox = new StackPane(offlineLabel);
+        offlineBox.setPadding(new Insets(16));
+        offlineBox.setStyle("-fx-background-color: #cf404a; -fx-background-radius: 4;");
+        HBox.setHgrow(offlineBox, Priority.ALWAYS);
 
-        ListView<PcStatusDto> pcListView = new ListView<>();
-        VBox.setVgrow(pcListView, Priority.ALWAYS);
-        pcListView.setPrefHeight(150);
-        pcListView.setPlaceholder(new Label("클릭하여 PC 목록 보기"));
-        pcListView.setCellFactory(lv -> new ListCell<>() {
-            private final Circle statusCircle = new Circle(5);
-            private final Label pcInfoLabel = new Label();
-            private final HBox content = new HBox(5, statusCircle, pcInfoLabel);
-            { content.setAlignment(Pos.CENTER_LEFT); }
+        HBox countStrip = new HBox(2, totalBox, onlineBox, offlineBox);
 
-            @Override
-            protected void updateItem(PcStatusDto item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setGraphic(null);
-                } else {
-                    statusCircle.setFill("ONLINE".equalsIgnoreCase(item.getStatus())
-                            ? Color.LIMEGREEN : Color.LIGHTGRAY);
-                    pcInfoLabel.setText(String.format("%s (%s)", item.getHostname(), item.getIpAddress()));
-                    setGraphic(content);
-                }
-            }
-        });
+        GridPane pcGrid = new GridPane();
+        pcGrid.setHgap(6);
+        pcGrid.setVgap(6);
+        panel.getProperties().put("pcGrid", pcGrid);
+        panel.getProperties().put("titleBanner", titleBanner);
+        panel.getProperties().put("nameLabel", nameLabel);
+        panel.getProperties().put("totalLabel", totalLabel);
+        panel.getProperties().put("onlineLabel", onlineLabel);
+        panel.getProperties().put("offlineLabel", offlineLabel);
 
-        panel.setOnMouseClicked(e -> {
-            if (!editModeSupplier.getAsBoolean()) {
-                if (e.getClickCount() == 1) {
-                    if (pcListView.getItems().isEmpty()) {
-                        fetchAndDisplayPcs(summary.getGroupId(),
-                                pcs -> pcListView.getItems().setAll(pcs),
-                                text -> pcListView.setPlaceholder(new Label(text)));
-                    }
-                } else if (e.getClickCount() == 2) {
-                    showClassroomDetailModal(summary);
-                }
-            }
-        });
+        renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid);
+        fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
 
         HBox buttonBox = new HBox(5);
         Button shutdownAllBtn = new Button("전체 종료");
@@ -338,7 +332,7 @@ public class DashboardClassroomModule {
         wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), "WOL"));
 
         buttonBox.getChildren().addAll(shutdownAllBtn, wolAllBtn);
-        panel.getChildren().addAll(header, ipLabel, statusBox, teacherStatus, pcListView, buttonBox);
+    panel.getChildren().addAll(header, titleBanner, countStrip, pcGrid, buttonBox);
 
         makeDraggable(panel, summary, panelDto.getId());
         makeResizable(panel, summary, panelDto.getId());
@@ -349,7 +343,9 @@ public class DashboardClassroomModule {
     }
 
     private void updateClassroomPanel(VBox panel, ClassroomSummaryDto summary, DashboardPanelDto panelDto) {
-        if (panel.getChildren().size() < 4) return;
+        if (panel.getChildren().isEmpty()) {
+            return;
+        }
 
         HBox header = (HBox) panel.getChildren().get(0);
         if (!header.getChildren().isEmpty() && header.getChildren().get(0) instanceof Label titleLabel) {
@@ -361,20 +357,23 @@ public class DashboardClassroomModule {
         panel.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : panel.getPrefWidth());
         panel.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : panel.getPrefHeight());
 
-        Label ipLabel = (Label) panel.getChildren().get(1);
-        ipLabel.setText(summary.getIpRanges() != null && !summary.getIpRanges().isEmpty()
-                ? String.join(", ", summary.getIpRanges()) : "IP 대역 미설정");
-
-        HBox statusBox = (HBox) panel.getChildren().get(2);
-        if (!statusBox.getChildren().isEmpty()) {
-            Label onlineLabel = (Label) statusBox.getChildren().get(0);
-            onlineLabel.setText(String.format("ON: %d / %d",
-                    summary.getOnlinePcs(), summary.getTotalPcs()));
+        Label nameLabel = (Label) panel.getProperties().get("nameLabel");
+        if (nameLabel != null) {
+            nameLabel.setText(summary.getGroupName());
         }
 
-        Label teacherLabel = (Label) panel.getChildren().get(3);
-        teacherLabel.setText("교사: " + summary.getTeacherPcStatus());
-        teacherLabel.setTextFill("ONLINE".equals(summary.getTeacherPcStatus()) ? Color.BLUE : Color.GRAY);
+        Label totalLabel = (Label) panel.getProperties().get("totalLabel");
+        Label onlineLabel = (Label) panel.getProperties().get("onlineLabel");
+        Label offlineLabel = (Label) panel.getProperties().get("offlineLabel");
+        if (totalLabel != null) totalLabel.setText(summary.getTotalPcs() + " 대");
+        if (onlineLabel != null) onlineLabel.setText(summary.getOnlinePcs() + " 대");
+        if (offlineLabel != null) offlineLabel.setText(Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs()) + " 대");
+
+        GridPane pcGrid = (GridPane) panel.getProperties().get("pcGrid");
+        if (pcGrid != null) {
+            renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid);
+            fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
+        }
 
         updatePanelStyle(panel, summary);
 
@@ -385,24 +384,54 @@ public class DashboardClassroomModule {
     }
 
     private void updatePanelStyle(VBox panel, ClassroomSummaryDto summary) {
-        String baseStyle = "-fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.1), 10, 0, 0, 0);";
-        String bgColor = "white";
+        String baseStyle = "-fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.10), 10, 0, 0, 0);";
+        panel.setStyle(baseStyle + " -fx-background-color: #d9d9d9;");
 
-        boolean teacherOnline = "ONLINE".equalsIgnoreCase(summary.getTeacherPcStatus());
-        boolean allOnline = summary.getTotalPcs() > 0 && summary.getOnlinePcs() == summary.getTotalPcs();
-        boolean someOffline = summary.getOnlinePcs() < summary.getTotalPcs();
-        boolean allOffline = summary.getOnlinePcs() == 0;
-
-        if (allOffline) {
-            bgColor = "#f8f9fa";
-        } else if (!teacherOnline) {
-            bgColor = "#fff3cd";
-        } else if (someOffline) {
-            bgColor = "#e8f0fe";
-        } else if (allOnline) {
-            bgColor = "#d4edda";
+        Node bannerNode = (Node) panel.getProperties().get("titleBanner");
+        if (bannerNode instanceof StackPane banner) {
+            boolean teacherOnline = "ONLINE".equalsIgnoreCase(summary.getTeacherPcStatus());
+            banner.setStyle("-fx-background-color: " + (teacherOnline ? "#4d8a3a" : "#8f949b") + "; -fx-background-radius: 8;");
         }
-        panel.setStyle(baseStyle + " -fx-background-color: " + bgColor + ";");
+    }
+
+    private void fetchPcStatuses(Long groupId, int totalCount, GridPane pcGrid) {
+        if (groupId == null || pcGrid == null) {
+            return;
+        }
+        apiClient.getPagedList("/dashboard/classrooms/" + groupId + "/pcs", new TypeReference<List<PcStatusDto>>() {})
+                .thenAccept(pcs -> Platform.runLater(() -> {
+                    List<PcStatusDto> ordered = pcs.stream()
+                            .sorted(Comparator.comparing(PcStatusDto::getHostname, Comparator.nullsLast(String::compareToIgnoreCase)))
+                            .toList();
+                    pcCacheByGroupId.put(groupId, ordered);
+                    renderPcGrid(totalCount, ordered, pcGrid);
+                }))
+                .exceptionally(ex -> null);
+    }
+
+    private void renderPcGrid(int totalCount, List<PcStatusDto> pcs, GridPane pcGrid) {
+        pcGrid.getChildren().clear();
+        int count = Math.max(0, totalCount);
+        List<PcStatusDto> list = pcs == null ? List.of() : pcs;
+        int columns = 8;
+        for (int i = 0; i < count; i++) {
+            PcStatusDto pc = i < list.size() ? list.get(i) : null;
+            String status = pc != null && pc.getStatus() != null ? pc.getStatus().toUpperCase() : "OFFLINE";
+            String bg = switch (status) {
+                case "ONLINE" -> "#4d8a3a";
+                case "BROKEN", "FAILED" -> "#cf404a";
+                default -> "#a5a7ab";
+            };
+
+            Label cell = new Label(String.valueOf(i + 1));
+            cell.setMinSize(36, 36);
+            cell.setPrefSize(36, 36);
+            cell.setAlignment(Pos.CENTER);
+            cell.setTextFill(Color.web("#f3f4f6"));
+            cell.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+            cell.setStyle("-fx-background-color: " + bg + "; -fx-background-radius: 4;");
+            pcGrid.add(cell, i % columns, i / columns);
+        }
     }
 
     private void showClassroomDetailModal(ClassroomSummaryDto summary) {

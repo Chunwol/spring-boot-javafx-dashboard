@@ -9,6 +9,7 @@ import com.example.frontend.controller.dashboard.DashboardCanvasModule;
 import com.example.frontend.controller.dashboard.DashboardClassroomModule;
 import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
+import com.example.frontend.controller.dashboard.DashboardDisconnectStatusPanelModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
 import com.example.frontend.controller.dashboard.DashboardResourcePanelModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
@@ -87,6 +88,7 @@ public class DashboardController {
     private DashboardRealtimeModule realtimeModule;
     private DashboardWidgetModule widgetModule;
     private DashboardResourcePanelModule resourcePanelModule;
+    private DashboardDisconnectStatusPanelModule disconnectStatusPanelModule;
     private DashboardViewModel dashboardViewModel;
     private DashboardUIService dashboardUIService;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
@@ -368,6 +370,18 @@ public class DashboardController {
             );
 
             networkPanelModule = new DashboardNetworkPanelModule(
+                dashboardService,
+                classroomContainer,
+                dashboardInteractionService,
+                () -> isEditModeActive() && !isLayoutLockedState(),
+                this::applySnap,
+                this::currentDashboardId,
+                this::showToast,
+                this::getResponsiveDefaultSize,
+                this::loadDashboardPanels
+            );
+
+            disconnectStatusPanelModule = new DashboardDisconnectStatusPanelModule(
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
@@ -819,6 +833,9 @@ public class DashboardController {
         if (networkPanelModule != null) {
             networkPanelModule.update(classrooms, panels);
         }
+        if (disconnectStatusPanelModule != null) {
+            disconnectStatusPanelModule.update(classrooms, panels);
+        }
         updateTopSummary();
     }
 
@@ -925,6 +942,11 @@ public class DashboardController {
             return large ? new double[]{720, 360}
                     : medium ? new double[]{620, 320}
                     : new double[]{520, 280};
+        }
+        if ("DISCONNECT".equals(type)) {
+            return large ? new double[]{680, 360}
+                : medium ? new double[]{600, 320}
+                : new double[]{500, 280};
         }
         return large ? new double[]{440, 320}
                 : medium ? new double[]{380, 300}
@@ -1042,6 +1064,9 @@ public class DashboardController {
         nodes.addAll(imageItemMap.values());
         if (networkPanelModule != null) {
             nodes.addAll(networkPanelModule.getPanelViews());
+        }
+        if (disconnectStatusPanelModule != null) {
+            nodes.addAll(disconnectStatusPanelModule.getPanelViews());
         }
         return nodes;
     }

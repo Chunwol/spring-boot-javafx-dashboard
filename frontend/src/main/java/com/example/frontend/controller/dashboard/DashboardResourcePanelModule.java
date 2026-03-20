@@ -100,6 +100,7 @@ public class DashboardResourcePanelModule {
                 createAddClassroomButton(),
                 createAddTextButton(),
                 createAddImageButton(),
+            createAddDisconnectStatusButton(),
                 createBackupTextButton(),
                 createRestoreTextButton(),
                 new Separator(),
@@ -272,6 +273,26 @@ public class DashboardResourcePanelModule {
         Button button = iconButton("Add image", "mdi2i-image-plus", "#334155");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleAddImageItem());
+        return button;
+    }
+
+    private Button createAddDisconnectStatusButton() {
+        Button button = iconButton("Add disconnect status", "mdi2a-alert-circle-outline", "#b91c1c");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> {
+            if (currentDashboardId.get() == null) {
+                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
+                return;
+            }
+            double[] size = responsiveSizeFn.apply("DISCONNECT");
+            dashboardService.createPanelAsync(
+                    currentDashboardId.get(),
+                    "DISCONNECT_STATUS",
+                    null,
+                    80.0, 80.0, size[0], size[1],
+                    dto -> Platform.runLater(onLoadDashboardPanels::run)
+            );
+        });
         return button;
     }
 
