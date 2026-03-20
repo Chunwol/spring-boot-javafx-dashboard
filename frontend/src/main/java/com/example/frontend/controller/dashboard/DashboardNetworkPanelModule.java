@@ -46,6 +46,8 @@ public class DashboardNetworkPanelModule {
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
     private final Map<Long, NetworkPanelController> controllerMap = new HashMap<>();
+    private final Map<Long, Button> deleteBtnMap = new HashMap<>();
+    private final Map<Long, Label> resizeHandleMap = new HashMap<>();
 
     public DashboardNetworkPanelModule(
             DashboardService dashboardService,
@@ -114,6 +116,8 @@ public class DashboardNetworkPanelModule {
                     classroomContainer.getChildren().remove(node);
                 }
                 controllerMap.remove(id);
+                deleteBtnMap.remove(id);
+                resizeHandleMap.remove(id);
             }
         });
     }
@@ -144,6 +148,9 @@ public class DashboardNetworkPanelModule {
         Button deleteBtn = new Button("Delete");
         deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; "
                 + "-fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setVisible(canInteract.getAsBoolean());
+        deleteBtn.setManaged(canInteract.getAsBoolean());
+        deleteBtnMap.put(panelDto.getId(), deleteBtn);
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
@@ -185,6 +192,9 @@ public class DashboardNetworkPanelModule {
 
         Label handle = new Label("◢");
         handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        handle.setVisible(canInteract.getAsBoolean());
+        handle.setManaged(canInteract.getAsBoolean());
+        resizeHandleMap.put(panelId, handle);
         StackPane handleHolder = new StackPane(handle);
         handleHolder.setPickOnBounds(false);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
@@ -196,6 +206,17 @@ public class DashboardNetworkPanelModule {
                 snapFn,
                 () -> persistPosition(panel, panelId, "Panel size saved")
         );
+    }
+
+    public void applyEditMode(boolean editMode) {
+        deleteBtnMap.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
+        resizeHandleMap.values().forEach(handle -> {
+            handle.setVisible(editMode);
+            handle.setManaged(editMode);
+        });
     }
 
     private void persistPosition(VBox panel, Long panelId, String toastMessage) {

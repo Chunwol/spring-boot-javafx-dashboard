@@ -59,6 +59,8 @@ public class DashboardDisconnectStatusPanelModule {
     private final javafx.scene.layout.Pane classroomContainer;
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
+    private final Map<Long, Button> deleteBtnMap = new HashMap<>();
+    private final Map<Long, Label> resizeHandleMap = new HashMap<>();
     private final Map<String, String> previousStatusByMac = new HashMap<>();
     private final ObservableList<ConnectionLogRow> logRows = FXCollections.observableArrayList();
     private final AtomicBoolean pollingInFlight = new AtomicBoolean(false);
@@ -96,6 +98,8 @@ public class DashboardDisconnectStatusPanelModule {
                 if (node != null) {
                     classroomContainer.getChildren().remove(node);
                 }
+                deleteBtnMap.remove(id);
+                resizeHandleMap.remove(id);
             }
         });
 
@@ -128,6 +132,9 @@ public class DashboardDisconnectStatusPanelModule {
 
         Button deleteBtn = new Button("삭제");
         deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setVisible(canInteract.getAsBoolean());
+        deleteBtn.setManaged(canInteract.getAsBoolean());
+        deleteBtnMap.put(panelDto.getId(), deleteBtn);
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
@@ -286,6 +293,9 @@ public class DashboardDisconnectStatusPanelModule {
 
         Label handle = new Label("◢");
         handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        handle.setVisible(canInteract.getAsBoolean());
+        handle.setManaged(canInteract.getAsBoolean());
+        resizeHandleMap.put(panelId, handle);
         StackPane handleHolder = new StackPane(handle);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
         panel.getChildren().add(handleHolder);
@@ -299,6 +309,17 @@ public class DashboardDisconnectStatusPanelModule {
                 snapFn,
                 () -> persistPosition(panel, panelId)
         );
+    }
+
+    public void applyEditMode(boolean editMode) {
+        deleteBtnMap.values().forEach(btn -> {
+            btn.setVisible(editMode);
+            btn.setManaged(editMode);
+        });
+        resizeHandleMap.values().forEach(handle -> {
+            handle.setVisible(editMode);
+            handle.setManaged(editMode);
+        });
     }
 
     private void persistPosition(VBox panel, Long panelId) {

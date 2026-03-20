@@ -656,6 +656,12 @@ public class DashboardController {
         if (classroomModule != null) {
             classroomModule.applyEditMode(isEditModeActive());
         }
+        if (networkPanelModule != null) {
+            networkPanelModule.applyEditMode(isEditModeActive());
+        }
+        if (disconnectStatusPanelModule != null) {
+            disconnectStatusPanelModule.applyEditMode(isEditModeActive());
+        }
         if (resourcePanelModule != null) {
             resourcePanelModule.refreshListView();
         }

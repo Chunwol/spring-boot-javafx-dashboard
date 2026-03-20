@@ -54,6 +54,7 @@ public class DashboardClassroomModule {
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
     private final Map<Long, Button> gridSettingsBtns = new HashMap<>();
+    private final Map<Long, Node> resizeHandleNodes = new HashMap<>();
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private static final double GRID_SIZE = 20.0;
 
@@ -109,6 +110,8 @@ public class DashboardClassroomModule {
                     classroomContainer.getChildren().remove(panel);
                 }
                 classroomDeleteBtns.remove(panelId);
+                gridSettingsBtns.remove(panelId);
+                resizeHandleNodes.remove(panelId);
                 panelManager.removePanel(panelId);
             }
         }
@@ -238,6 +241,10 @@ public class DashboardClassroomModule {
         gridSettingsBtns.values().forEach(btn -> {
             btn.setVisible(editMode);
             btn.setManaged(editMode);
+        });
+        resizeHandleNodes.values().forEach(node -> {
+            node.setVisible(editMode);
+            node.setManaged(editMode);
         });
     }
 
@@ -422,7 +429,7 @@ public class DashboardClassroomModule {
 
     private void updatePanelStyle(VBox panel, ClassroomSummaryDto summary) {
         String baseStyle = "-fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.10), 10, 0, 0, 0);";
-        panel.setStyle(baseStyle + " -fx-background-color: #d9d9d9;");
+        panel.setStyle(baseStyle + " -fx-background-color: white;");
 
         Node bannerNode = (Node) panel.getProperties().get("titleBanner");
         if (bannerNode instanceof StackPane banner) {
@@ -589,6 +596,9 @@ public class DashboardClassroomModule {
 
         HBox handleBox = new HBox(resizeHandle);
         handleBox.setAlignment(Pos.BOTTOM_RIGHT);
+        handleBox.setVisible(editModeSupplier.getAsBoolean());
+        handleBox.setManaged(editModeSupplier.getAsBoolean());
+        resizeHandleNodes.put(dashboardPanelId, handleBox);
         panel.getChildren().add(handleBox);
 
         dashboardInteractionService.attachResizeHandlers(
