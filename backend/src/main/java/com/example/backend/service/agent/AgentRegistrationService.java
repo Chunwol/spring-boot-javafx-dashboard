@@ -6,6 +6,7 @@ import com.example.backend.model.agent.AgentAuthToken;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,12 +73,7 @@ public class AgentRegistrationService {
         AgentAuthToken authToken = existingTokens.stream()
                 .reduce(this::preferredToken)
                 .orElseGet(AgentAuthToken::new);
-        authToken.setMacAddress(mac);
-        authToken.setTokenHash(tokenHash);
-        authToken.setIssuedAt(LocalDateTime.now());
-        authToken.setLastUsedAt(LocalDateTime.now());
-        authToken.setRevoked(false);
-        agentAuthTokenRepository.save(authToken);
+        authToken = saveTokenResilient(mac, tokenHash, authToken);
 
         // 중복 토큰 정리: 최신 1개만 남기고 나머지는 제거
         for (AgentAuthToken token : existingTokens) {
@@ -87,6 +83,31 @@ public class AgentRegistrationService {
         }
 
         return new AgentRegisterResponse(plainToken, "등록 완료. 하트비트를 시작하세요.");
+    }
+
+    private AgentAuthToken saveTokenResilient(String mac, String tokenHash, AgentAuthToken candidate) {
+        LocalDateTime now = LocalDateTime.now();
+        candidate.setMacAddress(mac);
+        candidate.setTokenHash(tokenHash);
+        candidate.setIssuedAt(now);
+        candidate.setLastUsedAt(now);
+        candidate.setRevoked(false);
+
+        try {
+            return agentAuthTokenRepository.saveAndFlush(candidate);
+        } catch (DataIntegrityViolationException ex) {
+            // 멀티 인스턴스 동시 등록 시 UNIQUE(mac_address) 충돌 가능.
+            // 최신 레코드를 다시 읽어 업데이트로 전환한다.
+            AgentAuthToken fallback = agentAuthTokenRepository.findAllByMacAddress(mac).stream()
+                    .reduce(this::preferredToken)
+                    .orElse(candidate);
+            fallback.setMacAddress(mac);
+            fallback.setTokenHash(tokenHash);
+            fallback.setIssuedAt(now);
+            fallback.setLastUsedAt(now);
+            fallback.setRevoked(false);
+            return agentAuthTokenRepository.saveAndFlush(fallback);
+        }
     }
 
     private AgentAuthToken preferredToken(AgentAuthToken a, AgentAuthToken b) {

@@ -131,13 +131,13 @@ if (-not $IncludeMutating) {
 # Mutating flow: register -> verify -> revoke -> delete -> verify
 $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $mac = "AA:BB:CC:" + ($stamp % 100).ToString("00") + ":11:22"
-$host = "SMOKE-$stamp"
+$hostName = "SMOKE-$stamp"
 $ip = "10.255.255." + (($stamp % 200) + 30)
 
 Write-Host "[5/7] Register temporary agent ($mac)"
 $regResp = Invoke-Http -Method POST -Url "$BaseUrl/agent/register" -Headers @{ "X-Agent-Install-Key" = $installKey } -Body @{
     macAddress = $mac
-    hostname = $host
+    hostname = $hostName
     ipAddress = $ip
     osInfo = "Windows Smoke"
     agentVersion = "smoke"
