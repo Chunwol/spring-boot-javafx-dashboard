@@ -367,8 +367,7 @@ public class DashboardWidgetModule {
     }
 
     public void toggleTextVisibility(Long id, Map<String, Object> map, boolean isVisible) {
-        String json = String.format("{\"visible\":%b}", isVisible);
-        updateItemVisibility(id, json, "/dashboard/texts/");
+        apiClient.putJson("/dashboard/texts/" + id, Map.of("visible", isVisible)).exceptionally(ex -> null);
     }
 
     // ─────────── 이미지 아이템 ───────────
@@ -497,7 +496,7 @@ public class DashboardWidgetModule {
                 box = newBox;
             } else {
                 if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
-                    iv.setImage(new Image(imageUrlFinal, w, h, true, true));
+                    iv.setImage(new Image(imageUrlFinal, w, h, true, true, true));
                     iv.setFitWidth(w);
                     iv.setFitHeight(h);
                 }
@@ -529,12 +528,7 @@ public class DashboardWidgetModule {
     }
 
     public void toggleImageVisibility(Long id, Map<String, Object> map, boolean isVisible) {
-        String json = String.format("{\"visible\":%b}", isVisible);
-        updateItemVisibility(id, json, "/dashboard/images/");
-    }
-
-    private void updateItemVisibility(Long id, String json, String endpoint) {
-        apiClient.putJson(endpoint + id, json).exceptionally(ex -> null);
+        apiClient.putJson("/dashboard/images/" + id, Map.of("visible", isVisible)).exceptionally(ex -> null);
     }
 
     // ─────────── 백업 / 복원 ───────────
@@ -641,7 +635,7 @@ public class DashboardWidgetModule {
                     if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
                         iv.setFitWidth(w - 8);
                         iv.setFitHeight(Math.max(120, h - 64));
-                        iv.setImage(new Image(imageUrlFinal, iv.getFitWidth(), iv.getFitHeight(), true, true));
+                        iv.setImage(new Image(imageUrlFinal, iv.getFitWidth(), iv.getFitHeight(), true, true, true));
                     }
                 },
                 () -> apiClient.putJson("/dashboard/images/" + id, Map.of(

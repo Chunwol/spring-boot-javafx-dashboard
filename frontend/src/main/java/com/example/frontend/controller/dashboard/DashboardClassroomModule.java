@@ -56,7 +56,7 @@ public class DashboardClassroomModule {
     private final Map<Long, Button> gridSettingsBtns = new HashMap<>();
     private final Map<Long, Node> resizeHandleNodes = new HashMap<>();
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
-    private boolean skipGroupCommandConfirm = false;
+    private final java.util.concurrent.atomic.AtomicBoolean skipGroupCommandConfirm = new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final double GRID_SIZE = 20.0;
     private static final String ORDER_BY_PC_NAME = "PC_NAME";
     private static final String ORDER_BY_IP = "IP";
@@ -87,7 +87,7 @@ public class DashboardClassroomModule {
         apiClient.getJson("/settings/skipGroupCommandConfirm", new TypeReference<Map<String, Object>>() {})
                 .thenAccept(resp -> {
                     if ("true".equalsIgnoreCase(String.valueOf(resp.getOrDefault("value", "")))) {
-                        skipGroupCommandConfirm = true;
+                            skipGroupCommandConfirm.set(true);
                     }
                 })
                 .exceptionally(ex -> null);
@@ -419,10 +419,6 @@ public class DashboardClassroomModule {
         }
 
         HBox header = (HBox) panel.getChildren().get(0);
-        if (!header.getChildren().isEmpty() && header.getChildren().get(0) instanceof Label titleLabel) {
-            titleLabel.setText(summary.getGroupName());
-        }
-
         panel.setLayoutX(panelDto.getX() != null ? panelDto.getX() : panel.getLayoutX());
         panel.setLayoutY(panelDto.getY() != null ? panelDto.getY() : panel.getLayoutY());
         panel.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : panel.getPrefWidth());
@@ -606,8 +602,9 @@ public class DashboardClassroomModule {
                         cfg.put("gridOrderMode", newOrderMode);
                         String newJson = objectMapper.writeValueAsString(cfg);
                         panel.getProperties().put("configJsonBase", newJson);
-                        final String payload = "{\"configJson\":" + objectMapper.writeValueAsString(newJson) + "}";
-                        apiClient.putJson("/dashboards/" + dashId + "/panels/" + panelId, payload)
+                           Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                           payload.put("configJson", newJson);
+                           apiClient.putJson("/dashboards/" + dashId + "/panels/" + panelId, payload)
                                 .exceptionally(ex -> null);
                     } catch (Exception ignored) {}
                 }
@@ -790,7 +787,7 @@ public class DashboardClassroomModule {
     }
 
     private boolean confirmGroupCommand(String groupName, String type) {
-        if (skipGroupCommandConfirm) {
+        if (skipGroupCommandConfirm.get()) {
             return true;
         }
 
@@ -818,8 +815,8 @@ public class DashboardClassroomModule {
 
         var result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.YES) {
-            skipGroupCommandConfirm = skipNext.isSelected();
-            if (skipGroupCommandConfirm) {
+            skipGroupCommandConfirm.set(skipNext.isSelected());
+            if (skipGroupCommandConfirm.get()) {
                 // DB에 영속
                 apiClient.putJson("/settings/skipGroupCommandConfirm",
                         Map.of("value", "true")).exceptionally(ex -> null);
