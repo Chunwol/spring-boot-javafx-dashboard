@@ -58,6 +58,8 @@ public class DashboardClassroomModule {
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private boolean skipGroupCommandConfirm = false;
     private static final double GRID_SIZE = 20.0;
+    private static final String ORDER_BY_PC_NAME = "PC_NAME";
+    private static final String ORDER_BY_IP = "IP";
 
     public DashboardClassroomModule(
             HttpClient httpClient,
@@ -348,6 +350,7 @@ public class DashboardClassroomModule {
         panel.getProperties().put("gridMinCell", 16);
         panel.getProperties().put("gridMaxCell", 56);
         panel.getProperties().put("gridMaxCols", 20);
+        panel.getProperties().put("gridOrderMode", ORDER_BY_PC_NAME);
 
         renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid, panel);
         fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
@@ -445,13 +448,10 @@ public class DashboardClassroomModule {
         }
         apiClient.getPagedList("/dashboard/classrooms/" + groupId + "/pcs", new TypeReference<List<PcStatusDto>>() {})
                 .thenAccept(pcs -> Platform.runLater(() -> {
-                    List<PcStatusDto> ordered = pcs.stream()
-                            .sorted(Comparator.comparing(PcStatusDto::getHostname, Comparator.nullsLast(String::compareToIgnoreCase)))
-                            .toList();
-                    pcCacheByGroupId.put(groupId, ordered);
+                pcCacheByGroupId.put(groupId, pcs);
                     Node parent = pcGrid.getParent();
                     VBox panel = parent instanceof VBox v ? v : null;
-                    renderPcGrid(totalCount, ordered, pcGrid, panel);
+                renderPcGrid(totalCount, pcs, pcGrid, panel);
                 }))
                 .exceptionally(ex -> null);
     }
@@ -460,6 +460,10 @@ public class DashboardClassroomModule {
         pcGrid.getChildren().clear();
         int count = Math.max(0, totalCount);
         List<PcStatusDto> list = pcs == null ? List.of() : pcs;
+        String orderMode = panel != null
+            ? (String) panel.getProperties().getOrDefault("gridOrderMode", ORDER_BY_PC_NAME)
+            : ORDER_BY_PC_NAME;
+        list = sortPcList(list, orderMode);
 
         int minCell = panel != null ? (int) panel.getProperties().getOrDefault("gridMinCell", 16) : 16;
         int maxCell = panel != null ? (int) panel.getProperties().getOrDefault("gridMaxCell", 56) : 56;
@@ -526,6 +530,7 @@ public class DashboardClassroomModule {
         int curMin = (int) panel.getProperties().getOrDefault("gridMinCell", 16);
         int curMax = (int) panel.getProperties().getOrDefault("gridMaxCell", 56);
         int curCols = (int) panel.getProperties().getOrDefault("gridMaxCols", 20);
+        String curOrderMode = (String) panel.getProperties().getOrDefault("gridOrderMode", ORDER_BY_PC_NAME);
 
         Spinner<Integer> minSpinner = new Spinner<>(8, 80, curMin, 2);
         minSpinner.setEditable(true);
@@ -536,6 +541,10 @@ public class DashboardClassroomModule {
         Spinner<Integer> colsSpinner = new Spinner<>(1, 50, curCols, 1);
         colsSpinner.setEditable(true);
         colsSpinner.setPrefWidth(85);
+        ComboBox<String> orderCombo = new ComboBox<>();
+        orderCombo.getItems().addAll("PC 이름 순", "IP 순");
+        orderCombo.setValue(ORDER_BY_IP.equals(curOrderMode) ? "IP 순" : "PC 이름 순");
+        orderCombo.setPrefWidth(120);
 
         GridPane form = new GridPane();
         form.setHgap(12);
@@ -547,6 +556,8 @@ public class DashboardClassroomModule {
         form.add(maxSpinner, 1, 1);
         form.add(new Label("최대 열 수:"), 0, 2);
         form.add(colsSpinner, 1, 2);
+        form.add(new Label("순번 정렬:"), 0, 3);
+        form.add(orderCombo, 1, 3);
 
         dialog.getDialogPane().setContent(form);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -556,9 +567,49 @@ public class DashboardClassroomModule {
                 panel.getProperties().put("gridMinCell", minSpinner.getValue());
                 panel.getProperties().put("gridMaxCell", maxSpinner.getValue());
                 panel.getProperties().put("gridMaxCols", colsSpinner.getValue());
+                panel.getProperties().put("gridOrderMode",
+                        "IP 순".equals(orderCombo.getValue()) ? ORDER_BY_IP : ORDER_BY_PC_NAME);
                 renderPcGrid(totalCount, pcCacheByGroupId.get(groupId), pcGrid, panel);
             }
         });
+    }
+
+    private List<PcStatusDto> sortPcList(List<PcStatusDto> source, String orderMode) {
+        Comparator<PcStatusDto> byName = Comparator.comparing(
+                dto -> dto.getHostname() == null ? "" : dto.getHostname(),
+                String.CASE_INSENSITIVE_ORDER);
+
+        Comparator<PcStatusDto> byIp = Comparator
+                .comparingLong((PcStatusDto dto) -> ipToSortableLong(dto.getIpAddress()))
+                .thenComparing(dto -> dto.getHostname() == null ? "" : dto.getHostname(), String.CASE_INSENSITIVE_ORDER);
+
+        return source.stream()
+                .sorted(ORDER_BY_IP.equals(orderMode) ? byIp : byName)
+                .toList();
+    }
+
+    private long ipToSortableLong(String ip) {
+        if (ip == null || ip.isBlank()) {
+            return Long.MAX_VALUE;
+        }
+        String[] parts = ip.trim().split("\\.");
+        if (parts.length != 4) {
+            return Long.MAX_VALUE;
+        }
+        long result = 0;
+        for (String p : parts) {
+            int octet;
+            try {
+                octet = Integer.parseInt(p);
+            } catch (NumberFormatException e) {
+                return Long.MAX_VALUE;
+            }
+            if (octet < 0 || octet > 255) {
+                return Long.MAX_VALUE;
+            }
+            result = (result << 8) | octet;
+        }
+        return result;
     }
 
     private void showClassroomDetailModal(ClassroomSummaryDto summary) {
