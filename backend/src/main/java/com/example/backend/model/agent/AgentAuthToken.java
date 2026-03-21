@@ -1,5 +1,6 @@
 package com.example.backend.model.agent;
 
+import com.example.backend.common.persistence.LenientLocalDateTimeStringConverter;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -19,9 +20,11 @@ public class AgentAuthToken {
     private String tokenHash;
 
     @Column(name = "issued_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime issuedAt;
 
     @Column(name = "last_used_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime lastUsedAt;
 
     @Column
