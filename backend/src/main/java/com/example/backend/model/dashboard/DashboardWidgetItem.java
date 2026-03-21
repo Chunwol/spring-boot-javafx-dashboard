@@ -1,5 +1,6 @@
 package com.example.backend.model.dashboard;
 
+import com.example.backend.common.persistence.LenientLocalDateTimeStringConverter;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -28,6 +29,7 @@ public class DashboardWidgetItem {
     private boolean visible = true;
 
     @Column(name = "created_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public DashboardWidgetItem() {
