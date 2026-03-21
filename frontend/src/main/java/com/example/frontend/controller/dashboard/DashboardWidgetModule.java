@@ -435,7 +435,8 @@ public class DashboardWidgetModule {
             double y = item.getOrDefault("y", 80.0) instanceof Number ? ((Number) item.get("y")).doubleValue() : 80.0;
             double w = item.getOrDefault("width", 320.0) instanceof Number ? ((Number) item.get("width")).doubleValue() : 320.0;
             double h = item.getOrDefault("height", 180.0) instanceof Number ? ((Number) item.get("height")).doubleValue() : 180.0;
-            String imageUrl = "https://via.placeholder.com/320x180.png?text=Image";
+            // (1) config JSON에서 imageUrl 추출 (loadImageItems() /dashboard/images 경로)
+            String imageUrl = null;
             try {
                 if (item.containsKey("config") && item.get("config") != null) {
                     String cfg = item.get("config").toString();
@@ -446,6 +447,14 @@ public class DashboardWidgetModule {
                 }
             } catch (Exception e) {
                 // ignore
+            }
+            // (2) top-level imageUrl 폴백 (applySnapshot() 15초 갱신 경로 — config 키 없음)
+            if ((imageUrl == null || imageUrl.isBlank()) && item.containsKey("imageUrl")) {
+                Object raw = item.get("imageUrl");
+                if (raw != null && !raw.toString().isBlank()) imageUrl = raw.toString();
+            }
+            if (imageUrl == null || imageUrl.isBlank()) {
+                imageUrl = apiBaseUrl.replace("/api/v1", "") + "/api/v1/files/placeholder.png";
             }
             final String imageUrlFinal = imageUrl;
             final double widthFinal = w;
@@ -461,11 +470,11 @@ public class DashboardWidgetModule {
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteImageItem(id));
                 imageDeleteBtns.put(id, deleteBtn);
-                ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true));
+                ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true));
                 imageView.setFitWidth(widthFinal);
                 imageView.setFitHeight(heightFinal);
                 Button refreshBtn = new Button("새로고침");
-                refreshBtn.setOnAction(e -> imageView.setImage(new Image(imageUrlFinal, widthFinal, heightFinal, true, true)));
+                refreshBtn.setOnAction(e -> imageView.setImage(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true)));
                 newBox.getChildren().addAll(deleteBtn, imageView, refreshBtn);
                 newBox.setPrefSize(widthFinal, heightFinal + 56);
                 dashboardInteractionService.attachDragHandlers(

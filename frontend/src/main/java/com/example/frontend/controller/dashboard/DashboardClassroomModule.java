@@ -82,6 +82,15 @@ public class DashboardClassroomModule {
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.refreshPanelCallback = refreshPanelCallback;
         this.snapModeSupplier = snapModeSupplier;
+
+        // DB에서 skipGroupCommandConfirm 초기값 로드
+        apiClient.getJson("/settings/skipGroupCommandConfirm", new TypeReference<Map<String, Object>>() {})
+                .thenAccept(resp -> {
+                    if ("true".equalsIgnoreCase(String.valueOf(resp.getOrDefault("value", "")))) {
+                        skipGroupCommandConfirm = true;
+                    }
+                })
+                .exceptionally(ex -> null);
     }
 
     // ─── 패널 갱신 (public) ────────────────────────────────────────────────
@@ -350,7 +359,21 @@ public class DashboardClassroomModule {
         panel.getProperties().put("gridMinCell", 16);
         panel.getProperties().put("gridMaxCell", 56);
         panel.getProperties().put("gridMaxCols", 20);
-        panel.getProperties().put("gridOrderMode", ORDER_BY_PC_NAME);
+
+        // configJson에서 gridOrderMode 복원 (DB 영속)
+        String savedOrderMode = ORDER_BY_PC_NAME;
+        String baseConfigJson = "{}";
+        try {
+            String cfgJson = panelDto.getConfigJson();
+            if (cfgJson != null && !cfgJson.isBlank()) {
+                baseConfigJson = cfgJson;
+                Map<String, Object> cfg = objectMapper.readValue(cfgJson, new TypeReference<Map<String, Object>>() {});
+                Object mode = cfg.get("gridOrderMode");
+                if (mode != null && !mode.toString().isBlank()) savedOrderMode = mode.toString();
+            }
+        } catch (Exception ignored) {}
+        panel.getProperties().put("gridOrderMode", savedOrderMode);
+        panel.getProperties().put("configJsonBase", baseConfigJson);
 
         renderPcGrid(summary.getTotalPcs(), pcCacheByGroupId.get(summary.getGroupId()), pcGrid, panel);
         fetchPcStatuses(summary.getGroupId(), summary.getTotalPcs(), pcGrid);
@@ -567,8 +590,28 @@ public class DashboardClassroomModule {
                 panel.getProperties().put("gridMinCell", minSpinner.getValue());
                 panel.getProperties().put("gridMaxCell", maxSpinner.getValue());
                 panel.getProperties().put("gridMaxCols", colsSpinner.getValue());
-                panel.getProperties().put("gridOrderMode",
-                        "IP 순".equals(orderCombo.getValue()) ? ORDER_BY_IP : ORDER_BY_PC_NAME);
+                String newOrderMode = "IP 순".equals(orderCombo.getValue()) ? ORDER_BY_IP : ORDER_BY_PC_NAME;
+                panel.getProperties().put("gridOrderMode", newOrderMode);
+
+                // gridOrderMode를 dashboard_panels.config_json 에 영속
+                Long panelId = (Long) panel.getProperties().get("dashboardPanelId");
+                long dashId = dashboardIdSupplier.getAsLong();
+                if (panelId != null && dashId > 0) {
+                    try {
+                        String base = (String) panel.getProperties().getOrDefault("configJsonBase", "{}");
+                        Map<String, Object> cfg = new java.util.LinkedHashMap<>();
+                        if (base != null && !base.isBlank()) {
+                            cfg = objectMapper.readValue(base, new TypeReference<Map<String, Object>>() {});
+                        }
+                        cfg.put("gridOrderMode", newOrderMode);
+                        String newJson = objectMapper.writeValueAsString(cfg);
+                        panel.getProperties().put("configJsonBase", newJson);
+                        final String payload = "{\"configJson\":" + objectMapper.writeValueAsString(newJson) + "}";
+                        apiClient.putJson("/dashboards/" + dashId + "/panels/" + panelId, payload)
+                                .exceptionally(ex -> null);
+                    } catch (Exception ignored) {}
+                }
+
                 renderPcGrid(totalCount, pcCacheByGroupId.get(groupId), pcGrid, panel);
             }
         });
@@ -776,6 +819,11 @@ public class DashboardClassroomModule {
         var result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.YES) {
             skipGroupCommandConfirm = skipNext.isSelected();
+            if (skipGroupCommandConfirm) {
+                // DB에 영속
+                apiClient.putJson("/settings/skipGroupCommandConfirm",
+                        Map.of("value", "true")).exceptionally(ex -> null);
+            }
             return true;
         }
         return false;
