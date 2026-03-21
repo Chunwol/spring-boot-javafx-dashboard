@@ -56,6 +56,7 @@ public class DashboardClassroomModule {
     private final Map<Long, Button> gridSettingsBtns = new HashMap<>();
     private final Map<Long, Node> resizeHandleNodes = new HashMap<>();
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
+    private boolean skipGroupCommandConfirm = false;
     private static final double GRID_SIZE = 20.0;
 
     public DashboardClassroomModule(
@@ -369,11 +370,11 @@ public class DashboardClassroomModule {
         HBox buttonBox = new HBox(5);
         Button shutdownAllBtn = new Button("전체 종료");
         shutdownAllBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
-        shutdownAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), "SHUTDOWN"));
+        shutdownAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "SHUTDOWN"));
 
         Button wolAllBtn = new Button("전체 켜기(WOL)");
         wolAllBtn.setStyle("-fx-background-color: #3498db; -fx-text-fill: white;");
-        wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), "WOL"));
+        wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "WOL"));
 
         buttonBox.getChildren().addAll(shutdownAllBtn, wolAllBtn);
     panel.getChildren().addAll(header, titleBanner, countStrip, pcGrid, buttonBox);
@@ -672,7 +673,10 @@ public class DashboardClassroomModule {
                 });
     }
 
-    private void sendGroupCommand(Long groupId, String type) {
+    private void sendGroupCommand(Long groupId, String groupName, String type) {
+        if (!confirmGroupCommand(groupName, type)) {
+            return;
+        }
         apiClient.postJson("/commands", java.util.Map.of(
                 "scope", "GROUP",
                 "groupId", groupId,
@@ -689,5 +693,40 @@ public class DashboardClassroomModule {
                             type + " 명령 전송 실패: " + cause.getMessage()).show());
                     return null;
                 });
+    }
+
+    private boolean confirmGroupCommand(String groupName, String type) {
+        if (skipGroupCommandConfirm) {
+            return true;
+        }
+
+        String label = switch (type) {
+            case "SHUTDOWN" -> "전체 종료";
+            case "WOL" -> "전체 켜기(WOL)";
+            default -> type;
+        };
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("전체 명령 확인");
+        confirm.setHeaderText("정말 전체 명령을 실행하시겠습니까?");
+
+        Label message = new Label("강의실: " + (groupName == null ? "-" : groupName)
+                + "\n명령: " + label
+                + "\n\n실수로 실행하면 큰 영향이 있을 수 있습니다.");
+        message.setWrapText(true);
+
+        CheckBox skipNext = new CheckBox("다시 묻지 않기");
+        VBox content = new VBox(10, message, skipNext);
+        content.setPadding(new Insets(8, 4, 4, 4));
+
+        confirm.getDialogPane().setContent(content);
+        confirm.getButtonTypes().setAll(ButtonType.YES, ButtonType.CANCEL);
+
+        var result = confirm.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.YES) {
+            skipGroupCommandConfirm = skipNext.isSelected();
+            return true;
+        }
+        return false;
     }
 }
