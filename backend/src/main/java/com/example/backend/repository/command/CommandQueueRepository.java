@@ -13,7 +13,7 @@ import java.util.List;
 @Repository
 public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long> {
 
-    List<CommandQueue> findByMacAddressAndIsExecutedFalse(String macAddress);
+    List<CommandQueue> findByMacAddressAndStatusInOrderByCreatedAtAsc(String macAddress, List<String> statuses);
 
     CommandQueue findFirstByMacAddressAndStatusOrderByTaskIdAsc(String macAddress, String status);
 

@@ -31,7 +31,9 @@ public class CommandService {
     }
 
     public List<CommandQueue> getPendingCommands(String macAddress) {
-        return commandQueueRepository.findByMacAddressAndIsExecutedFalse(macAddress);
+        return commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                macAddress,
+                List.of("QUEUED", "DELIVERED", "ACKED"));
     }
 
     @Transactional

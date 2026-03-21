@@ -3,7 +3,7 @@
 :: PC 관제 에이전트 제거 스크립트
 :: 관리자 권한으로 실행하세요.
 :: ============================================================
-setlocal
+setlocal enabledelayedexpansion
 
 set INSTALL_DIR=C:\Program Files\PCAgent
 set OLD_SERVICE=PCAgent

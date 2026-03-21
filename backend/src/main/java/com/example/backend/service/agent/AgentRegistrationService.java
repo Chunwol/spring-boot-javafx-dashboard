@@ -16,12 +16,15 @@ import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class AgentRegistrationService {
 
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
+    private final ConcurrentMap<String, Object> registrationLocks = new ConcurrentHashMap<>();
 
     @Value("${agent.install-key:CHANGE_ME_INSTALL_KEY}")
     private String installKey;
@@ -38,7 +41,17 @@ public class AgentRegistrationService {
         validateRequest(request);
 
         String mac = request.getMacAddress().trim().toUpperCase();
+        Object lock = registrationLocks.computeIfAbsent(mac, key -> new Object());
+        try {
+            synchronized (lock) {
+                return registerAgentUnderLock(mac, request);
+            }
+        } finally {
+            registrationLocks.remove(mac, lock);
+        }
+    }
 
+    private AgentRegisterResponse registerAgentUnderLock(String mac, AgentRegisterRequest request) {
         PcMaster pc = pcMasterRepository.findById(mac).orElseGet(PcMaster::new);
         pc.setMacAddress(mac);
         pc.setPcName(request.getHostname());
