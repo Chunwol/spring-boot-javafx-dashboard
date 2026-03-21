@@ -56,15 +56,8 @@ if exist "%~dp0agent-watchdog.ps1" (
     exit /b 1
 )
 
-:: ── config.json 복사 (기존 토큰 보존) ────────────────────────
-if exist "%~dp0config.json" (
-    if exist "%INSTALL_DIR%\config.json" (
-        echo [INFO] 기존 config.json 유지 (토큰 보존)
-    ) else (
-        xcopy /Y "%~dp0config.json" "%INSTALL_DIR%\" >nul
-        echo [OK] config.json 복사 완료
-    )
-) else (
+:: ── config.json 병합 업데이트 (agentToken 보존) ────────────────
+if not exist "%~dp0config.json" (
     if not exist "%INSTALL_DIR%\config.json" (
         (
             echo {
@@ -78,6 +71,38 @@ if exist "%~dp0config.json" (
             echo }
         ) > "%INSTALL_DIR%\config.json"
         echo [OK] 기본 config.json 생성 완료
+    )
+) else (
+    set TMPCFGPS=%TEMP%\pcagent-config-merge-%RANDOM%.ps1
+    (
+    echo $ErrorActionPreference = 'Stop'
+    echo $srcPath = '%~dp0config.json'
+    echo $dstPath = '%INSTALL_DIR%\config.json'
+    echo $src = Get-Content $srcPath -Raw ^| ConvertFrom-Json
+    echo if ^(Test-Path $dstPath^) {
+    echo     try { $dst = Get-Content $dstPath -Raw ^| ConvertFrom-Json } catch { $dst = [pscustomobject]@{} }
+    echo } else {
+    echo     $dst = [pscustomobject]@{}
+    echo }
+    echo $token = if ^($dst.PSObject.Properties.Name -contains 'agentToken'^) { [string]$dst.agentToken } else { '' }
+    echo $merged = [ordered]@{}
+    echo $merged.serverUrl = if ^($src.PSObject.Properties.Name -contains 'serverUrl'^) { [string]$src.serverUrl } else { 'http://localhost:8080' }
+    echo $merged.installKey = if ^($src.PSObject.Properties.Name -contains 'installKey'^) { [string]$src.installKey } else { '' }
+    echo $merged.agentToken = $token
+    echo $merged.heartbeatIntervalSec = if ^($src.PSObject.Properties.Name -contains 'heartbeatIntervalSec'^) { [int]$src.heartbeatIntervalSec } else { 120 }
+    echo $merged.jitterSec = if ^($src.PSObject.Properties.Name -contains 'jitterSec'^) { [int]$src.jitterSec } else { 30 }
+    echo $merged.githubOwner = if ^($src.PSObject.Properties.Name -contains 'githubOwner'^) { [string]$src.githubOwner } else { '' }
+    echo $merged.githubRepo = if ^($src.PSObject.Properties.Name -contains 'githubRepo'^) { [string]$src.githubRepo } else { '' }
+    echo $merged ^| ConvertTo-Json -Depth 8 ^| Set-Content $dstPath -Encoding UTF8
+    echo Write-Host '[OK] config.json 병합 완료 (agentToken 보존)'
+    ) > "%TMPCFGPS%"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%TMPCFGPS%"
+    set CFG_EXIT=%errorLevel%
+    del "%TMPCFGPS%" >nul 2>&1
+    if %CFG_EXIT% neq 0 (
+        echo [오류] config.json 병합 실패
+        pause
+        exit /b 1
     )
 )
 
@@ -101,8 +126,8 @@ echo $installDir = '%INSTALL_DIR%'
 echo $watchdogScript = Join-Path $installDir 'agent-watchdog.ps1'
 echo.
 echo # 기존 작업 제거
-echo try { Stop-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -ErrorAction SilentlyContinue } catch {}
-echo try { Unregister-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+echo try { Stop-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -ErrorAction SilentlyContinue } catch {}
+echo try { Unregister-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 echo try { Unregister-ScheduledTask -TaskName 'PCAgent' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 echo.
 echo $action = New-ScheduledTaskAction `
@@ -125,15 +150,15 @@ echo     -LogonType ServiceAccount `
 echo     -RunLevel Highest
 echo.
 echo $null = Register-ScheduledTask `
-echo     -TaskPath '\PCAgent\' `
-echo     -TaskName 'Main' `
+echo     -TaskPath '%TASK_PATH%' `
+echo     -TaskName '%TASK_NAME%' `
 echo     -Action $action `
 echo     -Trigger $trigger `
 echo     -Settings $settings `
 echo     -Principal $principal `
 echo     -Force
 echo.
-echo Write-Host '[OK] 작업 스케줄러 등록 완료: \PCAgent\Main'
+echo Write-Host '[OK] 작업 스케줄러 등록 완료: %TASK_PATH%%TASK_NAME%'
 ) > "%TMPPS%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%TMPPS%"
@@ -179,7 +204,7 @@ echo [OK] 전원 정책 적용 완료
 
 :: ── 에이전트 즉시 시작 ────────────────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { Start-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main'; Write-Host '[OK] 에이전트 시작됨' } catch { Write-Host '[경고] 즉시 시작 실패 (재부팅 후 자동 시작됩니다): ' + $_.Exception.Message }"
+    "try { Start-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%'; Write-Host '[OK] 에이전트 시작됨' } catch { Write-Host '[경고] 즉시 시작 실패 (재부팅 후 자동 시작됩니다): ' + $_.Exception.Message }"
 
 echo.
 echo ================================================================
@@ -194,7 +219,7 @@ echo  [ 중요 ] %INSTALL_DIR%\config.json 에서
 echo  serverUrl 과 installKey 를 수정하세요.
 echo.
 echo  작업 관리자 확인:
-echo    작업 스케줄러 라이브러리 → PCAgent → Main
+echo    작업 스케줄러 라이브러리 → %TASK_PATH% %TASK_NAME%
 echo ================================================================
 pause
 endlocal

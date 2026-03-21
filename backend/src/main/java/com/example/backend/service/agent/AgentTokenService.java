@@ -55,7 +55,7 @@ public class AgentTokenService {
         lastUsedBuffer.forEach((mac, usedAt) -> {
             boolean removed = lastUsedBuffer.remove(mac, usedAt);
             if (!removed) return;
-            tokenRepository.findByMacAddress(mac).ifPresent(tok -> {
+            tokenRepository.findAllByMacAddress(mac).forEach(tok -> {
                 tok.setLastUsedAt(usedAt);
                 tokenRepository.save(tok);
             });
@@ -64,7 +64,7 @@ public class AgentTokenService {
 
     @Transactional
     public void revokeByMac(String macAddress) {
-        tokenRepository.findByMacAddress(macAddress).ifPresent(tok -> {
+        tokenRepository.findAllByMacAddress(macAddress).forEach(tok -> {
             tok.setRevoked(true);
             tokenRepository.save(tok);
         });

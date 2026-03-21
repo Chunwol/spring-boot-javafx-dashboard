@@ -197,6 +197,23 @@ public class DashboardManagementModule {
         lastSeenCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("lastSeen"))));
         lastSeenCol.setPrefWidth(150);
 
+        TableColumn<Map<String, Object>, String> orphanCol = new TableColumn<>("등록상태");
+        orphanCol.setCellValueFactory(d -> {
+            boolean orphan = Boolean.TRUE.equals(d.getValue().get("orphan"));
+            return new SimpleStringProperty(orphan ? "고아토큰" : "정상");
+        });
+        orphanCol.setCellFactory(col -> new TableCell<>() {
+            @Override protected void updateItem(String s, boolean empty) {
+                super.updateItem(s, empty);
+                if (empty || s == null) { setText(null); setStyle(""); return; }
+                setText(s);
+                setStyle("고아토큰".equals(s)
+                        ? "-fx-text-fill: #b45309; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #475569;");
+            }
+        });
+        orphanCol.setPrefWidth(80);
+
         TableColumn<Map<String, Object>, Void> actionCol = new TableColumn<>("관리");
         actionCol.setCellFactory(col -> new TableCell<>() {
             private final Button revokeBtn = new Button("토큰폐기");
@@ -223,7 +240,7 @@ public class DashboardManagementModule {
         actionCol.setPrefWidth(140);
 
         agentTable = new TableView<>();
-        agentTable.getColumns().addAll(pcNameCol, ipCol, macCol, statusCol, tokenCol, lastSeenCol, actionCol);
+        agentTable.getColumns().addAll(pcNameCol, ipCol, macCol, statusCol, tokenCol, orphanCol, lastSeenCol, actionCol);
         agentTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         agentTable.setPrefHeight(260);
         agentTable.setPlaceholder(new Label("등록된 에이전트가 없습니다."));
@@ -255,7 +272,18 @@ public class DashboardManagementModule {
         if (agentTable == null) return;
         apiClient.getPagedList("/admin/agents", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(list -> Platform.runLater(() -> {
-                    agentTable.getItems().setAll(list != null ? list : List.of());
+                    if (list == null) {
+                        agentTable.getItems().setAll(List.of());
+                        return;
+                    }
+                    List<Map<String, Object>> sorted = new ArrayList<>(list);
+                    sorted.sort((a, b) -> {
+                        boolean ao = Boolean.TRUE.equals(a.get("orphan"));
+                        boolean bo = Boolean.TRUE.equals(b.get("orphan"));
+                        if (ao == bo) return 0;
+                        return ao ? -1 : 1;
+                    });
+                    agentTable.getItems().setAll(sorted);
                 }))
                 .exceptionally(ex -> {
                     log.warn("에이전트 목록 조회 실패", ex);

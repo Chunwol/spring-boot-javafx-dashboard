@@ -46,7 +46,13 @@ if %errorLevel% equ 0 (
 echo [INFO] 에이전트 프로세스 종료 중...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*PCAgent*agent*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; " ^
-    "Write-Host '[OK] 에이전트 프로세스 종료 완료'"
+    "$limit = (Get-Date).AddSeconds(20); " ^
+    "while ((Get-Date) -lt $limit) { " ^
+    "  $alive = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*PCAgent*agent*' }; " ^
+    "  if (-not $alive) { break }; Start-Sleep -Seconds 1 " ^
+    "}; " ^
+    "$remain = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*PCAgent*agent*' }; " ^
+    "if ($remain) { Write-Host '[경고] 일부 에이전트 프로세스가 아직 실행 중입니다.' } else { Write-Host '[OK] 에이전트 프로세스 종료 완료' }"
 
 :: ── 방화벽 규칙 제거 ──────────────────────────────────────────
 netsh advfirewall firewall delete rule name="PCAgent Outbound" >nul 2>&1
@@ -55,8 +61,23 @@ echo [OK] 방화벽 규칙 제거 완료
 :: ── 설치 폴더 제거 ────────────────────────────────────────────
 timeout /T 2 /NOBREAK >nul
 if exist "%INSTALL_DIR%" (
-    rmdir /S /Q "%INSTALL_DIR%"
-    echo [OK] 설치 폴더 제거: %INSTALL_DIR%
+    set DELETED=0
+    for /L %%I in (1,1,5) do (
+        rmdir /S /Q "%INSTALL_DIR%" >nul 2>&1
+        if not exist "%INSTALL_DIR%" (
+            set DELETED=1
+        )
+        if "!DELETED!"=="1" (
+            rem already deleted
+        ) else (
+            timeout /T 2 /NOBREAK >nul
+        )
+    )
+    if "%DELETED%"=="1" (
+        echo [OK] 설치 폴더 제거: %INSTALL_DIR%
+    ) else (
+        echo [경고] 설치 폴더 일부를 제거하지 못했습니다. 잠금 프로세스를 확인하세요: %INSTALL_DIR%
+    )
 )
 
 echo.

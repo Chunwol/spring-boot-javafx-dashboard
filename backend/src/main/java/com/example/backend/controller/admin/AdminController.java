@@ -103,6 +103,13 @@ public class AdminController {
     @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다.")
     public ResponseEntity<List<Map<String, Object>>> listAgents() {
         List<PcMaster> pcs = pcMasterRepository.findAll();
+        Map<String, PcMaster> pcByMac = new HashMap<>();
+        for (PcMaster pc : pcs) {
+            if (pc.getMacAddress() != null) {
+                pcByMac.put(pc.getMacAddress(), pc);
+            }
+        }
+
         List<AgentAuthToken> tokens = agentAuthTokenRepository.findAll();
         Map<String, AgentAuthToken> tokenByMac = new LinkedHashMap<>();
         for (AgentAuthToken token : tokens) {
@@ -128,6 +135,28 @@ public class AdminController {
             row.put("tokenActive", tok != null && !tok.isRevoked());
             row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
             row.put("tokenLastUsedAt", tok != null ? tok.getLastUsedAt() : null);
+            row.put("orphan", false);
+            result.add(row);
+        }
+
+        // token만 존재하고 pc_master에는 없는 고아 레코드도 노출하여 운영자가 정리 가능하게 함
+        for (Map.Entry<String, AgentAuthToken> e : tokenByMac.entrySet()) {
+            String mac = e.getKey();
+            if (pcByMac.containsKey(mac)) {
+                continue;
+            }
+            AgentAuthToken tok = e.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("macAddress", mac);
+            row.put("pcName", "(미등록 PC)");
+            row.put("ipAddress", "-");
+            row.put("status", "UNREGISTERED");
+            row.put("role", "-");
+            row.put("lastSeen", null);
+            row.put("tokenActive", tok != null && !tok.isRevoked());
+            row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
+            row.put("tokenLastUsedAt", tok != null ? tok.getLastUsedAt() : null);
+            row.put("orphan", true);
             result.add(row);
         }
         return ResponseEntity.ok(result);
@@ -163,7 +192,7 @@ public class AdminController {
     @DeleteMapping("/agents/{mac}")
     @Operation(summary = "에이전트 강제 삭제", description = "PC 레코드와 토큰을 모두 삭제합니다.")
     public ResponseEntity<Map<String, Object>> deleteAgent(@PathVariable String mac) {
-        agentAuthTokenRepository.findByMacAddress(mac).ifPresent(agentAuthTokenRepository::delete);
+        agentAuthTokenRepository.findAllByMacAddress(mac).forEach(agentAuthTokenRepository::delete);
         pcMasterRepository.findById(mac).ifPresent(pcMasterRepository::delete);
         auditService.log("ADMIN", "DELETE_AGENT", "AGENT", mac);
         Map<String, Object> resp = new HashMap<>();

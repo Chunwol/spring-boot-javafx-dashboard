@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -54,7 +55,9 @@ public class AgentRegistrationService {
         String plainToken = "agt_" + UUID.randomUUID().toString().replace("-", "");
         String tokenHash = sha256Hex(plainToken);
 
-        AgentAuthToken authToken = agentAuthTokenRepository.findByMacAddress(mac)
+        List<AgentAuthToken> existingTokens = agentAuthTokenRepository.findAllByMacAddress(mac);
+        AgentAuthToken authToken = existingTokens.stream()
+                .reduce(this::preferredToken)
                 .orElseGet(AgentAuthToken::new);
         authToken.setMacAddress(mac);
         authToken.setTokenHash(tokenHash);
@@ -63,7 +66,30 @@ public class AgentRegistrationService {
         authToken.setRevoked(false);
         agentAuthTokenRepository.save(authToken);
 
+        // 중복 토큰 정리: 최신 1개만 남기고 나머지는 제거
+        for (AgentAuthToken token : existingTokens) {
+            if (token.getId() != null && !token.getId().equals(authToken.getId())) {
+                agentAuthTokenRepository.delete(token);
+            }
+        }
+
         return new AgentRegisterResponse(plainToken, "등록 완료. 하트비트를 시작하세요.");
+    }
+
+    private AgentAuthToken preferredToken(AgentAuthToken a, AgentAuthToken b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        if (a.getLastUsedAt() != null && b.getLastUsedAt() != null) {
+            return a.getLastUsedAt().isAfter(b.getLastUsedAt()) ? a : b;
+        }
+        if (a.getLastUsedAt() != null) return a;
+        if (b.getLastUsedAt() != null) return b;
+        if (a.getIssuedAt() != null && b.getIssuedAt() != null) {
+            return a.getIssuedAt().isAfter(b.getIssuedAt()) ? a : b;
+        }
+        if (a.getIssuedAt() != null) return a;
+        if (b.getIssuedAt() != null) return b;
+        return a;
     }
 
     private void validateInstallKey(String requestInstallKey) {
