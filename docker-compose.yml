@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # ─── Spring Boot 백엔드 ───────────────────────────────
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SERVER_PORT: 8888
+      # X-Forwarded-* 헤더를 신뢰하도록 설정
+      SERVER_FORWARD_HEADERS_STRATEGY: NATIVE
+    volumes:
+      - ./db:/app/db
+      - ./uploads:/app/uploads
+    networks:
+      - web
+    # 직접 외부 노출 안 함 (Nginx가 앞단에서 처리)
+
+  # ─── Nginx 리버스 프록시 ───────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - app
+    networks:
+      - web
+
+networks:
+  web:
+    driver: bridge

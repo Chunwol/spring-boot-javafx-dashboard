@@ -70,9 +70,7 @@ if not exist "%~dp0config.json" (
             echo   "installKey": "CHANGE_ME_INSTALL_KEY",
             echo   "agentToken": "",
             echo   "heartbeatIntervalSec": 120,
-            echo   "jitterSec": 30,
-            echo   "githubOwner": "",
-            echo   "githubRepo": ""
+            echo   "jitterSec": 30
             echo }
         ) > "%INSTALL_DIR%\config.json"
         echo [OK] 기본 config.json 생성 완료
@@ -96,8 +94,6 @@ if not exist "%~dp0config.json" (
     echo $merged.agentToken = $token
     echo $merged.heartbeatIntervalSec = if ^($src.PSObject.Properties.Name -contains 'heartbeatIntervalSec'^) { [int]$src.heartbeatIntervalSec } else { 120 }
     echo $merged.jitterSec = if ^($src.PSObject.Properties.Name -contains 'jitterSec'^) { [int]$src.jitterSec } else { 30 }
-    echo $merged.githubOwner = if ^($src.PSObject.Properties.Name -contains 'githubOwner'^) { [string]$src.githubOwner } else { '' }
-    echo $merged.githubRepo = if ^($src.PSObject.Properties.Name -contains 'githubRepo'^) { [string]$src.githubRepo } else { '' }
     echo $merged ^| ConvertTo-Json -Depth 8 ^| Set-Content $dstPath -Encoding UTF8
     echo Write-Host '[OK] config.json 병합 완료 (agentToken 보존)'
     ) > "%TMPCFGPS%"

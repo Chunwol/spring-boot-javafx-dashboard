@@ -23,6 +23,21 @@ public class ClassroomSummaryDto {
     @Schema(description = "전체 PC 수", example = "20")
     private int totalPcCount;
     
+    @Schema(description = "온라인 PC 수 (long)", example = "15")
+    private int onlinePcs;
+    
+    @Schema(description = "전체 PC 수 (long)", example = "20")
+    private int totalPcs;
+    
+    @Schema(description = "교사 PC 상태", example = "ONLINE")
+    private String teacherPcStatus;
+    
+    @Schema(description = "마지막 하트비트 시간")
+    private String lastHeartbeat;
+    
+    @Schema(description = "강의실의 IP 범위 목록")
+    private List<String> ipRanges;
+    
     @Schema(description = "대시보드에 표시 여부", example = "true")
     private boolean visible = true;
     
@@ -37,16 +52,4 @@ public class ClassroomSummaryDto {
     
     @Schema(description = "대시보드 패널 높이", example = "300.0")
     private Double height;
-    
-    @Schema(description = "강의실의 IP 범위 목록")
-    private List<String> ipRanges;
-    
-    @Schema(description = "온라인 PC 수 (onlinePcCount와 동일)", example = "15")
-    private int onlinePcs;
-    
-    @Schema(description = "전체 PC 수 (totalPcCount와 동일)", example = "20")
-    private int totalPcs;
-    
-    @Schema(description = "교사 PC 상태", example = "ONLINE")
-    private String teacherPcStatus;
 }

@@ -75,11 +75,12 @@ public class DashboardWidgetApiController {
     // ---- TEXT API (/api/v1/dashboard/texts) ----
 
     @GetMapping("/dashboard/texts")
-    public List<Map<String, Object>> listTextItems() {
+    public List<Map<String, Object>> listTextItems(@RequestParam(required = false) Long dashboardId) {
         try {
-            return repository.findByTypeIgnoreCase("TEXT").stream()
-                    .map(this::toTextMap)
-                    .toList();
+            List<DashboardWidgetItem> items = (dashboardId != null && dashboardId > 0)
+                    ? repository.findByTypeIgnoreCaseAndDashboardId("TEXT", dashboardId)
+                    : repository.findByTypeIgnoreCase("TEXT");
+            return items.stream().map(this::toTextMap).toList();
         } catch (Exception e) {
             log.error("Failed to list text dashboard widgets", e);
             return List.of();
@@ -134,11 +135,12 @@ public class DashboardWidgetApiController {
     // ---- IMAGE API (/api/v1/dashboard/images) ----
 
     @GetMapping("/dashboard/images")
-    public List<Map<String, Object>> listImageItems() {
+    public List<Map<String, Object>> listImageItems(@RequestParam(required = false) Long dashboardId) {
         try {
-            return repository.findByTypeIgnoreCase("IMAGE").stream()
-                    .map(this::toImageMap)
-                    .toList();
+            List<DashboardWidgetItem> items = (dashboardId != null && dashboardId > 0)
+                    ? repository.findByTypeIgnoreCaseAndDashboardId("IMAGE", dashboardId)
+                    : repository.findByTypeIgnoreCase("IMAGE");
+            return items.stream().map(this::toImageMap).toList();
         } catch (Exception e) {
             log.error("Failed to list image dashboard widgets", e);
             return List.of();
@@ -187,7 +189,8 @@ public class DashboardWidgetApiController {
             @RequestParam(defaultValue = "100") double x,
             @RequestParam(defaultValue = "100") double y,
             @RequestParam(defaultValue = "360") double width,
-            @RequestParam(defaultValue = "240") double height) {
+            @RequestParam(defaultValue = "240") double height,
+            @RequestParam(required = false) Long dashboardId) {
         try {
             String filename = fileStorageService.store(file);
             String imageUrl = serverBaseUrl + "/api/v1/files/" + filename;
@@ -201,6 +204,7 @@ public class DashboardWidgetApiController {
             DashboardWidgetItem item = new DashboardWidgetItem();
             item.setType("IMAGE");
             applyCommon(item, req, 100.0, 100.0, 360.0, 240.0, true);
+            if (dashboardId != null && dashboardId > 0) item.setDashboardId(dashboardId);
             item.setConfig(writeConfig(req));
             DashboardWidgetItem saved = repository.save(item);
             return ResponseEntity.status(201).body(toImageMap(saved));
@@ -245,6 +249,10 @@ public class DashboardWidgetApiController {
     private void applyCommon(DashboardWidgetItem item, Map<String, Object> req,
                              Double dx, Double dy, Double dw, Double dh, boolean dvis) {
         item.setGroupId(asLong(req.getOrDefault("groupId", item.getGroupId() == null ? 1L : item.getGroupId())));
+        if (req.containsKey("dashboardId")) {
+            long did = asLong(req.get("dashboardId"));
+            if (did > 0) item.setDashboardId(did);
+        }
         item.setX(asDouble(req.getOrDefault("x", dx == null ? 0.0 : dx)));
         item.setY(asDouble(req.getOrDefault("y", dy == null ? 0.0 : dy)));
         item.setWidth(asDouble(req.getOrDefault("width", dw == null ? 200.0 : dw)));
@@ -272,6 +280,7 @@ public class DashboardWidgetApiController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", item.getId());
         out.put("groupId", item.getGroupId());
+        out.put("dashboardId", item.getDashboardId());
         out.put("type", item.getType());
         out.put("x", item.getX());
         out.put("y", item.getY());

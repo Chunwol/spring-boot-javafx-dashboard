@@ -9,15 +9,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AgentConfig {
 
-    private String serverUrl = "http://localhost:8080";
+    private String serverUrl = "http://localhost:8888";
     private String installKey = "";
     private String agentToken = "";
     private int heartbeatIntervalSec = 120;
     private int jitterSec = 30;
-
-    /** OTA 자가 업데이트용 GitHub 저장소 (비워 두면 OTA 비활성화) */
-    private String githubOwner = "";
-    private String githubRepo = "";
 
     // ----- getters / setters -----
 
@@ -37,10 +33,4 @@ public class AgentConfig {
 
     public int getJitterSec() { return jitterSec; }
     public void setJitterSec(int jitterSec) { this.jitterSec = jitterSec; }
-
-    public String getGithubOwner() { return githubOwner; }
-    public void setGithubOwner(String githubOwner) { this.githubOwner = githubOwner; }
-
-    public String getGithubRepo() { return githubRepo; }
-    public void setGithubRepo(String githubRepo) { this.githubRepo = githubRepo; }
 }

@@ -1,10 +1,10 @@
 .root {
     -fx-font-family: "Segoe UI";
-    -fx-background-color: linear-gradient(to bottom, #eef4ff, #ffffff 40%);
+    -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
 }
 
 .label {
-    -fx-text-fill: #0f172a;
+    -fx-text-fill: #2d3748;
 }
 
 .button {
@@ -17,22 +17,20 @@
 .text-field,
 .password-field,
 .text-area,
-.list-view,
-.table-view,
 .color-picker,
 .menu-button,
 .toggle-button {
     -fx-background-radius: 10;
     -fx-border-radius: 10;
-    -fx-border-color: #d7e2ef;
+    -fx-border-color: #cbd5e0;
     -fx-background-color: white;
-    -fx-text-fill: #0f172a;
+    -fx-text-fill: #2d3748;
 }
 
 .toggle-button:selected {
-    -fx-background-color: #1e40af;
+    -fx-background-color: #3182ce;
     -fx-text-fill: white;
-    -fx-border-color: #1e40af;
+    -fx-border-color: #3182ce;
 }
 
 .scroll-pane {
@@ -41,23 +39,10 @@
 
 .tab-pane *.tab-header-area *.tab {
     -fx-background-radius: 10 10 0 0;
-    -fx-background-color: #dde8f5;
+    -fx-background-color: #edf2f7;
     -fx-padding: 8 16 8 16;
 }
 
 .tab-pane *.tab-header-area *.tab:selected {
     -fx-background-color: #ffffff;
-}
-
-.list-cell {
-    -fx-padding: 8 10 8 10;
-}
-
-.table-row-cell {
-    -fx-background-color: white;
-    -fx-border-color: transparent transparent #eef2f7 transparent;
-}
-
-.table-row-cell:selected {
-    -fx-background-color: #dbeafe;
 }

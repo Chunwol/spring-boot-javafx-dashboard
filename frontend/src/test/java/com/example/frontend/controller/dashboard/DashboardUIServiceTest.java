@@ -7,6 +7,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
+import javafx.scene.transform.Scale;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -31,8 +32,10 @@ class DashboardUIServiceTest {
 
         runOnFxAndWait(() -> service.applyZoom(1.35));
 
-        assertThat(classroom.getScaleX()).isEqualTo(1.35);
-        assertThat(classroom.getScaleY()).isEqualTo(1.35);
+        assertThat(classroom.getTransforms()).hasSize(1);
+        Scale scale = (Scale) classroom.getTransforms().get(0);
+        assertThat(scale.getX()).isEqualTo(1.35);
+        assertThat(scale.getY()).isEqualTo(1.35);
     }
 
     @Test
@@ -62,8 +65,10 @@ class DashboardUIServiceTest {
 
         runOnFxAndWait(() -> service.fitAllPanelsToViewport(List.of()));
 
-        assertThat(classroom.getScaleX()).isEqualTo(1.0);
-        assertThat(classroom.getScaleY()).isEqualTo(1.0);
+        assertThat(classroom.getTransforms()).hasSize(1);
+        Scale resetScale = (Scale) classroom.getTransforms().get(0);
+        assertThat(resetScale.getX()).isEqualTo(1.0);
+        assertThat(resetScale.getY()).isEqualTo(1.0);
         assertThat(toast.getChildren()).isNotEmpty();
         assertThat(((Label) toast.getChildren().get(0)).getText()).contains("No panels to fit");
     }

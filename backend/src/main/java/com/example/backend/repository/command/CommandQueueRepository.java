@@ -53,4 +53,11 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
            long countByStatusAndDeliveredAtBefore(String status, LocalDateTime threshold);
 
            long countByStatusAndAckedAtBefore(String status, LocalDateTime threshold);
+
+           /** SCMATE 초기화 감시: ACK 받은 관리 작업 명령 조회 */
+           List<CommandQueue> findByStatusAndIsAdminOperationAndAckedAtAfter(
+                   String status, Boolean isAdminOperation, LocalDateTime ackedAtThreshold);
+
+           /** SCMATE 초기화 복구 상태로 명령 조회 */
+           List<CommandQueue> findByMacAddressAndScmateResetStatus(String macAddress, String scmateResetStatus);
 }

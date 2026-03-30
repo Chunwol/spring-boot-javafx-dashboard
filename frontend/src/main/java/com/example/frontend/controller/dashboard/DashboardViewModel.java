@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.geometry.Point2D;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.prefs.Preferences;
@@ -27,7 +26,7 @@ public class DashboardViewModel {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardViewModel.class);
 
-    private static final double MIN_ZOOM = 0.4;
+    private static final double MIN_ZOOM = 0.2;
     private static final double MAX_ZOOM = 2.2;
     private static final double GRID_SIZE = 20.0;
 
@@ -254,44 +253,12 @@ public class DashboardViewModel {
     }
 
     // Data Loading Methods
-    /**
-     * Fetch classrooms from backend using DashboardDataService.
-     */
-    public void loadClassrooms(Consumer<List<ClassroomSummaryDto>> callback) {
-        try {
-            List<ClassroomSummaryDto> classrooms = dataService.fetchClassrooms();
-            setCachedClassrooms(classrooms);
-            if (callback != null) {
-                callback.accept(classrooms);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load classrooms", e);
-            if (callback != null) {
-                callback.accept(List.of());
-            }
-        }
-    }
-
-    /**
-     * Update cached data from a refresh snapshot.
-     */
-    public void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
-        if (snapshot == null) {
-            return;
-        }
-        
-        List<ClassroomSummaryDto> classrooms = snapshot.getClassrooms();
-        if (classrooms != null) {
-            setCachedClassrooms(classrooms);
-        }
-    }
 
     /**
      * Fetch refresh snapshot asynchronously using DashboardDataService.
      */
     public void fetchRefreshSnapshotAsync(Consumer<DashboardRefreshDto> callback) {
         dataService.fetchRefreshSnapshotAsync(snapshot -> {
-            applyRefreshSnapshot(snapshot);
             if (callback != null) {
                 callback.accept(snapshot);
             }

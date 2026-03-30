@@ -74,6 +74,62 @@ public class CommandController {
         String scope = req.getScope() == null ? "" : req.getScope().toUpperCase(Locale.ROOT);
         String role = req.getRole() == null ? "ALL" : req.getRole().toUpperCase(Locale.ROOT);
         String type = req.getType() == null ? "" : req.getType().toUpperCase(Locale.ROOT);
+        if ("PCON".equals(type)) {
+            type = "WOL";
+        }
+
+        // SINGLE + WOL: 대상 PC의 그룹 리더 에이전트를 통해 WOL 릴레이
+        if ("SINGLE".equals(scope) && "WOL".equals(type)) {
+            if (req.getMacAddress() == null || req.getMacAddress().isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "macAddress required"));
+            }
+
+            Optional<PcMaster> targetOpt = pcMasterRepository.findById(req.getMacAddress());
+            if (targetOpt.isEmpty()) {
+                return ResponseEntity.status(404).body(Map.of("message", "target pc not found"));
+            }
+
+            PcMaster targetPc = targetOpt.get();
+            if (targetPc.getGroupId() == null) {
+                return ResponseEntity.badRequest().body(Map.of("message", "target groupId not resolved"));
+            }
+
+            List<PcMaster> leaders = pcMasterRepository.findByGroupIdAndStatus(targetPc.getGroupId(), "ONLINE");
+            if (leaders.isEmpty()) {
+                return ResponseEntity.accepted().body(Map.of("queued", 0, "message", "no-online-agent"));
+            }
+
+            PcMaster leader = leaders.get(0);
+            String payloadJson = req.getPayloadJson();
+            if (payloadJson == null || payloadJson.isBlank()) {
+                try {
+                    String broadcastIp = (req.getBroadcastIp() != null && !req.getBroadcastIp().isBlank())
+                            ? req.getBroadcastIp() : "255.255.255.255";
+                    Map<String, String> wolPayload = new LinkedHashMap<>();
+                    wolPayload.put("targetMacs", targetPc.getMacAddress());
+                    wolPayload.put("broadcastIp", broadcastIp);
+                    payloadJson = objectMapper.writeValueAsString(wolPayload);
+                } catch (Exception e) {
+                    return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
+                }
+            }
+
+            CommandQueue c = new CommandQueue();
+            c.setMacAddress(leader.getMacAddress());
+            c.setCommandType("WOL_RELAY");
+            c.setScriptUrl(null);
+            c.setPayloadJson(payloadJson);
+            c.setStatus("QUEUED");
+            c.setCreatedAt(LocalDateTime.now());
+            c.setIsExecuted(false);
+            CommandQueue saved = commandQueueRepository.save(c);
+
+            return ResponseEntity.accepted().body(Map.of(
+                    "queued", 1,
+                    "leaderMac", leader.getMacAddress(),
+                    "taskIds", List.of(saved.getTaskId())
+            ));
+        }
 
         // Special-case: WOL via relay agent (one command to leader)
         if ("GROUP".equals(scope) && "WOL".equals(type)) {
@@ -179,6 +235,7 @@ public class CommandController {
      * @return 확인 응답
      */
     @PostMapping("/agent/commands/{taskId}/ack")
+    @Transactional
     @Operation(
         summary = "에이전트 명령 수신 확인",
         description = "에이전트가 명령을 받았음을 서버에 알립니다. " +
@@ -211,6 +268,7 @@ public class CommandController {
      * @return 확인 응답
      */
     @PostMapping("/agent/commands/{taskId}/result")
+    @Transactional
     @Operation(
         summary = "에이전트 명령 실행 결과 보고",
         description = "에이전트가 명령 실행을 완료하고 결과를 보고합니다. " +

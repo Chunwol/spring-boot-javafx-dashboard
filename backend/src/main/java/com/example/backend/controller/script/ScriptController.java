@@ -72,8 +72,7 @@ public class ScriptController {
             byte[] buf = new byte[8192];
             int r;
             try (var out = Files.newOutputStream(target)) {
-                while ((r = in.read(buf)) >= 0) {
-                    if (r == 0) continue;
+                while ((r = in.read(buf)) > 0) {
                     md.update(buf, 0, r);
                     out.write(buf, 0, r);
                 }

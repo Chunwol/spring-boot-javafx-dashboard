@@ -32,6 +32,9 @@ public class PcMaster {
     @Column(name = "role")
     private String role;
 
+    @Column(name = "broken_note")
+    private String brokenNote;
+
     public PcMaster() {
     }
 
@@ -90,5 +93,13 @@ public class PcMaster {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public String getBrokenNote() {
+        return brokenNote;
+    }
+
+    public void setBrokenNote(String brokenNote) {
+        this.brokenNote = brokenNote;
     }
 }

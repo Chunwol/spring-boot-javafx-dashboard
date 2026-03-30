@@ -13,6 +13,9 @@ public class ClassroomTeacherDevice {
     @Column(name = "group_id", nullable = false)
     private Long groupId;
 
+    @Transient
+    private String groupName;
+
     @Column(name = "ip_address")
     private String ipAddress;
 
@@ -36,6 +39,14 @@ public class ClassroomTeacherDevice {
 
     public void setGroupId(Long groupId) {
         this.groupId = groupId;
+    }
+
+    public String getGroupName() {
+        return groupName;
+    }
+
+    public void setGroupName(String groupName) {
+        this.groupName = groupName;
     }
 
     public String getIpAddress() {

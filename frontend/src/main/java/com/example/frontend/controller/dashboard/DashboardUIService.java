@@ -9,8 +9,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
-import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.transform.Scale;
 import javafx.util.Duration;
 
 import java.util.List;
@@ -28,7 +28,7 @@ public class DashboardUIService {
     private final ScrollPane dashboardScrollPane;
     private final DashboardCanvasModule canvasModule;
     private final HBox editOnlyToolbar;
-    private final VBox leftEditControls;
+    private final Node leftEditControls;
 
     public DashboardUIService(
             Pane toastContainer,
@@ -36,7 +36,7 @@ public class DashboardUIService {
             ScrollPane dashboardScrollPane,
             DashboardCanvasModule canvasModule,
             HBox editOnlyToolbar,
-            VBox leftEditControls
+                Node leftEditControls
     ) {
         this.toastContainer = toastContainer;
         this.classroomContainer = classroomContainer;
@@ -54,7 +54,7 @@ public class DashboardUIService {
             return;
         }
         Label toast = new Label(message);
-        toast.setStyle("-fx-background-color: " + (isError ? "#b91c1c" : "#0f766e")
+        toast.setStyle("-fx-background-color: " + (isError ? "#d73a49" : "#22863a")
                 + "; -fx-text-fill: white; -fx-padding: 8 12 8 12; -fx-background-radius: 8; -fx-font-weight: 600;");
         toastContainer.getChildren().add(0, toast);
 
@@ -70,8 +70,8 @@ public class DashboardUIService {
         if (classroomContainer == null) {
             return;
         }
-        classroomContainer.setScaleX(scale);
-        classroomContainer.setScaleY(scale);
+        // Scale from origin (0,0) so content stays anchored top-left inside the Group/ScrollPane
+        classroomContainer.getTransforms().setAll(new Scale(scale, scale, 0, 0));
     }
 
     /**
@@ -118,7 +118,7 @@ public class DashboardUIService {
 
         // Calculate optimal scale
         double targetScale = Math.min(viewportW / contentW, viewportH / contentH);
-        double clampedScale = Math.max(0.4, Math.min(2.2, targetScale));
+        double clampedScale = Math.max(0.2, Math.min(2.2, targetScale));
         applyZoom(clampedScale);
 
         // Calculate scroll positions

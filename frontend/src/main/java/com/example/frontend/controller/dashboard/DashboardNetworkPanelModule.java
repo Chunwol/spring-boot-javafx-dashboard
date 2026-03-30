@@ -34,6 +34,8 @@ import java.util.function.Supplier;
  */
 public class DashboardNetworkPanelModule {
 
+    private static final double LAYOUT_EPSILON = 0.5;
+
     private final DashboardService dashboardService;
     private final Pane classroomContainer;
     private final DashboardInteractionService interactionService;
@@ -41,13 +43,20 @@ public class DashboardNetworkPanelModule {
     private final DoubleUnaryOperator snapFn;
     private final Supplier<Long> dashboardIdSupplier;
     private final BiConsumer<String, Boolean> showToast;
+    private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final Function<String, double[]> responsiveSizeFn;
     private final Runnable onPanelsChanged;
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
     private final Map<Long, NetworkPanelController> controllerMap = new HashMap<>();
+    private final Map<Long, Long> panelGroupMap = new HashMap<>();
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
     private final Map<Long, Label> resizeHandleMap = new HashMap<>();
+
+    @FunctionalInterface
+    public interface PanelLayoutCacheUpdater {
+        void update(Long panelId, double x, double y, double width, double height);
+    }
 
     public DashboardNetworkPanelModule(
             DashboardService dashboardService,
@@ -57,6 +66,7 @@ public class DashboardNetworkPanelModule {
             DoubleUnaryOperator snapFn,
             Supplier<Long> dashboardIdSupplier,
             BiConsumer<String, Boolean> showToast,
+            PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             Function<String, double[]> responsiveSizeFn,
             Runnable onPanelsChanged) {
         this.dashboardService = dashboardService;
@@ -66,6 +76,7 @@ public class DashboardNetworkPanelModule {
         this.snapFn = snapFn;
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.showToast = showToast;
+        this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.responsiveSizeFn = responsiveSizeFn;
         this.onPanelsChanged = onPanelsChanged;
     }
@@ -116,6 +127,7 @@ public class DashboardNetworkPanelModule {
                     classroomContainer.getChildren().remove(node);
                 }
                 controllerMap.remove(id);
+                panelGroupMap.remove(id);
                 deleteBtnMap.remove(id);
                 resizeHandleMap.remove(id);
             }
@@ -135,18 +147,19 @@ public class DashboardNetworkPanelModule {
         classroomContainer.getChildren().add(wrapper);
         panelMap.put(panelDto.getId(), wrapper);
         controllerMap.put(panelDto.getId(), controller);
+        panelGroupMap.put(panelDto.getId(), panelDto.getRefGroupId());
     }
 
     private VBox buildWrapper(DashboardPanelDto panelDto, ClassroomSummaryDto linked,
                               NetworkPanelController controller) {
-        Label title = new Label(linked != null ? linked.getGroupName() + " Network" : "Network panel");
+        Label title = new Label(linked != null ? linked.getGroupName() + " 네트워크" : "네트워크 패널");
         title.setStyle("-fx-font-weight: 700; -fx-text-fill: #0f172a;");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button deleteBtn = new Button("Delete");
-        deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; "
+        Button deleteBtn = new Button("삭제");
+        deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; "
                 + "-fx-font-size: 11px; -fx-background-radius: 6;");
         deleteBtn.setVisible(canInteract.getAsBoolean());
         deleteBtn.setManaged(canInteract.getAsBoolean());
@@ -176,10 +189,24 @@ public class DashboardNetworkPanelModule {
     }
 
     private void updateLayout(VBox existing, DashboardPanelDto panelDto) {
-        existing.setLayoutX(panelDto.getX() != null ? panelDto.getX() : existing.getLayoutX());
-        existing.setLayoutY(panelDto.getY() != null ? panelDto.getY() : existing.getLayoutY());
-        existing.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : existing.getPrefWidth());
-        existing.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : existing.getPrefHeight());
+        if (panelDto.getX() != null) {
+            applyIfChanged(existing.getLayoutX(), panelDto.getX(), existing::setLayoutX);
+        }
+        if (panelDto.getY() != null) {
+            applyIfChanged(existing.getLayoutY(), panelDto.getY(), existing::setLayoutY);
+        }
+        if (panelDto.getWidth() != null) {
+            applyIfChanged(existing.getPrefWidth(), panelDto.getWidth(), existing::setPrefWidth);
+        }
+        if (panelDto.getHeight() != null) {
+            applyIfChanged(existing.getPrefHeight(), panelDto.getHeight(), existing::setPrefHeight);
+        }
+    }
+
+    private void applyIfChanged(double current, double next, java.util.function.DoubleConsumer setter) {
+        if (Math.abs(current - next) > LAYOUT_EPSILON) {
+            setter.accept(next);
+        }
     }
 
     private void attachInteraction(VBox panel, Long panelId) {
@@ -219,6 +246,17 @@ public class DashboardNetworkPanelModule {
         });
     }
 
+    public void refreshPcTrafficRows() {
+        controllerMap.forEach((panelId, controller) -> {
+            Long groupId = panelGroupMap.get(panelId);
+            if (groupId == null) {
+                controller.updatePcTraffic(List.of());
+                return;
+            }
+            dashboardService.fetchClassroomPcTrafficAsync(groupId, controller::updatePcTraffic);
+        });
+    }
+
     private void persistPosition(VBox panel, Long panelId, String toastMessage) {
         Long dashboardId = dashboardIdSupplier.get();
         if (dashboardId == null) {
@@ -229,6 +267,15 @@ public class DashboardNetworkPanelModule {
                 panel.getLayoutX(), panel.getLayoutY(),
                 panel.getPrefWidth(), panel.getPrefHeight()
         );
+        if (panelLayoutCacheUpdater != null) {
+            panelLayoutCacheUpdater.update(
+                panelId,
+                panel.getLayoutX(),
+                panel.getLayoutY(),
+                panel.getPrefWidth(),
+                panel.getPrefHeight()
+            );
+        }
         showToast.accept(toastMessage, false);
     }
 }

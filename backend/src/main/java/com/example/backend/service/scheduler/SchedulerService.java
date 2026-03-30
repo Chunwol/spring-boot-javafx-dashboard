@@ -152,6 +152,58 @@ public class SchedulerService {
         }
     }
 
+    // ─── SCMATE 초기화 감시 (2분 주기) ────────────────────────────
+    @Scheduled(fixedRate = 120_000, initialDelay = 30_000)
+    @org.springframework.transaction.annotation.Transactional
+    public void monitorScmateInitialization() {
+        // 관리 작업(파일 설치, 에이전트 업데이트) 명령이 ACK까지 받았는데
+        // PC가 갑자기 OFFLINE이 되면 = SCMATE 초기화 의심
+        LocalDateTime recentThreshold = LocalDateTime.now().minusMinutes(5);
+        
+        // ACK 받은 관리 작업 명령들 조사 (완료되지 않은 것)
+        List<CommandQueue> adminCommandsAcked = commandQueueRepository
+            .findByStatusAndIsAdminOperationAndAckedAtAfter("ACKED", true, recentThreshold);
+        
+        for (CommandQueue cmd : adminCommandsAcked) {
+            // 이미 SCMATE 복구 중이면 skip
+            if ("PENDING".equals(cmd.getScmateResetStatus())) {
+                continue;
+            }
+            
+            String mac = cmd.getMacAddress();
+            Optional<PcMaster> pcOpt = pcRepo.findById(mac);
+            
+            if (pcOpt.isPresent()) {
+                PcMaster pc = pcOpt.get();
+                // ACK는 받았는데 PC가 OFFLINE 상태 = SCMATE 초기화 의심
+                if ("OFFLINE".equalsIgnoreCase(pc.getStatus())) {
+                    long ackedSeconds = java.time.temporal.ChronoUnit.SECONDS
+                        .between(cmd.getAckedAt(), LocalDateTime.now());
+                    
+                    // ACK 받은지 2분 이내에 OFFLINE된 경우만 감지
+                    if (ackedSeconds < 120) {
+                        log.warn("[SCMATE 초기화 감지] {} ({}) - 관리 작업 완료 직후 연결 끊김 ({}초)",
+                                pc.getPcName(), mac, ackedSeconds);
+                        
+                        // SCMATE 복구 상태 설정
+                        cmd.setScmateResetStatus("PENDING");
+                        cmd.setScmateResetRequestedAt(LocalDateTime.now());
+                        commandQueueRepository.save(cmd);
+                        
+                        if (isAlertCooldownPassed(mac)) {
+                            String scmateMsg = String.format(
+                                    "[SCMATE 초기화 감지] %s (%s) - 에이전트 업데이트/파일 설치 완료 직후 연결 끊김. "
+                                    + "PC의 SCMATE 스냅샷을 재설정하고 PC를 재부팅하세요. (명령 ID: %d)",
+                                    pc.getPcName(), mac, cmd.getTaskId());
+                            eventPublisher.publishEvent(new AlertEvent(this, mac, scmateMsg));
+                            lastAlertTime.put(mac, LocalDateTime.now());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
         private void handleRetryOrFail(CommandQueue cmd) {
         int retryCount = cmd.getRetryCount() == null ? 0 : cmd.getRetryCount();
         if (retryCount >= maxCommandRetries) {

@@ -6,6 +6,8 @@ import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.util.IpRangeUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +15,8 @@ import java.util.List;
 
 @Service
 public class ClassroomValidationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ClassroomValidationService.class);
 
     private final ClassroomGroupRepository groupRepository;
     private final ClassroomIpRangeRepository ipRangeRepository;
@@ -30,8 +34,7 @@ public class ClassroomValidationService {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("강의실 이름은 필수입니다.");
         }
-        boolean duplicated = groupRepository.findAll().stream()
-                .anyMatch(g -> g.getName() != null && g.getName().equalsIgnoreCase(name.trim()));
+        boolean duplicated = groupRepository.existsByNameIgnoreCase(name.trim());
         if (duplicated) {
             String msg = "강의실 이름이 이미 존재합니다: " + name;
             publishAlert(msg);
@@ -43,11 +46,7 @@ public class ClassroomValidationService {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("강의실 이름은 필수입니다.");
         }
-        boolean duplicated = groupRepository.findAll().stream()
-                .anyMatch(g -> g.getId() != null
-                        && !g.getId().equals(id)
-                        && g.getName() != null
-                        && g.getName().equalsIgnoreCase(name.trim()));
+        boolean duplicated = groupRepository.existsByNameIgnoreCaseAndIdNot(name.trim(), id);
         if (duplicated) {
             String msg = "수정하려는 강의실 이름이 이미 사용 중입니다: " + name;
             publishAlert(msg);
@@ -69,7 +68,8 @@ public class ClassroomValidationService {
             long[] interval;
             try {
                 interval = toInterval(r);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.debug("기존 IP 대역 파싱 실패 (id={}): {}", r.getId(), e.getMessage());
                 continue;
             }
 

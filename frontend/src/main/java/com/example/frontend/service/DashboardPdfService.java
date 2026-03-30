@@ -22,7 +22,7 @@ public class DashboardPdfService {
     private final ApiClient apiClient = ApiClient.getInstance();
 
     public DashboardPdfService() {
-        this(ApiClient.DEFAULT_BASE_URL);
+        this(ApiClient.getInstance().getBaseUrl());
     }
 
     public DashboardPdfService(String apiBaseUrl) {

@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,19 +30,30 @@ public class ReportController {
     /**
      * GET /api/v1/reports/pdf?type=WEEKLY
      * GET /api/v1/reports/pdf?type=MONTHLY&year=2026&month=3
+         * GET /api/v1/reports/pdf?type=WEEKLY&fromDate=2026-03-01&toDate=2026-03-07
      */
     @GetMapping("/pdf")
     @Operation(summary = "PDF 보고서 생성",
-               description = "type=WEEKLY(이번 주) 또는 type=MONTHLY&year=&month= 로 구분")
+               description = "fromDate/toDate(yyyy-MM-dd) 지정 가능. 미지정 시 type=WEEKLY 또는 type=MONTHLY&year=&month= 기준")
     public ResponseEntity<byte[]> generatePdf(
             @RequestParam(defaultValue = "WEEKLY") String type,
             @RequestParam(required = false) Integer year,
-            @RequestParam(required = false) Integer month) {
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate) {
 
         LocalDateTime from;
         LocalDateTime to;
 
-        if ("MONTHLY".equalsIgnoreCase(type) && year != null && month != null) {
+        LocalDate parsedFrom = parseLocalDate(fromDate);
+        LocalDate parsedTo = parseLocalDate(toDate);
+
+        if (parsedFrom != null && parsedTo != null) {
+            LocalDate start = parsedFrom.isAfter(parsedTo) ? parsedTo : parsedFrom;
+            LocalDate end = parsedFrom.isAfter(parsedTo) ? parsedFrom : parsedTo;
+            from = start.atStartOfDay();
+            to = end.atTime(23, 59, 59);
+        } else if ("MONTHLY".equalsIgnoreCase(type) && year != null && month != null) {
             YearMonth ym = YearMonth.of(year, month);
             from = ym.atDay(1).atStartOfDay();
             to   = ym.atEndOfMonth().atTime(23, 59, 59);
@@ -65,6 +77,18 @@ public class ReportController {
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(pdf);
+    }
+
+    private static LocalDate parseLocalDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(raw);
+        } catch (Exception e) {
+            LoggerFactory.getLogger(ReportController.class).debug("날짜 파싱 실패: {}", raw);
+            return null;
+        }
     }
 
     // ─── 트래픽 JSON 집계 ─────────────────────────────────────────────────

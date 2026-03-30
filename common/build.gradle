@@ -18,6 +18,10 @@ compileJava {
     options.compilerArgs += ['-Xlint:deprecation', '-Xlint:unchecked']
 }
 
+compileTestJava {
+    options.encoding = 'UTF-8'
+}
+
 dependencies {
     // Lombok
     compileOnly 'org.projectlombok:lombok:1.18.30'
@@ -28,4 +32,12 @@ dependencies {
     
     // OpenAPI annotations (for DTO documentation)
     implementation 'io.swagger.core.v3:swagger-annotations:2.2.9'
+
+    // 테스트
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+}
+
+test {
+    useJUnitPlatform()
 }

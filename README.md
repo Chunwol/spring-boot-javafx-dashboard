@@ -6,71 +6,53 @@
 
 ```
 spring-boot-javafx-dashboard
-├── backend                # 백엔드 모듈
-│   ├── src
-│   │   └── main
-│   │       ├── java
-│   │       │   └── com
-│   │       │       └── example
-│   │       │           └── backend
-│   │       │               ├── Application.java
-│   │       │               ├── controller
-│   │       │               │   └── ApiController.java
-│   │       │               ├── service
-│   │       │               │   ├── MailService.java
-│   │       │               │   └── SchedulerService.java
-│   │       │               ├── repository
-│   │       │               │   └── UserRepository.java
-│   │       │               └── model
-│   │       │                   └── User.java
-│   │       └── resources
-│   │           ├── application.yml
-│   │           └── db
-│   │               └── schema.sql
-│   └── build.gradle
-├── frontend               # 프론트엔드 모듈
-│   ├── src
-│   │   └── main
-│   │       ├── java
-│   │       │   └── com
-│   │       │       └── example
-│   │       │           └── frontend
-│   │       │               ├── DashboardApp.java
-│   │       │               └── controller
-│   │       │                   └── DashboardController.java
-│   │       └── resources
-│   │           └── fxml
-│   │               └── dashboard.fxml
-│   └── build.gradle
-├── common                 # 공통 모듈
-│   ├── src
-│   │   └── main
-│   │       └── java
-│   │           └── com
-│   │               └── example
-│   │                   └── dto
-│   │                       └── UserDto.java
-│   └── build.gradle
-├── scripts                # 초기화 스크립트
-│   └── init-sql
-│       └── init-db.sql
-├── gradle                 # Gradle Wrapper
-│   └── wrapper
-│       └── gradle-wrapper.properties
-├── gradlew                # Gradle Wrapper 실행 스크립트 (Unix)
-├── gradlew.bat           # Gradle Wrapper 실행 스크립트 (Windows)
-├── settings.gradle        # Gradle 멀티 모듈 설정
-├── build.gradle           # 루트 프로젝트의 Gradle 빌드 설정
-├── .gitignore             # Git 무시 파일
-└── README.md              # 이 문서
+├── backend/               # 백엔드 모듈 (Spring Boot 3.x)
+│   └── src/main/java/com/example/backend/
+│       ├── Application.java
+│       ├── controller/    # REST API 컨트롤러
+│       │   ├── AdminController.java
+│       │   ├── AuthController.java
+│       │   ├── CommandController.java
+│       │   ├── DashboardApiController.java
+│       │   ├── GroupController.java
+│       │   ├── HeartbeatController.java
+│       │   ├── ReportController.java
+│       │   ├── ScriptController.java
+│       │   └── ...
+│       ├── service/       # 비즈니스 로직
+│       ├── repository/    # JPA 레포지토리
+│       ├── model/         # 엔티티 (PcMaster, ClassroomGroup 등)
+│       └── config/        # Security, JWT, WebSocket 설정
+├── frontend/              # 프론트엔드 모듈 (JavaFX 21)
+│   └── src/main/java/com/example/frontend/
+│       ├── DashboardApp.java
+│       ├── controller/    # MVVM 뷰 컨트롤러
+│       ├── viewmodel/     # DashboardViewModel
+│       └── service/       # DashboardUIService, ApiClient
+├── common/                # 공통 DTO 모듈
+│   └── src/main/java/com/example/dto/
+├── agent/                 # PC 에이전트 모듈 (Windows 서비스)
+│   └── src/main/java/com/example/agent/
+│       ├── AgentMain.java
+│       ├── HeartbeatSender.java
+│       └── CommandExecutor.java
+├── scripts/               # 빌드/배포/테스트 스크립트
+├── nginx/                 # Nginx 리버스 프록시 설정
+├── docs/                  # 설계 문서
+├── docker-compose.yml     # Docker 배포 구성
+├── settings.gradle        # Gradle 멀티모듈 설정
+└── README.md
 ```
 
 ## 기능
 
-- **백엔드**: Spring Boot를 사용하여 REST API를 구축하고, SQLite 데이터베이스와 통신합니다.
-- **프론트엔드**: JavaFX를 사용하여 대시보드 UI를 구현합니다.
-- **이메일 알림**: Spring Mail을 통해 사용자에게 이메일 알림을 전송합니다.
-- **스케줄러**: Spring Scheduler를 사용하여 주기적으로 작업을 수행합니다.
+- **백엔드**: Spring Boot 3.x REST API, JWT 인증, WebSocket/STOMP 실시간 통신, SQLite + Flyway 마이그레이션
+- **프론트엔드**: JavaFX 21 Grafana 스타일 대시보드 (AtlantaFX 테마, MVVM 패턴)
+- **에이전트**: Windows PC 모니터링 서비스 (OSHI 하드웨어 정보, 하트비트, 원격 명령 실행)
+- **강의실 관리**: IP 대역 기반 자동 매핑, 교사PC/학생PC 자동 분류
+- **원격 제어**: 종료/재부팅, WOL, 명령 실행, PS1 스크립트 배포
+- **리포트**: iTextPDF 기반 트래픽·가동률 보고서, 이메일 발송
+- **배포**: Docker Compose, Nginx 리버스 프록시, ZeroSSL 자동 인증서
 
 ## 설정
 
@@ -102,7 +84,7 @@ cp .env.example .env
 DB_URL=jdbc:sqlite:db/mydatabase.db
 
 # 서버
-SERVER_PORT=8080
+SERVER_PORT=8888
 
 # 이메일
 MAIL_HOST=smtp.gmail.com
@@ -151,3 +133,151 @@ Windows PowerShell:
 ## 기여
 
 기여를 원하시면 이 저장소를 포크하고 Pull Request를 제출해 주세요.
+
+## 배포 (Deployment)
+
+### 배포 파일 생성 및 배포
+
+프로젝트는 **3개의 배포 가능한 모듈**로 구성되어 있습니다:
+
+| 모듈 | JAR 파일 | 위치 |
+|------|----------|------|
+| **Backend** | `backend-0.0.1-SNAPSHOT.jar` | `backend/build/libs/` |
+| **Agent** | `agent-1.0.0.jar` | `agent/build/libs/` |
+| **Frontend** | `dashboard-0.0.1.jar` | `frontend/build/libs/` |
+
+### 빠른 배포 (Windows)
+
+```powershell
+# 모든 모듈 빌드 및 배포 자동화
+.\scripts\deploy.bat
+```
+
+### 빠른 배포 (Linux/Mac)
+
+```bash
+# 권한 부여
+chmod +x scripts/deploy.sh
+
+# 모든 모듈 빌드 및 배포 자동화
+./scripts/deploy.sh
+```
+
+### 수동 배포 단계
+
+#### 1단계: Java 아티팩트 빌드
+
+```bash
+# Windows
+.\scripts\build-all.bat
+
+# Linux/Mac
+./scripts/build-all.sh
+```
+
+#### 2단계: Docker 이미지 빌드
+
+```bash
+# Windows
+.\scripts\build-docker.bat
+
+# Linux/Mac
+./scripts/build-docker.sh
+```
+
+#### 3단계: Docker Compose 스택 시작
+
+```bash
+docker-compose up -d
+```
+
+#### 4단계: 상태 확인
+
+```bash
+# 컨테이너 실행 상태
+docker-compose ps
+
+# 로그 확인
+docker-compose logs -f backend
+```
+
+### 배포 문서
+
+자세한 배포 가이드는 다음 문서를 참고하세요:
+
+- **[DEPLOYMENT.md](DEPLOYMENT.md)**: 상세 배포 가이드 (모듈별 배포, 설정, 문제 해결)
+- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)**: 배포 체크리스트 (배포 전/후 검증)
+
+### 환경 설정
+
+배포 전에 `.env` 파일을 생성하고 설정하세요:
+
+```bash
+# .env 파일 생성 (템플릿 복사)
+cp .env.example .env
+
+# .env 파일 편집
+# - SERVER_PORT: 8888 (내부 포트, 변경 불필요)
+# - JWT_SECRET: 강력한 비밀키로 변경
+# - AGENT_INSTALL_KEY: 에이전트 설치 키 변경
+```
+
+### 네트워킹 아키텍처
+
+```
+외부 (443 HTTPS)
+       ↓
+Nginx 리버스 프록시
+       ↓
+Backend (8888 내부)
+       ↓
+- REST API (/api/*)
+- WebSocket (/ws/*)
+- JWT 인증
+```
+
+### 포트 설정
+
+| 포트 | 서비스 | 외부 접근 |
+|------|--------|---------|
+| 80 | HTTP → HTTPS 리다이렉트 | ✅ 허용 |
+| 443 | HTTPS API & WebSocket | ✅ 허용 |
+| 8888 | Backend (내부) | ❌ 차단 |
+
+### SSL/TLS 인증서 (ZeroSSL)
+
+자동 인증서 발급 및 갱신:
+
+```bash
+# 초기 인증서 발급 (자동)
+docker exec nginx /opt/init-ssl.sh
+
+# 수동 갱신
+docker exec nginx /opt/renew-ssl.sh
+```
+
+### 모니터링
+
+```bash
+# 실시간 로그
+docker-compose logs -f
+
+# 리소스 사용량
+docker stats
+
+# 컨테이너 상태
+docker-compose ps
+```
+
+### 배포 완료 확인
+
+```bash
+# Backend 헬스 체크
+curl https://pelmon.kro.kr/health
+
+# Frontend 실행 (GUI)
+java -jar frontend/build/libs/dashboard-0.0.1.jar
+
+# Agent 실행 (모니터링)
+java -jar agent/build/libs/agent-1.0.0.jar
+```

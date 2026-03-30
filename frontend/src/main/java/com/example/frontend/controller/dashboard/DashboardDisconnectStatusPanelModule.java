@@ -46,6 +46,7 @@ import java.util.function.Supplier;
 public class DashboardDisconnectStatusPanelModule {
 
     private static final DateTimeFormatter LOG_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final double LAYOUT_EPSILON = 0.5;
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final DashboardService dashboardService;
@@ -125,13 +126,13 @@ public class DashboardDisconnectStatusPanelModule {
 
     private VBox buildPanel(DashboardPanelDto panelDto, List<ClassroomSummaryDto> classrooms) {
         Label title = new Label("접속현황 패널");
-        title.setStyle("-fx-font-weight: 800; -fx-font-size: 15px; -fx-text-fill: #0f172a;");
+        title.setStyle("-fx-font-weight: 800; -fx-font-size: 15px; -fx-text-fill: #334155;");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button deleteBtn = new Button("삭제");
-        deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
         deleteBtn.setVisible(canInteract.getAsBoolean());
         deleteBtn.setManaged(canInteract.getAsBoolean());
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
@@ -144,6 +145,8 @@ public class DashboardDisconnectStatusPanelModule {
 
         HBox header = new HBox(8, title, spacer, deleteBtn);
         header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(8, 10, 8, 10));
+        header.setStyle("-fx-background-color: #e2e8f0; -fx-background-radius: 8;");
 
         Label summary = new Label();
         summary.setStyle("-fx-font-size: 12px; -fx-font-weight: 700;");
@@ -152,11 +155,11 @@ public class DashboardDisconnectStatusPanelModule {
         table.setItems(logRows);
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        VBox wrapper = new VBox(8, header, summary, table);
+        VBox wrapper = new VBox(10, header, summary, table);
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
         wrapper.getProperties().put("summaryLabel", summary);
-        wrapper.setPadding(new Insets(12));
-        wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; -fx-border-color: #cbd5e1; -fx-border-radius: 10;");
+        wrapper.setPadding(new Insets(16, 14, 14, 14));
+        wrapper.setStyle("-fx-background-color: #f8fafc; -fx-background-radius: 12; -fx-border-color: #d8dee8; -fx-border-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.12), 16, 0, 0, 4);");
 
         double[] defaultSize = responsiveSizeFn.apply("DISCONNECT");
         wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 120);
@@ -202,7 +205,7 @@ public class DashboardDisconnectStatusPanelModule {
         long online = classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
         long offline = Math.max(0, total - online);
         summary.setText("전체 " + total + "대 / 온라인 " + online + "대 / 오프라인 " + offline + "대");
-        summary.setTextFill(offline > 0 ? Color.web("#b91c1c") : Color.web("#15803d"));
+        summary.setTextFill(offline > 0 ? Color.web("#d73a49") : Color.web("#22863a"));
     }
 
     private void pollAndAppendConnectionLogs(List<ClassroomSummaryDto> classrooms) {
@@ -277,10 +280,24 @@ public class DashboardDisconnectStatusPanelModule {
     }
 
     private void updateLayout(VBox existing, DashboardPanelDto panelDto) {
-        existing.setLayoutX(panelDto.getX() != null ? panelDto.getX() : existing.getLayoutX());
-        existing.setLayoutY(panelDto.getY() != null ? panelDto.getY() : existing.getLayoutY());
-        existing.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : existing.getPrefWidth());
-        existing.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : existing.getPrefHeight());
+        if (panelDto.getX() != null) {
+            applyIfChanged(existing.getLayoutX(), panelDto.getX(), existing::setLayoutX);
+        }
+        if (panelDto.getY() != null) {
+            applyIfChanged(existing.getLayoutY(), panelDto.getY(), existing::setLayoutY);
+        }
+        if (panelDto.getWidth() != null) {
+            applyIfChanged(existing.getPrefWidth(), panelDto.getWidth(), existing::setPrefWidth);
+        }
+        if (panelDto.getHeight() != null) {
+            applyIfChanged(existing.getPrefHeight(), panelDto.getHeight(), existing::setPrefHeight);
+        }
+    }
+
+    private void applyIfChanged(double current, double next, java.util.function.DoubleConsumer setter) {
+        if (Math.abs(current - next) > LAYOUT_EPSILON) {
+            setter.accept(next);
+        }
     }
 
     private void attachInteraction(VBox panel, Long panelId) {

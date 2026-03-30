@@ -6,6 +6,7 @@ import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.service.dashboard.DashboardService;
 import com.example.backend.service.classroom.ClassroomValidationService;
+import com.example.backend.config.TrafficThresholdConfig;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -19,6 +20,7 @@ import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,12 +41,15 @@ public class DashboardApiController {
 
     private final DashboardService dashboardService;
     private final ClassroomValidationService classroomValidationService;
+    private final TrafficThresholdConfig trafficThresholdConfig;
 
     @Autowired
     public DashboardApiController(DashboardService dashboardService,
-                                  ClassroomValidationService classroomValidationService) {
+                                  ClassroomValidationService classroomValidationService,
+                                  TrafficThresholdConfig trafficThresholdConfig) {
         this.dashboardService = dashboardService;
         this.classroomValidationService = classroomValidationService;
+        this.trafficThresholdConfig = trafficThresholdConfig;
     }
 
     /**
@@ -79,6 +84,13 @@ public class DashboardApiController {
         return ResponseEntity.ok(dashboardService.getPcStatusesPaged(classroomId, page, size));
     }
 
+    @GetMapping("/classrooms/{classroomId}/traffic/pcs")
+    @Operation(summary = "강의실별 PC 트래픽 조회", description = "지정된 강의실의 PC별 최신 인바운드/아웃바운드 트래픽을 조회합니다.")
+    public ResponseEntity<List<Map<String, Object>>> getPcTrafficInClassroom(
+            @Parameter(description = "강의실 ID") @PathVariable Long classroomId) {
+        return ResponseEntity.ok(dashboardService.getClassroomPcTraffic(classroomId));
+    }
+
     /**
      * 전체 네트워크 트래픽 현황을 조회합니다.
      * @return 인바운드/아웃바운드 트래픽 정보
@@ -88,6 +100,21 @@ public class DashboardApiController {
     @ApiResponse(responseCode = "200", description = "트래픽 조회 성공")
     public ResponseEntity<NetworkTrafficDto> getNetworkTraffic() {
         return ResponseEntity.ok(dashboardService.getNetworkTraffic());
+    }
+
+    /**
+     * 트래픽 임계값 설정을 조회합니다.
+     * @return 글로벌, 강의실, PC별 트래픽 임계값
+     */
+    @GetMapping("/config/traffic-thresholds")
+    @Operation(summary = "트래픽 임계값 설정 조회", description = "글로벌, 강의실, PC별 트래픽 임계값(Mbps)을 조회합니다.")
+    @ApiResponse(responseCode = "200", description = "설정 조회 성공")
+    public ResponseEntity<Map<String, Double>> getTrafficThresholds() {
+        Map<String, Double> thresholds = new java.util.HashMap<>();
+        thresholds.put("globalMbps", trafficThresholdConfig.getGlobalThresholdMbps());
+        thresholds.put("classroomMbps", trafficThresholdConfig.getClassroomThresholdMbps());
+        thresholds.put("pcMbps", trafficThresholdConfig.getPcThresholdMbps());
+        return ResponseEntity.ok(thresholds);
     }
 
     /** 프론트 호환용 alias: /dashboard/traffic/summary */
@@ -142,10 +169,27 @@ public class DashboardApiController {
     @PostMapping("/pcs/broken")
     public ResponseEntity<PcStatusDto> markBrokenPc(@RequestBody Map<String, String> payload) {
         String macAddress = payload.get("macAddress");
-        if (macAddress == null || macAddress.isBlank()) {
+        String ipAddress = payload.get("ipAddress");
+        if ((macAddress == null || macAddress.isBlank()) && (ipAddress == null || ipAddress.isBlank())) {
             return ResponseEntity.badRequest().build();
         }
         String note = payload.getOrDefault("note", "broken");
-        return ResponseEntity.ok(dashboardService.markPcAsBroken(macAddress, note));
+        return ResponseEntity.ok(dashboardService.markPcAsBroken(macAddress, ipAddress, note));
+    }
+
+    @GetMapping("/pcs/broken")
+    public ResponseEntity<List<PcStatusDto>> getBrokenPcs() {
+        return ResponseEntity.ok(dashboardService.getBrokenPcStatuses());
+    }
+
+    @DeleteMapping("/pcs/broken/{macAddress}")
+    public ResponseEntity<PcStatusDto> clearBrokenPc(@PathVariable String macAddress) {
+        return ResponseEntity.ok(dashboardService.clearBrokenPc(macAddress));
+    }
+
+    @PutMapping("/pcs/broken/{macAddress}")
+    public ResponseEntity<PcStatusDto> updateBrokenPcNote(@PathVariable String macAddress,
+                                                          @RequestBody Map<String, String> payload) {
+        return ResponseEntity.ok(dashboardService.updateBrokenPcNote(macAddress, payload.get("note")));
     }
 }

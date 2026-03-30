@@ -11,5 +11,6 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
     List<ClassroomTeacherDevice> findByGroupId(Long groupId);
     ClassroomTeacherDevice findFirstByGroupIdAndIpAddress(Long groupId, String ipAddress);
     ClassroomTeacherDevice findFirstByGroupIdAndMacAddress(Long groupId, String macAddress);
+    void deleteByGroupId(Long groupId);
 }
 

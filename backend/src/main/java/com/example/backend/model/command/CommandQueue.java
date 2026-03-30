@@ -54,6 +54,22 @@ public class CommandQueue {
     @Column(name = "retry_count")
     private Integer retryCount = 0;
 
+    /** 관리자 작업 명령 여부 (파일 설치, 에이전트 업데이트 등) - SCMATE 초기화 감지용 */
+    @Column(name = "is_admin_operation")
+    private Boolean isAdminOperation = false;
+
+    /** SCMATE 초기화 복구 상태: null | PENDING | COMPLETED */
+    @Column(name = "scmate_reset_status")
+    private String scmateResetStatus;
+
+    /** SCMATE 초기화 감지 시각 */
+    @Column(name = "scmate_reset_requested_at")
+    private LocalDateTime scmateResetRequestedAt;
+
+    /** SCMATE 초기화 복구 완료 시각 */
+    @Column(name = "scmate_reset_completed_at")
+    private LocalDateTime scmateResetCompletedAt;
+
     public CommandQueue() {
     }
 
@@ -176,5 +192,37 @@ public class CommandQueue {
 
     public void setRetryCount(Integer retryCount) {
         this.retryCount = retryCount;
+    }
+
+    public Boolean getIsAdminOperation() {
+        return isAdminOperation != null ? isAdminOperation : false;
+    }
+
+    public void setIsAdminOperation(Boolean adminOperation) {
+        isAdminOperation = adminOperation;
+    }
+
+    public String getScmateResetStatus() {
+        return scmateResetStatus;
+    }
+
+    public void setScmateResetStatus(String scmateResetStatus) {
+        this.scmateResetStatus = scmateResetStatus;
+    }
+
+    public LocalDateTime getScmateResetRequestedAt() {
+        return scmateResetRequestedAt;
+    }
+
+    public void setScmateResetRequestedAt(LocalDateTime scmateResetRequestedAt) {
+        this.scmateResetRequestedAt = scmateResetRequestedAt;
+    }
+
+    public LocalDateTime getScmateResetCompletedAt() {
+        return scmateResetCompletedAt;
+    }
+
+    public void setScmateResetCompletedAt(LocalDateTime scmateResetCompletedAt) {
+        this.scmateResetCompletedAt = scmateResetCompletedAt;
     }
 }

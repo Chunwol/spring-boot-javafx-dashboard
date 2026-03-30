@@ -16,6 +16,7 @@ import com.itextpdf.layout.Document;
 import com.itextpdf.layout.element.Cell;
 import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
+import com.itextpdf.layout.element.Text;
 import com.itextpdf.layout.properties.TextAlignment;
 import com.itextpdf.layout.properties.UnitValue;
 import org.slf4j.Logger;
@@ -68,14 +69,27 @@ public class ReportService {
                     : "PC 관제 시스템 월간 보고서";
 
             // ── 표지 ──────────────────────────────────────────────────────
-            doc.add(new Paragraph(title)
-                    .setFontSize(22).setBold()
-                    .setTextAlignment(TextAlignment.CENTER)
-                    .setMarginBottom(6));
-            doc.add(new Paragraph("기간: " + period)
-                    .setFontSize(11).setTextAlignment(TextAlignment.CENTER).setMarginBottom(4));
-            doc.add(new Paragraph("생성: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
-                    .setFontSize(10).setTextAlignment(TextAlignment.CENTER).setMarginBottom(20));
+            Cell headerCell = new Cell()
+                    .add(new Paragraph(title)
+                            .setFontSize(22).setBold().setFontColor(ColorConstants.WHITE)
+                            .setTextAlignment(TextAlignment.CENTER)
+                            .setMarginTop(8)
+                            .setMarginBottom(4))
+                    .add(new Paragraph("기간: " + period)
+                            .setFontSize(11).setFontColor(new DeviceRgb(0xd1, 0xfa, 0xe5))
+                            .setTextAlignment(TextAlignment.CENTER)
+                            .setMarginBottom(2))
+                    .add(new Paragraph("생성: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
+                            .setFontSize(10).setFontColor(new DeviceRgb(0xe5, 0xe7, 0xeb))
+                            .setTextAlignment(TextAlignment.CENTER)
+                            .setMarginBottom(8))
+                    .setBackgroundColor(new DeviceRgb(0x1f, 0x29, 0x37))
+                    .setBorder(null);
+            Table header = new Table(UnitValue.createPercentArray(new float[]{100}))
+                    .setWidth(UnitValue.createPercentValue(100));
+            header.addCell(headerCell);
+            doc.add(header);
+            doc.add(new Paragraph(" ").setMarginBottom(8));
 
             // ── 1. 요약 ───────────────────────────────────────────────────
             List<PcMaster> allPcs = pcRepository.findAll();
@@ -83,6 +97,10 @@ public class ReportService {
             long onlinePc = allPcs.stream().filter(p -> "ONLINE".equalsIgnoreCase(p.getStatus())).count();
 
             List<TrafficLog> trafficLogs = trafficRepository.findByTimestampBetween(from, to);
+                Map<String, PcMaster> pcByMac = pcRepository.findAll().stream()
+                    .collect(Collectors.toMap(PcMaster::getMacAddress, p -> p, (a, b) -> a));
+                Map<Long, String> groupNameById = groupRepository.findAll().stream()
+                    .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName, (a, b) -> a));
             long totalInKbps = trafficLogs.stream()
                     .mapToLong(t -> t.getInboundKbps() != null ? t.getInboundKbps() : 0L).sum();
             long totalOutKbps = trafficLogs.stream()
@@ -95,15 +113,19 @@ public class ReportService {
 
             double avgUptime = computeAverageUptimePct(from, to);
 
-            doc.add(section("1. 요약"));
-            Table sumTbl = twoColTable();
-            sumTbl.addCell(label("총 PC 수")); sumTbl.addCell(value(totalPc + "대"));
-            sumTbl.addCell(label("현재 온라인")); sumTbl.addCell(value(onlinePc + "대"));
-            sumTbl.addCell(label("평균 가동률")); sumTbl.addCell(value(String.format("%.1f%%", avgUptime)));
-            sumTbl.addCell(label("총 인바운드 트래픽")); sumTbl.addCell(value(kbToReadable(totalInKbps)));
-            sumTbl.addCell(label("총 아웃바운드 트래픽")); sumTbl.addCell(value(kbToReadable(totalOutKbps)));
-            sumTbl.addCell(label("명령 실행 건수")); sumTbl.addCell(value(cmdTotal + "건 (성공 " + cmdSuccess + " / 실패 " + cmdFail + ")"));
-            doc.add(sumTbl);
+            doc.add(section("1. 핵심 요약"));
+            Table kpiCards = new Table(UnitValue.createPercentArray(new float[]{33, 33, 34}))
+                    .setWidth(UnitValue.createPercentValue(100));
+            kpiCards.addCell(card("총 PC", totalPc + "대", new DeviceRgb(0x1d, 0x4e, 0x89)));
+            kpiCards.addCell(card("현재 온라인", onlinePc + "대", new DeviceRgb(0x16, 0xa3, 0x4a)));
+            kpiCards.addCell(card("평균 가동률", String.format("%.1f%%", avgUptime), new DeviceRgb(0xea, 0x58, 0x0c)));
+            doc.add(kpiCards);
+
+                Table sumTbl = twoColTable();
+                sumTbl.addCell(label("총 인바운드 트래픽")); sumTbl.addCell(value(kbToReadable(totalInKbps)));
+                sumTbl.addCell(label("총 아웃바운드 트래픽")); sumTbl.addCell(value(kbToReadable(totalOutKbps)));
+                sumTbl.addCell(label("명령 실행 건수")); sumTbl.addCell(value(cmdTotal + "건 (성공 " + cmdSuccess + " / 실패 " + cmdFail + ")"));
+                doc.add(sumTbl.setMarginTop(8));
             doc.add(new Paragraph("\n"));
 
             // ── 2. 강의실별 가동률 ────────────────────────────────────────
@@ -158,8 +180,56 @@ public class ReportService {
             }
             doc.add(new Paragraph("\n"));
 
-            // ── 4. 명령 실행 이력 요약 ────────────────────────────────────
-            doc.add(section("4. 명령 실행 이력 요약"));
+                // ── 4. 수업시간대 사용 분석 ─────────────────────────────────
+                doc.add(section("4. 수업시간대 사용 분석"));
+                Map<String, Long> bySlot = computeUsageByTimeSlot(trafficLogs);
+                List<Map<String, Object>> slotRows = buildClassTimeUsageRows(trafficLogs, pcByMac, groupNameById);
+                Table slotTbl = new Table(UnitValue.createPercentArray(new float[]{17, 16, 20, 14, 19, 14}))
+                        .setWidth(UnitValue.createPercentValue(100));
+                for (String h : new String[]{"구분", "시간", "트래픽 합계", "활성 PC", "최다 사용 강의실", "강의실 트래픽"}) {
+                    slotTbl.addHeaderCell(new Cell().add(new Paragraph(h).setBold().setFontSize(10)));
+                }
+                for (Map<String, Object> row : slotRows) {
+                    slotTbl.addCell(cell(str(row, "slotName")));
+                    slotTbl.addCell(cell(str(row, "timeRange")));
+                    slotTbl.addCell(cell(kbToReadable(asLong(row.get("totalTraffic")))));
+                    slotTbl.addCell(cell(str(row, "activePcCount") + "대"));
+                    slotTbl.addCell(cell(str(row, "topClassroom")));
+                    slotTbl.addCell(cell(kbToReadable(asLong(row.get("topClassroomTraffic")))));
+                }
+                doc.add(slotTbl);
+                doc.add(new Paragraph("* 활성 PC: 해당 시간대에 트래픽 로그가 1회 이상 기록된 PC 수").setFontSize(9));
+                doc.add(new Paragraph("\n"));
+
+                // ── 5. 강의실 트래픽 TOP 5 ─────────────────────────────────
+                doc.add(section("5. 강의실 트래픽 TOP 5"));
+                List<Map<String, Object>> topClassrooms = computeTopClassroomsByTraffic(trafficLogs, pcByMac, groupNameById, 5);
+                if (topClassrooms.isEmpty()) {
+                    doc.add(new Paragraph("  (강의실 트래픽 데이터 없음)").setFontSize(10));
+                } else {
+                    Table topTbl = new Table(UnitValue.createPercentArray(new float[]{10, 40, 25, 25}))
+                            .setWidth(UnitValue.createPercentValue(100));
+                    for (String h : new String[]{"순위", "강의실", "트래픽 합계", "점유율"}) {
+                        topTbl.addHeaderCell(new Cell().add(new Paragraph(h).setBold().setFontSize(10)));
+                    }
+                    long totalTraffic = Math.max(1L, trafficLogs.stream()
+                            .mapToLong(l -> (l.getInboundKbps() != null ? l.getInboundKbps() : 0L)
+                                    + (l.getOutboundKbps() != null ? l.getOutboundKbps() : 0L)).sum());
+                    int rank = 1;
+                    for (Map<String, Object> row : topClassrooms) {
+                        long value = asLong(row.get("traffic"));
+                        double share = (double) value / totalTraffic * 100.0;
+                        topTbl.addCell(cell(String.valueOf(rank++)));
+                        topTbl.addCell(cell(str(row, "groupName")));
+                        topTbl.addCell(cell(kbToReadable(value)));
+                        topTbl.addCell(cell(String.format("%.1f%%", share)));
+                    }
+                    doc.add(topTbl);
+                }
+                doc.add(new Paragraph("\n"));
+
+                // ── 6. 명령 실행 이력 요약 ────────────────────────────────────
+                doc.add(section("6. 명령 실행 이력 요약"));
             Map<String, long[]> cmdSummary = summarizeCommandHistory(cmdLogs);
             if (cmdSummary.isEmpty()) {
                 doc.add(new Paragraph("  (명령 이력 없음)").setFontSize(10));
@@ -181,6 +251,26 @@ public class ReportService {
                 }
                 doc.add(cmdTbl);
             }
+
+                // ── 7. 운영 인사이트 ────────────────────────────────────────
+            doc.add(new Paragraph("\n"));
+                doc.add(section("7. 운영 인사이트"));
+            double failRate = cmdTotal == 0 ? 0.0 : (double) cmdFail / cmdTotal * 100.0;
+            String peakSlot = peakSlotLabel(bySlot);
+                String peakClass = topClassrooms.isEmpty() ? "-" : str(topClassrooms.get(0), "groupName");
+            Paragraph insight = new Paragraph()
+                    .add(new Text("• 피크 사용 시간대: ").setBold())
+                    .add(peakSlot + "\n")
+                    .add(new Text("• 트래픽 상위 강의실: ").setBold())
+                    .add(peakClass + "\n")
+                    .add(new Text("• 명령 실패율: ").setBold())
+                    .add(String.format("%.1f%%", failRate) + "\n")
+                    .add(new Text("• 점검 권고: ").setBold())
+                    .add(failRate >= 10.0
+                            ? "명령 실패율이 높아 에이전트 연결/정책 점검이 필요합니다."
+                            : "명령 실패율이 안정적입니다. 현재 운영 상태는 양호합니다.");
+            insight.setFontSize(11);
+            doc.add(insight);
 
             doc.close();
         } catch (Exception e) {
@@ -353,5 +443,128 @@ public class ReportService {
 
     private static Cell cell(String text) {
         return new Cell().add(new Paragraph(text).setFontSize(10));
+    }
+
+    private static Cell card(String title, String value, DeviceRgb accent) {
+        Paragraph p = new Paragraph()
+                .add(new Text(title + "\n").setFontSize(10).setFontColor(new DeviceRgb(0x33, 0x41, 0x55)))
+                .add(new Text(value).setBold().setFontSize(18).setFontColor(accent));
+        return new Cell()
+                .add(p)
+                .setBackgroundColor(new DeviceRgb(0xf8, 0xfa, 0xfc))
+                .setPadding(10);
+    }
+
+    private static String peakSlotLabel(Map<String, Long> bySlot) {
+        String bestKey = bySlot.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse("morning");
+        return switch (bestKey) {
+            case "afternoon" -> "오후(12~18시)";
+            case "night" -> "야간(18~24시)";
+            default -> "오전(00~12시)";
+        };
+    }
+
+    private List<Map<String, Object>> buildClassTimeUsageRows(
+            List<TrafficLog> logs,
+            Map<String, PcMaster> pcByMac,
+            Map<Long, String> groupNameById) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.add(buildSingleClassTimeRow("morning", "오전 수업", "08:00~12:00", logs, pcByMac, groupNameById));
+        rows.add(buildSingleClassTimeRow("afternoon", "오후 수업", "12:00~18:00", logs, pcByMac, groupNameById));
+        rows.add(buildSingleClassTimeRow("night", "야간 수업", "18:00~22:00", logs, pcByMac, groupNameById));
+        return rows;
+    }
+
+    private Map<String, Object> buildSingleClassTimeRow(
+            String slotKey,
+            String slotName,
+            String timeRange,
+            List<TrafficLog> logs,
+            Map<String, PcMaster> pcByMac,
+            Map<Long, String> groupNameById) {
+        Set<String> activeMacs = new HashSet<>();
+        Map<String, Long> trafficByClass = new HashMap<>();
+        long total = 0L;
+
+        for (TrafficLog log : logs) {
+            if (log.getTimestamp() == null) continue;
+            if (!slotKey.equals(resolveSlot(log.getTimestamp().getHour()))) continue;
+
+            long value = (log.getInboundKbps() != null ? log.getInboundKbps() : 0L)
+                    + (log.getOutboundKbps() != null ? log.getOutboundKbps() : 0L);
+            total += value;
+            if (log.getMacAddress() != null) {
+                activeMacs.add(log.getMacAddress());
+            }
+
+            String groupName = "미분류";
+            PcMaster pc = log.getMacAddress() == null ? null : pcByMac.get(log.getMacAddress());
+            if (pc != null && pc.getGroupId() != null) {
+                groupName = groupNameById.getOrDefault(pc.getGroupId(), "강의실#" + pc.getGroupId());
+            }
+            trafficByClass.merge(groupName, value, Long::sum);
+        }
+
+        Map.Entry<String, Long> top = trafficByClass.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .orElse(Map.entry("-", 0L));
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("slotName", slotName);
+        row.put("timeRange", timeRange);
+        row.put("totalTraffic", total);
+        row.put("activePcCount", activeMacs.size());
+        row.put("topClassroom", top.getKey());
+        row.put("topClassroomTraffic", top.getValue());
+        return row;
+    }
+
+    private List<Map<String, Object>> computeTopClassroomsByTraffic(
+            List<TrafficLog> logs,
+            Map<String, PcMaster> pcByMac,
+            Map<Long, String> groupNameById,
+            int limit) {
+        Map<String, Long> byClass = new HashMap<>();
+        for (TrafficLog log : logs) {
+            if (log.getTimestamp() == null) continue;
+            long value = (log.getInboundKbps() != null ? log.getInboundKbps() : 0L)
+                    + (log.getOutboundKbps() != null ? log.getOutboundKbps() : 0L);
+            String groupName = "미분류";
+            PcMaster pc = log.getMacAddress() == null ? null : pcByMac.get(log.getMacAddress());
+            if (pc != null && pc.getGroupId() != null) {
+                groupName = groupNameById.getOrDefault(pc.getGroupId(), "강의실#" + pc.getGroupId());
+            }
+            byClass.merge(groupName, value, Long::sum);
+        }
+        return byClass.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(limit)
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("groupName", e.getKey());
+                    m.put("traffic", e.getValue());
+                    return m;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private static String resolveSlot(int hour) {
+        if (hour >= 8 && hour < 12) return "morning";
+        if (hour >= 12 && hour < 18) return "afternoon";
+        if (hour >= 18 && hour < 22) return "night";
+        return "night";
+    }
+
+    private static long asLong(Object value) {
+        if (value == null) return 0L;
+        if (value instanceof Number n) return n.longValue();
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
     }
 }

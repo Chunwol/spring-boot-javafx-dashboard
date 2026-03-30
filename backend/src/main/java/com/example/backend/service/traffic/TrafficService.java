@@ -3,7 +3,7 @@ package com.example.backend.service.traffic;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.pc.PcMasterRepository;
-import com.example.backend.repository.traffic.TrafficLogRepository;
+import com.example.backend.repository.traffic.TrafficLogsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -21,11 +21,11 @@ import java.util.Map;
 public class TrafficService {
 
     private final PcMasterRepository pcMasterRepository;
-    private final TrafficLogRepository trafficLogRepository;
+    private final TrafficLogsRepository trafficLogRepository;
 
     @Autowired
     public TrafficService(PcMasterRepository pcMasterRepository,
-                          TrafficLogRepository trafficLogRepository) {
+                          TrafficLogsRepository trafficLogRepository) {
         this.pcMasterRepository = pcMasterRepository;
         this.trafficLogRepository = trafficLogRepository;
     }

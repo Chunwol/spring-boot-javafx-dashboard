@@ -40,6 +40,9 @@ public class DashboardPanel {
     @Column
     private boolean visible = true;
 
+    @Column(name = "panel_name")
+    private String panelName;
+
     @Column(name = "created_at")
     private String createdAt;
 
@@ -132,6 +135,14 @@ public class DashboardPanel {
 
     public void setVisible(boolean visible) {
         this.visible = visible;
+    }
+
+    public String getPanelName() {
+        return panelName;
+    }
+
+    public void setPanelName(String panelName) {
+        this.panelName = panelName;
     }
 
     public String getCreatedAt() {

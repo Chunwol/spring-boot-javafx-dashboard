@@ -14,8 +14,8 @@ public class CommandRequestDto {
     private String role;  // TEACHER, STUDENT, ALL
 
     @NotBlank(message = "type은 필수입니다.")
-    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL)$", message = "type 값이 올바르지 않습니다.")
-    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL
+    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL|PCON)$", message = "type 값이 올바르지 않습니다.")
+    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL, PCON
 
     @Pattern(regexp = "^$|^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$", message = "macAddress 형식이 올바르지 않습니다.")
     private String macAddress;
@@ -90,12 +90,23 @@ public class CommandRequestDto {
              message = "broadcastIp 형식이 올바르지 않습니다.")
     private String broadcastIp;
 
+    /** 관리자 작업 여부 (파일 설치, 에이전트 업데이트 등) - SCMATE 초기화 감지용 */
+    private Boolean isAdminOperation = false;
+
     public String getBroadcastIp() {
         return broadcastIp;
     }
 
     public void setBroadcastIp(String broadcastIp) {
         this.broadcastIp = broadcastIp;
+    }
+
+    public Boolean getIsAdminOperation() {
+        return isAdminOperation != null ? isAdminOperation : false;
+    }
+
+    public void setIsAdminOperation(Boolean adminOperation) {
+        isAdminOperation = adminOperation;
     }
 }
 

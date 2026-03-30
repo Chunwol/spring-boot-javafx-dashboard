@@ -1,11 +1,14 @@
 package com.example.backend.controller.group;
 
 import com.example.backend.model.classroom.ClassroomGroup;
+import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
+import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.model.pc.ClientPosition;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.pc.ClientPositionRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
+import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.service.classroom.ClassroomValidationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -19,6 +22,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,18 +35,27 @@ import java.util.stream.Collectors;
 public class GroupController {
 
     private final ClassroomGroupRepository groupRepository;
+    private final ClassroomIpRangeRepository ipRangeRepository;
+    private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
     private final ClientPositionRepository positionRepository;
     private final PcMasterRepository pcMasterRepository;
+    private final ClassroomResolutionService classroomResolutionService;
     private final ClassroomValidationService classroomValidationService;
 
     @Autowired
     public GroupController(ClassroomGroupRepository groupRepository,
+                           ClassroomIpRangeRepository ipRangeRepository,
+                           ClassroomTeacherDeviceRepository teacherDeviceRepository,
                            ClientPositionRepository positionRepository,
                            PcMasterRepository pcMasterRepository,
+                           ClassroomResolutionService classroomResolutionService,
                            ClassroomValidationService classroomValidationService) {
         this.groupRepository = groupRepository;
+        this.ipRangeRepository = ipRangeRepository;
+        this.teacherDeviceRepository = teacherDeviceRepository;
         this.positionRepository = positionRepository;
         this.pcMasterRepository = pcMasterRepository;
+        this.classroomResolutionService = classroomResolutionService;
         this.classroomValidationService = classroomValidationService;
     }
 
@@ -81,6 +94,7 @@ public class GroupController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     @Operation(summary = "강의실 삭제", description = "강의실을 삭제합니다. 관련 클라이언트 위치 정보도 정리됩니다.")
     @ApiResponse(responseCode = "204", description = "강의실 삭제 성공")
     @ApiResponse(responseCode = "404", description = "강의실을 찾을 수 없음")
@@ -89,18 +103,25 @@ public class GroupController {
         if (opt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
-        var g = opt.get();
+
         List<ClientPosition> positions = positionRepository.findByGroupId(id);
         for (ClientPosition p : positions) {
             p.setGroupId(null);
             positionRepository.save(p);
-            PcMaster pm = pcMasterRepository.findById(p.getMacAddress()).orElse(null);
-            if (pm != null && pm.getGroupId() != null && pm.getGroupId().equals(id)) {
-                pm.setGroupId(null);
-                pcMasterRepository.save(pm);
-            }
         }
-        groupRepository.delete(g);
+
+        List<PcMaster> pcs = pcMasterRepository.findByGroupId(id);
+        for (PcMaster pc : pcs) {
+            pc.setGroupId(null);
+            pcMasterRepository.save(pc);
+        }
+
+        // 강의실 삭제 시 연관 IP 대역/교사 장치도 정리해야 재생성 후 고아 참조가 남지 않는다.
+        ipRangeRepository.deleteByGroupId(id);
+        teacherDeviceRepository.deleteByGroupId(id);
+
+        groupRepository.deleteById(id);
+        classroomResolutionService.evictIpRangeCache();
         return ResponseEntity.noContent().build();
     }
 

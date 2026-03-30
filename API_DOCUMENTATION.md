@@ -3,18 +3,42 @@
 ## 개요
 이 문서는 강의실 통합 대시보드 REST API의 모든 엔드포인트를 설명합니다.
 
-**API 베이스 URL:** `http://localhost:8080/api/v1`
+**API 베이스 URL:** `http://localhost:8888/api/v1`
 
-**Swagger UI:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
+**Swagger UI:** [http://localhost:8888/swagger-ui.html](http://localhost:8888/swagger-ui.html)
 
-**OpenAPI Spec:** [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+**OpenAPI Spec:** [http://localhost:8888/v3/api-docs](http://localhost:8888/v3/api-docs)
+
+> 프로덕션 배포 시 Nginx 리버스 프록시(443 → 8888)를 통해 HTTPS로 접근합니다.
 
 ---
 
 ## 인증
 
-현재 개발 환경에서는 모든 엔드포인트가 인증 없이 접근 가능합니다.
-프로덕션 환경에서는 JWT 토큰 기반 인증이 필요합니다.
+### JWT 토큰 인증
+대부분의 API 엔드포인트는 JWT 토큰 인증이 필요합니다.
+
+**1. 토큰 발급:**
+```
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{"username": "admin", "password": "비밀번호"}
+```
+
+**응답:**
+```json
+{"token": "eyJhbGciOiJIUzI1NiJ9..."}
+```
+
+**2. 인증 헤더 사용:**
+```
+Authorization: Bearer <token>
+```
+
+### 에이전트 인증
+에이전트는 별도의 `X-Agent-Token` 헤더를 사용합니다.
+에이전트 등록 시 발급받은 토큰을 사용하며, `/api/v1/heartbeat` 및 `/api/v1/agent/*` 경로에 적용됩니다.
 
 ---
 
@@ -272,6 +296,9 @@ POST /api/v1/heartbeat
 
 **설명:** 클라이언트 PC 에이전트로부터 주기적인 생존 신호(하트비트)를 수신합니다.
 PC의 IP, MAC, 네트워크 트래픽, 상태 정보 등을 업데이트하고 필요시 명령을 응답으로 전달합니다.
+IP 주소 기반으로 강의실 자동 매핑 및 역할(교사/학생) 판별이 수행됩니다.
+
+**인증:** `X-Agent-Token` 헤더
 
 **요청 예시:**
 ```json
@@ -279,13 +306,13 @@ PC의 IP, MAC, 네트워크 트래픽, 상태 정보 등을 업데이트하고 �
   "macAddress": "00:1A:2B:3C:4D:5E",
   "ipAddress": "192.168.10.10",
   "hostname": "PC-101-001",
-  "traffic": {
-    "inboundMbps": 5.2,
-    "outboundMbps": 3.1
-  },
-  "timestamp": "2026-03-16T10:52:50"
+  "inboundKbps": 5200.0,
+  "outboundKbps": 3100.0,
+  "positions": []
 }
 ```
+
+> **호환성 참고:** `inboundMbps`/`outboundMbps` (구버전) 및 `traffic` 리스트 형태도 수용합니다.
 
 **응답:**
 ```json
@@ -293,6 +320,8 @@ PC의 IP, MAC, 네트워크 트래픽, 상태 정보 등을 업데이트하고 �
   "status": "ok"
 }
 ```
+
+명령이 대기 중인 경우 응답에 명령 정보가 포함됩니다.
 
 **상태 코드:**
 - `200 OK` - 하트비트 수신 성공
@@ -310,7 +339,10 @@ PC의 IP, MAC, 네트워크 트래픽, 상태 정보 등을 업데이트하고 �
 | `201 Created` | 리소스 생성 성공 |
 | `204 No Content` | 요청 성공 (응답 본문 없음) |
 | `400 Bad Request` | 잘못된 요청 |
+| `401 Unauthorized` | 인증 필요 (JWT 토큰 없음/만료) |
+| `403 Forbidden` | 권한 없음 |
 | `404 Not Found` | 리소스를 찾을 수 없음 |
+| `409 Conflict` | 리소스 충돌 (중복 IP 대역 등) |
 | `500 Internal Server Error` | 서버 오류 |
 
 ---
@@ -361,14 +393,23 @@ PC의 상태 정보를 나타냅니다.
 
 ### cURL 예시
 
+#### 로그인 (토큰 발급)
+```bash
+curl -X POST "http://localhost:8888/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "비밀번호"}'
+```
+
 #### 모든 강의실 조회
 ```bash
-curl -X GET "http://localhost:8080/api/v1/groups"
+curl -X GET "http://localhost:8888/api/v1/groups" \
+  -H "Authorization: Bearer <token>"
 ```
 
 #### 신규 강의실 생성
 ```bash
-curl -X POST "http://localhost:8080/api/v1/groups" \
+curl -X POST "http://localhost:8888/api/v1/groups" \
+  -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "강의실 103",
@@ -378,20 +419,32 @@ curl -X POST "http://localhost:8080/api/v1/groups" \
 
 #### 강의실 요약 정보 조회
 ```bash
-curl -X GET "http://localhost:8080/api/v1/dashboard/classrooms"
+curl -X GET "http://localhost:8888/api/v1/dashboard/classrooms" \
+  -H "Authorization: Bearer <token>"
 ```
 
 #### PC 상태 조회
 ```bash
-curl -X GET "http://localhost:8080/api/v1/dashboard/classrooms/1/pcs"
+curl -X GET "http://localhost:8888/api/v1/dashboard/classrooms/1/pcs" \
+  -H "Authorization: Bearer <token>"
 ```
 
 ### PowerShell 예시
 
+#### 로그인 (토큰 발급)
+```powershell
+$login = Invoke-RestMethod -Uri "http://localhost:8888/api/v1/auth/login" `
+    -Method POST `
+    -ContentType "application/json" `
+    -Body '{"username":"admin","password":"비밀번호"}'
+$token = $login.token
+$headers = @{ Authorization = "Bearer $token" }
+```
+
 #### 모든 강의실 조회
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:8080/api/v1/groups" -Method GET -UseBasicParsing
-$response.Content | ConvertFrom-Json | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8888/api/v1/groups" `
+    -Headers $headers | ConvertTo-Json
 ```
 
 #### 신규 강의실 생성
@@ -401,26 +454,260 @@ $body = @{
     description = "2층 강의실"
 } | ConvertTo-Json
 
-$response = Invoke-WebRequest -Uri "http://localhost:8080/api/v1/groups" `
+Invoke-RestMethod -Uri "http://localhost:8888/api/v1/groups" `
     -Method POST `
-    -Header @{"Content-Type"="application/json"} `
-    -Body $body `
-    -UseBasicParsing
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $body
 ```
 
 ---
 
-## 향후 확장 API
+## 추가 API 엔드포인트
 
-다음의 API들이 개발 예정입니다:
+아래는 현재 구현 완료된 추가 API 엔드포인트입니다.
 
-- **명령 관리**: PC 원격 제어 (종료, 재부팅, WOL 등)
-- **스크립트 배포**: PS1 스크립트 업로드 및 배포
-- **로그 조회**: PC 작업 로그 및 에러 로그 조회
-- **리포트 생성**: 트래픽, 가동률 등 통계 리포트
+### 4. 에이전트 관리 API
+
+#### 4.1 에이전트 등록
+```
+POST /api/v1/agent/register
+```
+**설명:** 에이전트가 최초 서버에 등록합니다. 설치 키 인증 후 에이전트 토큰을 발급합니다.
+
+#### 4.2 설치 키 조회
+```
+GET /api/v1/admin/install-key
+```
+**설명:** 에이전트 설치에 필요한 현재 설치 키를 조회합니다.
+
+#### 4.3 등록된 에이전트 목록
+```
+GET /api/v1/admin/agents
+```
+**설명:** 등록된 모든 에이전트 목록을 조회합니다.
+
+#### 4.4 에이전트 토큰 폐기
+```
+PUT /api/v1/admin/agents/{mac}/revoke
+```
+**설명:** 특정 에이전트의 인증 토큰을 폐기합니다.
+
+#### 4.5 에이전트 삭제
+```
+DELETE /api/v1/admin/agents/{mac}
+```
 
 ---
 
-## 지원
+### 5. 명령 관리 API
 
-API 관련 질문이나 버그 보고는 [프로젝트 이슈](https://github.com/example/dashboard/issues)를 통해 주시기 바랍니다.
+#### 5.1 명령 발행
+```
+POST /api/v1/commands
+```
+**설명:** 단일/일괄로 PC에 명령을 전송합니다 (종료, 재부팅, 명령 실행, PS1 실행, WOL 등).
+
+**요청 예시:**
+```json
+{
+  "scope": "GROUP",
+  "groupId": 1,
+  "role": "ALL",
+  "type": "SHUTDOWN",
+  "payload": ""
+}
+```
+
+#### 5.2 IP 지정 명령 발행
+```
+POST /api/v1/commands/to-ip
+```
+
+#### 5.3 발행된 명령 목록 조회
+```
+GET /api/v1/commands
+```
+
+#### 5.4 명령 ACK (에이전트)
+```
+POST /api/v1/agent/commands/{taskId}/ack
+```
+**설명:** 에이전트가 명령 수신을 확인합니다.
+
+#### 5.5 명령 결과 보고 (에이전트)
+```
+POST /api/v1/agent/commands/{taskId}/result
+```
+**설명:** 에이전트가 명령 실행 결과를 보고합니다.
+
+---
+
+### 6. WOL (Wake-on-LAN)
+
+```
+POST /api/v1/admin/enqueue
+```
+**설명:** 단일 PC에 WOL 명령을 큐잉합니다.
+
+```
+POST /api/v1/admin/group/wol
+```
+**설명:** 강의실 전체에 WOL을 일괄 전송합니다. 강의실 내 온라인 에이전트가 매직패킷을 릴레이합니다.
+
+---
+
+### 7. 스크립트 배포 API
+
+#### 7.1 스크립트 업로드
+```
+POST /api/v1/scripts
+Content-Type: multipart/form-data
+```
+**설명:** PS1 스크립트 파일을 업로드합니다. 해시 검증이 포함됩니다.
+
+#### 7.2 스크립트 다운로드
+```
+GET /api/v1/scripts/{id}/download
+```
+**설명:** 업로드된 스크립트를 다운로드합니다 (에이전트 사용).
+
+---
+
+### 8. IP 대역 관리 API
+
+```
+GET    /api/v1/ip-ranges              # 전체 IP 대역 조회
+POST   /api/v1/ip-ranges              # IP 대역 추가
+POST   /api/v1/ip-ranges/batch        # 일괄 IP 대역 추가
+DELETE /api/v1/ip-ranges/{id}         # IP 대역 삭제
+```
+
+강의실별 IP 대역은 대시보드 API에서도 관리 가능합니다:
+```
+GET    /api/v1/dashboard/classrooms/{groupId}/ip-ranges
+POST   /api/v1/dashboard/classrooms/{groupId}/ip-ranges
+DELETE /api/v1/dashboard/classrooms/ip-ranges/{id}
+```
+
+---
+
+### 9. 교사 PC 관리 API
+
+```
+GET    /api/v1/dashboard/classrooms/{groupId}/teacher-devices
+POST   /api/v1/dashboard/classrooms/{groupId}/teacher-devices
+DELETE /api/v1/dashboard/classrooms/teacher-devices/{id}
+```
+
+별도 컨트롤러:
+```
+GET    /api/v1/{groupId}/teacher-devices
+POST   /api/v1/{groupId}/teacher-devices
+DELETE /api/v1/teacher-devices/{id}
+```
+
+---
+
+### 10. PC 고장 등록 API
+
+```
+POST   /api/v1/dashboard/pcs/broken        # 고장 등록
+GET    /api/v1/dashboard/pcs/broken         # 고장 목록
+DELETE /api/v1/dashboard/pcs/broken/{mac}   # 고장 해제
+PUT    /api/v1/dashboard/pcs/broken/{mac}   # 고장 메모 수정
+```
+
+---
+
+### 11. 리포트 API
+
+```
+GET /api/v1/reports/pdf              # PDF 리포트 다운로드
+GET /api/v1/reports/traffic          # 트래픽 리포트
+GET /api/v1/reports/uptime           # 가동률 리포트
+GET /api/v1/reports/logs             # 트래픽 로그 조회 (페이징)
+```
+
+---
+
+### 12. PC 상태 조회 API
+
+```
+GET /api/v1/status/all                      # 전체 PC 상태
+GET /api/v1/status/{mac}                    # MAC으로 개별 조회
+GET /api/v1/status/role/{role}              # 역할별 조회 (TEACHER/STUDENT)
+GET /api/v1/status/classroom/{groupId}      # 강의실별 조회
+GET /api/v1/status/performance              # 성능 데이터
+```
+
+---
+
+### 13. 대시보드 레이아웃 API
+
+```
+GET    /api/v1/dashboards                   # 대시보드 목록
+POST   /api/v1/dashboards                   # 대시보드 생성
+PUT    /api/v1/dashboards/{id}              # 대시보드 수정
+DELETE /api/v1/dashboards/{id}              # 대시보드 삭제
+GET    /api/v1/dashboards/{id}/panels       # 패널 목록
+POST   /api/v1/dashboards/{id}/panels       # 패널 추가
+PUT    /api/v1/dashboards/{id}/panels/{panelId}  # 패널 수정
+DELETE /api/v1/dashboards/{id}/panels/{panelId}  # 패널 삭제
+```
+
+---
+
+### 14. 위젯 API (텍스트/이미지)
+
+```
+GET    /api/v1/dashboard/texts              # 텍스트 위젯 조회
+POST   /api/v1/dashboard/texts              # 텍스트 위젯 생성
+PUT    /api/v1/dashboard/texts/{id}         # 텍스트 위젯 수정
+DELETE /api/v1/dashboard/texts/{id}         # 텍스트 위젯 삭제
+POST   /api/v1/dashboard/texts/restore      # 텍스트 위젯 복원
+
+GET    /api/v1/dashboard/images             # 이미지 위젯 조회
+POST   /api/v1/dashboard/images             # 이미지 위젯 생성
+PUT    /api/v1/dashboard/images/{id}        # 이미지 위젯 수정
+DELETE /api/v1/dashboard/images/{id}        # 이미지 위젯 삭제
+POST   /api/v1/dashboard/images/upload      # 이미지 파일 업로드
+
+GET    /api/v1/dashboard/widgets            # 범용 위젯 조회
+POST   /api/v1/dashboard/widgets            # 범용 위젯 생성
+PUT    /api/v1/dashboard/widgets/{id}       # 범용 위젯 수정
+DELETE /api/v1/dashboard/widgets/{id}       # 범용 위젯 삭제
+```
+
+---
+
+### 15. 대시보드 모듈 API
+
+```
+GET    /api/v1/dashboard/modules            # 전체 모듈 조회
+GET    /api/v1/dashboard/modules/group/{groupId}  # 그룹별 모듈
+POST   /api/v1/dashboard/modules            # 모듈 생성
+PUT    /api/v1/dashboard/modules/{id}       # 모듈 수정
+DELETE /api/v1/dashboard/modules/{id}       # 모듈 삭제
+```
+
+---
+
+### 16. 설정 API
+
+```
+GET /api/v1/settings/{key}                  # 설정값 조회
+PUT /api/v1/settings/{key}                  # 설정값 변경
+```
+
+---
+
+### 17. 감사 로그 API
+
+```
+GET /api/v1/admin/audit/logs                # 감사 로그 조회
+```
+
+---
+
+> **최종 갱신일**: 2026-03-30 | 포트: 8888 | 인증: JWT Bearer Token

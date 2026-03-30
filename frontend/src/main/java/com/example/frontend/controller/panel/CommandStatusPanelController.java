@@ -46,15 +46,15 @@ public class CommandStatusPanelController {
     private VBox buildPanel() {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(12));
-        panel.setStyle("-fx-background-color: #f8fafc; -fx-background-radius: 8; -fx-border-color: #cbd5e1; -fx-border-radius: 8;");
+        panel.setStyle("-fx-background-color: #f8fbff; -fx-background-radius: 8; -fx-border-color: #cbd5e0; -fx-border-radius: 8;");
         panel.setPrefSize(400, 260);
 
-        Label title = new Label("Command Status");
+        Label title = new Label("명령 상태");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         title.setTextFill(Color.web("#0f172a"));
 
         Button refreshBtn = new Button("↺");
-        refreshBtn.setStyle("-fx-background-color: #e2e8f0; -fx-text-fill: #0f172a; -fx-font-weight: 700;");
+        refreshBtn.setStyle("-fx-background-color: #edf2f7; -fx-text-fill: #2d3748; -fx-font-weight: 700;");
         refreshBtn.setOnAction(e -> refresh());
 
         Region spacer = new Region();
@@ -103,24 +103,49 @@ public class CommandStatusPanelController {
         TableView<Map<String, Object>> table = new TableView<>();
         table.setPlaceholder(new Label("명령 로그가 없습니다."));
 
-        TableColumn<Map<String, Object>, String> timeCol = new TableColumn<>("Time");
-        timeCol.setPrefWidth(150);
+        TableColumn<Map<String, Object>, String> timeCol = new TableColumn<>("시간");
+        timeCol.setPrefWidth(140);
         timeCol.setCellValueFactory(data -> new SimpleStringProperty(extractTime(data.getValue())));
 
-        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("Type");
-        typeCol.setPrefWidth(100);
+        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("종류");
+        typeCol.setPrefWidth(80);
         typeCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "commandType", "type")));
 
-        TableColumn<Map<String, Object>, String> targetCol = new TableColumn<>("Target");
-        targetCol.setPrefWidth(120);
+        TableColumn<Map<String, Object>, String> targetCol = new TableColumn<>("대상");
+        targetCol.setPrefWidth(110);
         targetCol.setCellValueFactory(data -> new SimpleStringProperty(extractTarget(data.getValue())));
 
-        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("Status");
-        statusCol.setPrefWidth(100);
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(normalizeStatus(asText(data.getValue(), "status"))));
+        // 상태 컬럼 - SCMATE 상태 포함
+        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("상태");
+        statusCol.setPrefWidth(140);
+        statusCol.setCellValueFactory(data -> new SimpleStringProperty(extractDetailedStatus(data.getValue())));
+        statusCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                } else {
+                    setText(item);
+                    // 상태별 색상 표시
+                    if (item.contains("시점저장")) {
+                        setStyle("-fx-text-fill: #d97706; -fx-font-weight: 700;"); // 주황색 - 주의
+                    } else if (item.contains("COMPLETED")) {
+                        setStyle("-fx-text-fill: #10b981; -fx-font-weight: 600;"); // 초록색 - 완료
+                    } else if (item.contains("DELIVERED")) {
+                        setStyle("-fx-text-fill: #3b82f6; -fx-font-weight: 600;"); // 파란색 - 전송
+                    } else if (item.contains("ACKED")) {
+                        setStyle("-fx-text-fill: #8b5cf6; -fx-font-weight: 600;"); // 보라색 - 실행중
+                    } else if (item.contains("FAILED")) {
+                        setStyle("-fx-text-fill: #ef4444; -fx-font-weight: 600;"); // 빨강색 - 실패
+                    }
+                }
+            }
+        });
 
-        TableColumn<Map<String, Object>, String> exitCol = new TableColumn<>("Exit");
-        exitCol.setPrefWidth(70);
+        TableColumn<Map<String, Object>, String> exitCol = new TableColumn<>("종료코드");
+        exitCol.setPrefWidth(60);
         exitCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "exitCode")));
 
         table.getColumns().addAll(timeCol, typeCol, targetCol, statusCol, exitCol);
@@ -135,7 +160,12 @@ public class CommandStatusPanelController {
         long acked = recent.stream().filter(c -> "ACKED".equals(normalizeStatus(asText(c, "status")))).count();
         long completed = recent.stream().filter(c -> "COMPLETED".equals(normalizeStatus(asText(c, "status")))).count();
         long failed = recent.stream().filter(c -> "FAILED".equals(normalizeStatus(asText(c, "status")))).count();
-        long activeTotal = queued + delivered + acked;
+        
+        // SCMATE 상태 카운팅
+        long scmateReset = recent.stream()
+            .filter(c -> "PENDING".equals(asText(c, "scmateResetStatus")))
+            .count();
+        long activeTotal = queued + delivered + acked + scmateReset;
 
         if (recent.isEmpty()) {
             summaryLabel.setText("대기 중인 명령 없음");
@@ -144,8 +174,8 @@ public class CommandStatusPanelController {
         }
 
         summaryLabel.setText(String.format(
-                "최근 120건: 진행중 %d (Q:%d D:%d A:%d) / 완료 %d / 실패 %d",
-                activeTotal, queued, delivered, acked, completed, failed));
+                "최근 120건: 진행중 %d (Q:%d D:%d A:%d) / 시점저장 %d / 완료 %d / 실패 %d",
+                activeTotal, queued, delivered, acked, scmateReset, completed, failed));
         commandTable.setItems(FXCollections.observableArrayList(recent));
     }
 
@@ -163,6 +193,28 @@ public class CommandStatusPanelController {
 
     private String normalizeStatus(String status) {
         return status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+    }
+
+    /** 상세 상태 추출: SCMATE 상태 포함 */
+    private String extractDetailedStatus(Map<String, Object> row) {
+        String status = normalizeStatus(asText(row, "status"));
+        String scmateStatus = asText(row, "scmateResetStatus");
+        
+        if ("PENDING".equals(scmateStatus)) {
+            return "실행완료 (시점저장필요)";
+        } else if ("COMPLETED".equals(scmateStatus)) {
+            return "명령완료";
+        }
+        
+        // 기본 상태
+        return switch(status) {
+            case "QUEUED" -> "전송중";
+            case "DELIVERED" -> "전송중";
+            case "ACKED" -> "실행중";
+            case "COMPLETED" -> "완료";
+            case "FAILED" -> "실패";
+            default -> status;
+        };
     }
 
     private String extractTarget(Map<String, Object> row) {

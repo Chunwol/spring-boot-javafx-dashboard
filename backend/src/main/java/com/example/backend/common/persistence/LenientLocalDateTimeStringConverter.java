@@ -2,6 +2,8 @@ package com.example.backend.common.persistence;
 
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -18,6 +20,8 @@ import java.time.temporal.ChronoField;
  */
 @Converter
 public class LenientLocalDateTimeStringConverter implements AttributeConverter<LocalDateTime, String> {
+
+    private static final Logger log = LoggerFactory.getLogger(LenientLocalDateTimeStringConverter.class);
 
     private static final DateTimeFormatter DB_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter FLEX_SPACE = new DateTimeFormatterBuilder()
@@ -55,10 +59,11 @@ public class LenientLocalDateTimeStringConverter implements AttributeConverter<L
             }
             try {
                 return LocalDateTime.parse(text, FLEX_SPACE);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
                 return LocalDateTime.parse(text, FLEX_ISO);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.trace("LocalDateTime 파싱 실패: {}", text);
             return null;
         }
     }

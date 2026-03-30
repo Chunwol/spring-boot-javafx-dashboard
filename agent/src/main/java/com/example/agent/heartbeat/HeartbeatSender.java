@@ -131,8 +131,10 @@ public class HeartbeatSender {
                     JsonNode node = mapper.readTree(resp.body().string());
                     JsonNode cmd = node.get("command");
                     if (cmd != null && !cmd.isNull()) {
+                        long taskId = cmd.has("taskId") ? cmd.get("taskId").asLong() : 0;
                         // 비동기로 명령 실행 (하트비트 스레드 블로킹 방지)
-                        Thread cmdThread = new Thread(() -> commandExecutor.execute(cmd));
+                        Thread cmdThread = new Thread(() -> commandExecutor.execute(cmd),
+                                "cmd-exec-" + taskId);
                         cmdThread.setDaemon(true);
                         cmdThread.start();
                     }

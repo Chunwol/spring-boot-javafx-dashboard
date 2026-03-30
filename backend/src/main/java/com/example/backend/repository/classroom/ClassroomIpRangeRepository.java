@@ -9,5 +9,6 @@ import java.util.List;
 @Repository
 public interface ClassroomIpRangeRepository extends JpaRepository<ClassroomIpRange, Long> {
     List<ClassroomIpRange> findByGroupId(Long groupId);
+    void deleteByGroupId(Long groupId);
 }
 

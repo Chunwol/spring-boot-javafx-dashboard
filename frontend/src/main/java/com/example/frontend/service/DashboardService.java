@@ -17,6 +17,12 @@ public class DashboardService {
     private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
     private final ApiClient apiClient = ApiClient.getInstance();
 
+    private static final Map<String, Double> DEFAULT_TRAFFIC_THRESHOLDS = Map.of(
+            "globalMbps", 5000.0,
+            "classroomMbps", 1000.0,
+            "pcMbps", 300.0
+    );
+
     public void fetchClassroomsAsync(Consumer<List<ClassroomSummaryDto>> callback) {
         apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
                 .thenAccept(callback)
@@ -43,6 +49,44 @@ public class DashboardService {
                 .exceptionally(ex -> {
                     log.warn("Failed to fetch network traffic", ex);
                     callback.accept(0.0, 0.0);
+                    return null;
+                });
+    }
+
+    public void fetchTrafficThresholdsAsync(Consumer<Map<String, Double>> callback) {
+        if (!apiClient.hasBearerToken()) {
+            callback.accept(DEFAULT_TRAFFIC_THRESHOLDS);
+            return;
+        }
+        apiClient.getJson("/dashboard/config/traffic-thresholds", new TypeReference<Map<String, Double>>() {})
+                .thenAccept(callback)
+                .exceptionally(ex -> {
+                    Throwable cause = ex instanceof java.util.concurrent.CompletionException && ex.getCause() != null
+                            ? ex.getCause()
+                            : ex;
+                    if (cause instanceof ApiClientException apiEx
+                            && (apiEx.getStatusCode() == 401 || apiEx.getStatusCode() == 403)) {
+                        log.info("Traffic threshold API unavailable for current session; using defaults (status={})",
+                                apiEx.getStatusCode());
+                    } else {
+                        log.warn("Failed to fetch traffic thresholds, using defaults", cause);
+                    }
+                    callback.accept(DEFAULT_TRAFFIC_THRESHOLDS);
+                    return null;
+                });
+    }
+
+    public void fetchClassroomPcTrafficAsync(Long classroomId, Consumer<List<Map<String, Object>>> callback) {
+        if (classroomId == null) {
+            callback.accept(List.of());
+            return;
+        }
+        apiClient.getJson("/dashboard/classrooms/" + classroomId + "/traffic/pcs",
+                        new TypeReference<List<Map<String, Object>>>() {})
+                .thenAccept(callback)
+                .exceptionally(ex -> {
+                    log.warn("Failed to fetch classroom pc traffic for {}", classroomId, ex);
+                    callback.accept(List.of());
                     return null;
                 });
     }

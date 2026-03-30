@@ -111,14 +111,18 @@ public class CommandExecutor {
 
     private CommandResult executeShell(String command) throws IOException, InterruptedException {
         Process proc = Runtime.getRuntime().exec(new String[]{"cmd.exe", "/c", command});
-        boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
-        if (!finished) {
+        try {
+            boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
+            if (!finished) {
+                proc.destroyForcibly();
+                return new CommandResult(124, "", "명령 실행 타임아웃 (30초)");
+            }
+            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
+            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
+            return new CommandResult(proc.exitValue(), stdout, stderr);
+        } finally {
             proc.destroyForcibly();
-            return new CommandResult(124, "", "명령 실행 타임아웃 (30초)");
         }
-        String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-        String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-        return new CommandResult(proc.exitValue(), stdout, stderr);
     }
 
     // ─── PS1 ─────────────────────────────────────────────────────────────
@@ -136,57 +140,59 @@ public class CommandExecutor {
         Path tmpDir = Files.createTempDirectory("pcagent-ps1-");
         Path tmpFile = tmpDir.resolve("script-" + taskId + ".ps1");
 
-        // 다운로드
-        byte[] scriptBytes;
-        Request dlReq = new Request.Builder()
-                .url(url)
-                .header("X-Agent-Token", config.getAgentToken())
-                .get()
-                .build();
-        try (Response resp = httpClient.newCall(dlReq).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) {
-                return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
-            }
-            scriptBytes = resp.body().bytes();
-            // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
-            String serverHash = resp.header("X-Script-SHA256");
-            if (serverHash != null && !serverHash.isBlank()) {
-                String localHash = sha256(scriptBytes);
-                if (!localHash.equalsIgnoreCase(serverHash)) {
-                    return new CommandResult(1, "", "스크립트 무결성 검증 실패");
+        try {
+            // 다운로드
+            byte[] scriptBytes;
+            Request dlReq = new Request.Builder()
+                    .url(url)
+                    .header("X-Agent-Token", config.getAgentToken())
+                    .get()
+                    .build();
+            try (Response resp = httpClient.newCall(dlReq).execute()) {
+                if (!resp.isSuccessful() || resp.body() == null) {
+                    return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
+                }
+                scriptBytes = resp.body().bytes();
+                // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
+                String serverHash = resp.header("X-Script-SHA256");
+                if (serverHash != null && !serverHash.isBlank()) {
+                    String localHash = sha256(scriptBytes);
+                    if (!localHash.equalsIgnoreCase(serverHash)) {
+                        return new CommandResult(1, "", "스크립트 무결성 검증 실패");
+                    }
                 }
             }
+            Files.write(tmpFile, scriptBytes);
+
+            // payload에서 args 추출
+            JsonNode p = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+            String args = p.has("args") ? p.get("args").asText() : "";
+
+            Process proc = new ProcessBuilder(
+                    "powershell.exe",
+                    "-ExecutionPolicy", "Bypass",
+                    "-Scope", "Process",
+                    "-File", tmpFile.toAbsolutePath().toString(),
+                    args
+            ).redirectErrorStream(false).start();
+
+            try {
+                boolean finished = proc.waitFor(5, TimeUnit.MINUTES);
+                if (!finished) {
+                    proc.destroyForcibly();
+                    return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
+                }
+                String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
+                String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
+                return new CommandResult(proc.exitValue(), stdout, stderr);
+            } finally {
+                proc.destroyForcibly();
+            }
+        } finally {
+            // 임시 파일 정리 (예외 발생 시에도 보장)
+            try { Files.deleteIfExists(tmpFile); } catch (IOException ignored) {}
+            try { Files.deleteIfExists(tmpDir); } catch (IOException ignored) {}
         }
-        Files.write(tmpFile, scriptBytes);
-
-        // payload에서 args 추출
-        JsonNode p = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
-        String args = p.has("args") ? p.get("args").asText() : "";
-
-        Process proc = new ProcessBuilder(
-                "powershell.exe",
-                "-ExecutionPolicy", "Bypass",
-                "-Scope", "Process",
-                "-File", tmpFile.toAbsolutePath().toString(),
-                args
-        ).redirectErrorStream(false).start();
-
-        boolean finished = proc.waitFor(5, TimeUnit.MINUTES);
-        if (!finished) {
-            proc.destroyForcibly();
-            Files.deleteIfExists(tmpFile);
-            Files.deleteIfExists(tmpDir);
-            return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
-        }
-        String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-        String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-        int exit = proc.exitValue();
-
-        // 임시 파일 삭제
-        Files.deleteIfExists(tmpFile);
-        Files.deleteIfExists(tmpDir);
-
-        return new CommandResult(exit, stdout, stderr);
     }
 
     // ─── WOL RELAY ───────────────────────────────────────────────────────

@@ -12,19 +12,31 @@ import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
+import javafx.geometry.Rectangle2D;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 import java.util.Map;
+import java.util.prefs.Preferences;
 
 public class LoginController {
 
     private static final Logger log = LoggerFactory.getLogger(LoginController.class);
+    private static final Preferences PREFS = Preferences.userNodeForPackage(LoginController.class);
+    private static final String PREF_SERVER_HOST = "server.host";
+    private static final String PREF_SERVER_PORT = "server.port";
 
     @FXML
     private TextField usernameField;
 
     @FXML
     private PasswordField passwordField;
+
+    @FXML
+    private TextField hostField;
+
+    @FXML
+    private TextField portField;
 
     @FXML
     private Label messageLabel;
@@ -39,6 +51,9 @@ public class LoginController {
 
     @FXML
     public void initialize() {
+        hostField.setText(PREFS.get(PREF_SERVER_HOST, apiClient.currentLoginHost()));
+        portField.setText(PREFS.get(PREF_SERVER_PORT, Integer.toString(apiClient.currentLoginPort())));
+
         // Enter 키 입력 시 로그인 수행
         passwordField.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ENTER) handleLogin();
@@ -52,15 +67,36 @@ public class LoginController {
     private void handleLogin() {
         String username = usernameField.getText();
         String password = passwordField.getText();
+        String host = hostField.getText();
+        String portText = portField.getText();
         messageLabel.setVisible(false);
 
+        if (host == null || host.isBlank()) {
+            messageLabel.setText("도메인 또는 IP를 입력하세요.");
+            messageLabel.setVisible(true);
+            return;
+        }
+
+        int port;
+        try {
+            port = Integer.parseInt(portText);
+            if (port < 1 || port > 65535) {
+                throw new NumberFormatException("out-of-range");
+            }
+        } catch (Exception ex) {
+            messageLabel.setText("포트는 1~65535 범위의 숫자여야 합니다.");
+            messageLabel.setVisible(true);
+            return;
+        }
+
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
-            messageLabel.setText("사용자명과 비밀번호를 입력하세요.");
+            messageLabel.setText("서버 정보와 사용자명, 비밀번호를 입력하세요.");
             messageLabel.setVisible(true);
             return;
         }
 
         try {
+            apiClient.configureServer(host, port);
             Map<String, Object> payload = Map.of(
                     "username", username,
                     "password", password
@@ -75,6 +111,8 @@ public class LoginController {
                             return;
                         }
                         apiClient.setBearerToken(tokenObj.toString());
+                        PREFS.put(PREF_SERVER_HOST, host.trim());
+                        PREFS.put(PREF_SERVER_PORT, Integer.toString(port));
                         try {
                             showDashboard();
                         } catch (Exception ex) {
@@ -99,7 +137,6 @@ public class LoginController {
     }
 
     private void showDashboard() throws Exception {
-        // FXML 경로를 URL로 안전하게 로드 (표준 방식)
         var fxmlUrl = getClass().getResource("/fxml/dashboard.fxml");
         if (fxmlUrl == null) {
             throw new RuntimeException("dashboard.fxml 리소스를 찾을 수 없습니다: /fxml/dashboard.fxml (classpath 경로 문제)");
@@ -109,12 +146,27 @@ public class LoginController {
         if (primaryStage == null) {
             throw new IllegalStateException("primaryStage가 null입니다. setPrimaryStage 호출 필요");
         }
-        Scene scene = new Scene(root, 1440, 900);
+
+        Rectangle2D bounds = Screen.getPrimary().getVisualBounds();
+        double targetWidth = Math.max(1000, Math.min(1360, bounds.getWidth() - 120));
+        double targetHeight = Math.max(680, Math.min(860, bounds.getHeight() - 120));
+
+        // hide()로 Stage 레이아웃 캐시를 초기화한 뒤 Scene 교체 → show().
+        // hide 없이 setScene만 하면 이전 Scene(460×360) 크기로 내부가 잡히는 문제 발생.
+        primaryStage.hide();
+
+        Scene scene = new Scene(root, targetWidth, targetHeight);
         scene.getStylesheets().add(getClass().getResource("/dashboard-theme.css").toExternalForm());
-        primaryStage.setMinWidth(1280);
-        primaryStage.setMinHeight(800);
+
+        primaryStage.setTitle("대시보드");
+        primaryStage.setMinWidth(1000);
+        primaryStage.setMinHeight(680);
         primaryStage.setScene(scene);
-        primaryStage.setTitle("Dashboard");
-        primaryStage.setMaximized(true);
+        primaryStage.setWidth(targetWidth);
+        primaryStage.setHeight(targetHeight);
+        root.applyCss();
+        root.layout();
+        primaryStage.centerOnScreen();
+        primaryStage.show();
     }
 }

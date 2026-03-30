@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -18,15 +17,14 @@ public class ClassroomSummaryDto {
     private int onlinePcCount;
     private int totalPcCount;
 
-    private long onlinePcs;
-    private long totalPcs;
+    private int onlinePcs;
+    private int totalPcs;
     private String teacherPcStatus; // 예: "ONLINE", "OFFLINE"
-    private LocalDateTime lastHeartbeat;
+    private String lastHeartbeat;
     private List<String> ipRanges;
     private boolean visible;
     private Double x;
     private Double y;
     private Double width;
     private Double height;
-    private List<PcStatusDto> pcList;
 }

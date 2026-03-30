@@ -15,6 +15,9 @@ public class DashboardWidgetItem {
     @Column(name = "group_id")
     private Long groupId;
 
+    @Column(name = "dashboard_id")
+    private Long dashboardId;
+
     @Column(nullable = false)
     private String type;
 
@@ -49,6 +52,14 @@ public class DashboardWidgetItem {
 
     public void setGroupId(Long groupId) {
         this.groupId = groupId;
+    }
+
+    public Long getDashboardId() {
+        return dashboardId;
+    }
+
+    public void setDashboardId(Long dashboardId) {
+        this.dashboardId = dashboardId;
     }
 
     public String getType() {

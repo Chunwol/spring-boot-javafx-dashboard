@@ -40,6 +40,7 @@ import java.util.function.LongSupplier;
 public class DashboardClassroomModule {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardClassroomModule.class);
+    private static final double LAYOUT_EPSILON = 0.5;
 
     private final ApiClient apiClient;
     private final ObjectMapper objectMapper;
@@ -50,6 +51,7 @@ public class DashboardClassroomModule {
     private final Runnable refreshCallback;
     private final LongSupplier dashboardIdSupplier;
     private final Runnable refreshPanelCallback;
+    private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final BooleanSupplier snapModeSupplier;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
@@ -61,6 +63,11 @@ public class DashboardClassroomModule {
     private static final String ORDER_BY_PC_NAME = "PC_NAME";
     private static final String ORDER_BY_IP = "IP";
 
+    @FunctionalInterface
+    public interface PanelLayoutCacheUpdater {
+        void update(Long panelId, double x, double y, double width, double height);
+    }
+
     public DashboardClassroomModule(
             HttpClient httpClient,
             ObjectMapper objectMapper,
@@ -71,6 +78,7 @@ public class DashboardClassroomModule {
             Runnable refreshCallback,
             LongSupplier dashboardIdSupplier,
             Runnable refreshPanelCallback,
+            PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             BooleanSupplier snapModeSupplier) {
         this.apiClient = ApiClient.getInstance();
         this.objectMapper = objectMapper;
@@ -81,6 +89,7 @@ public class DashboardClassroomModule {
         this.refreshCallback = refreshCallback;
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.refreshPanelCallback = refreshPanelCallback;
+        this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.snapModeSupplier = snapModeSupplier;
 
         // DB에서 skipGroupCommandConfirm 초기값 로드
@@ -184,16 +193,28 @@ public class DashboardClassroomModule {
             return;
         }
 
-        apiClient.postJson("/dashboards/" + dashboardId + "/panels", Map.of(
-                "panelType", "CLASSROOM_HEARTBEAT",
-                "refGroupId", group.getGroupId(),
-                "x", x,
-                "y", y,
-                "width", width,
-                "height", height,
-                "visible", true,
-                "zIndex", 0
-        )).thenAccept(resp -> Platform.runLater(refreshPanelCallback))
+        TextInputDialog nameDialog = new TextInputDialog();
+        nameDialog.setTitle("패널 이름 설정");
+        nameDialog.setHeaderText("강의실 [" + group.getGroupName() + "] 패널의 표시 이름을 입력하세요.");
+        nameDialog.setContentText("이름 (비워두면 강의실명 사용):");
+        java.util.Optional<String> nameResult = nameDialog.showAndWait();
+        if (nameResult.isEmpty()) return; // 취소
+
+        String panelName = nameResult.get().trim();
+
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("panelType", "CLASSROOM_HEARTBEAT");
+        payload.put("refGroupId", group.getGroupId());
+        payload.put("x", x);
+        payload.put("y", y);
+        payload.put("width", width);
+        payload.put("height", height);
+        payload.put("visible", true);
+        payload.put("zIndex", 0);
+        if (!panelName.isEmpty()) payload.put("panelName", panelName);
+
+        apiClient.postJson("/dashboards/" + dashboardId + "/panels", payload)
+                .thenAccept(resp -> Platform.runLater(refreshPanelCallback))
                 .exceptionally(ex -> {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "강의실 패널 추가 실패: " + cause.getMessage()).showAndWait());
@@ -270,8 +291,8 @@ public class DashboardClassroomModule {
     // ─── 패널 내부 빌더 (private) ──────────────────────────────────────────
 
     private VBox createClassroomPanel(ClassroomSummaryDto summary, DashboardPanelDto panelDto) {
-        VBox panel = new VBox(10);
-        panel.setPadding(new Insets(15));
+        VBox panel = new VBox(12);
+        panel.setPadding(new Insets(18, 16, 16, 16));
         panel.getProperties().put("dashboardPanelId", panelDto.getId());
         panel.getProperties().put("groupId", summary.getGroupId());
         panel.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 20.0);
@@ -284,14 +305,14 @@ public class DashboardClassroomModule {
         nameLabel.setTextFill(Color.web("#e5e7eb"));
         nameLabel.setMaxWidth(Double.MAX_VALUE);
         StackPane titleBanner = new StackPane(nameLabel);
-        titleBanner.setPadding(new Insets(10, 8, 10, 8));
+        titleBanner.setPadding(new Insets(12, 10, 12, 10));
         VBox.setVgrow(titleBanner, Priority.NEVER);
-        titleBanner.setStyle("-fx-background-color: #4d8a3a; -fx-background-radius: 8;");
+        titleBanner.setStyle("-fx-background-color: #1f7a42; -fx-background-radius: 10;");
 
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         Button deleteBtn = new Button("삭제");
-        deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
         deleteBtn.setVisible(editModeSupplier.getAsBoolean());
         deleteBtn.setManaged(editModeSupplier.getAsBoolean());
         deleteBtn.setOnAction(e -> {
@@ -306,7 +327,7 @@ public class DashboardClassroomModule {
         });
         classroomDeleteBtns.put(panelDto.getId(), deleteBtn);
         Button gridSettingsBtn = new Button("⚙");
-        gridSettingsBtn.setStyle("-fx-background-color: #555e6d; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+        gridSettingsBtn.setStyle("-fx-background-color: #718096; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
         gridSettingsBtn.setVisible(editModeSupplier.getAsBoolean());
         gridSettingsBtn.setManaged(editModeSupplier.getAsBoolean());
         gridSettingsBtn.setOnAction(e -> {
@@ -322,16 +343,16 @@ public class DashboardClassroomModule {
         totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         totalLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane totalBox = new StackPane(totalLabel);
-        totalBox.setPadding(new Insets(8));
-        totalBox.setStyle("-fx-background-color: #979ca3; -fx-background-radius: 4;");
+        totalBox.setPadding(new Insets(9, 8, 9, 8));
+        totalBox.setStyle("-fx-background-color: #64748b; -fx-background-radius: 6;");
         HBox.setHgrow(totalBox, Priority.ALWAYS);
 
         Label onlineLabel = new Label(summary.getOnlinePcs() + " 대");
         onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         onlineLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane onlineBox = new StackPane(onlineLabel);
-        onlineBox.setPadding(new Insets(8));
-        onlineBox.setStyle("-fx-background-color: #6da657; -fx-background-radius: 4;");
+        onlineBox.setPadding(new Insets(9, 8, 9, 8));
+        onlineBox.setStyle("-fx-background-color: #15803d; -fx-background-radius: 6;");
         HBox.setHgrow(onlineBox, Priority.ALWAYS);
 
         int offlineCount = Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs());
@@ -339,11 +360,11 @@ public class DashboardClassroomModule {
         offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         offlineLabel.setTextFill(Color.web("#f3f4f6"));
         StackPane offlineBox = new StackPane(offlineLabel);
-        offlineBox.setPadding(new Insets(8));
-        offlineBox.setStyle("-fx-background-color: #cf404a; -fx-background-radius: 4;");
+        offlineBox.setPadding(new Insets(9, 8, 9, 8));
+        offlineBox.setStyle("-fx-background-color: #b4535f; -fx-background-radius: 6;");
         HBox.setHgrow(offlineBox, Priority.ALWAYS);
 
-        HBox countStrip = new HBox(2, totalBox, onlineBox, offlineBox);
+        HBox countStrip = new HBox(4, totalBox, onlineBox, offlineBox);
 
         GridPane pcGrid = new GridPane();
         pcGrid.setHgap(6);
@@ -371,7 +392,9 @@ public class DashboardClassroomModule {
                 Object mode = cfg.get("gridOrderMode");
                 if (mode != null && !mode.toString().isBlank()) savedOrderMode = mode.toString();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.debug("패널 configJson 파싱 실패", e);
+        }
         panel.getProperties().put("gridOrderMode", savedOrderMode);
         panel.getProperties().put("configJsonBase", baseConfigJson);
 
@@ -395,15 +418,29 @@ public class DashboardClassroomModule {
 
         HBox buttonBox = new HBox(5);
         Button shutdownAllBtn = new Button("전체 종료");
-        shutdownAllBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
+        shutdownAllBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
         shutdownAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "SHUTDOWN"));
 
         Button wolAllBtn = new Button("전체 켜기(WOL)");
-        wolAllBtn.setStyle("-fx-background-color: #3498db; -fx-text-fill: white;");
+        wolAllBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white;");
         wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "WOL"));
 
         buttonBox.getChildren().addAll(shutdownAllBtn, wolAllBtn);
-    panel.getChildren().addAll(header, titleBanner, countStrip, pcGrid, buttonBox);
+        panel.getChildren().addAll(header, titleBanner);
+
+        // 사용자 지정 패널 이름이 있으면 부제목으로 표시
+        String customPanelName = panelDto.getPanelName();
+        if (customPanelName != null && !customPanelName.isBlank()) {
+            Label panelNameLabel = new Label(customPanelName);
+            panelNameLabel.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 13));
+            panelNameLabel.setTextFill(Color.web("#94a3b8"));
+            panelNameLabel.setMaxWidth(Double.MAX_VALUE);
+            panelNameLabel.setStyle("-fx-padding: 2 8 0 8;");
+            panel.getProperties().put("panelNameLabel", panelNameLabel);
+            panel.getChildren().add(panelNameLabel);
+        }
+
+        panel.getChildren().addAll(countStrip, pcGrid, buttonBox);
 
         makeDraggable(panel, summary, panelDto.getId());
         makeResizable(panel, summary, panelDto.getId());
@@ -419,10 +456,18 @@ public class DashboardClassroomModule {
         }
 
         HBox header = (HBox) panel.getChildren().get(0);
-        panel.setLayoutX(panelDto.getX() != null ? panelDto.getX() : panel.getLayoutX());
-        panel.setLayoutY(panelDto.getY() != null ? panelDto.getY() : panel.getLayoutY());
-        panel.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : panel.getPrefWidth());
-        panel.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : panel.getPrefHeight());
+        if (panelDto.getX() != null) {
+            applyIfChanged(panel.getLayoutX(), panelDto.getX(), panel::setLayoutX);
+        }
+        if (panelDto.getY() != null) {
+            applyIfChanged(panel.getLayoutY(), panelDto.getY(), panel::setLayoutY);
+        }
+        if (panelDto.getWidth() != null) {
+            applyIfChanged(panel.getPrefWidth(), panelDto.getWidth(), panel::setPrefWidth);
+        }
+        if (panelDto.getHeight() != null) {
+            applyIfChanged(panel.getPrefHeight(), panelDto.getHeight(), panel::setPrefHeight);
+        }
 
         Label nameLabel = (Label) panel.getProperties().get("nameLabel");
         if (nameLabel != null) {
@@ -450,14 +495,20 @@ public class DashboardClassroomModule {
         }
     }
 
+    private void applyIfChanged(double current, double next, java.util.function.DoubleConsumer setter) {
+        if (Math.abs(current - next) > LAYOUT_EPSILON) {
+            setter.accept(next);
+        }
+    }
+
     private void updatePanelStyle(VBox panel, ClassroomSummaryDto summary) {
-        String baseStyle = "-fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.10), 10, 0, 0, 0);";
-        panel.setStyle(baseStyle + " -fx-background-color: white;");
+        String baseStyle = "-fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.12), 16, 0, 0, 4); -fx-border-color: #d8dee8; -fx-border-radius: 12;";
+        panel.setStyle(baseStyle + " -fx-background-color: #f8fafc;");
 
         Node bannerNode = (Node) panel.getProperties().get("titleBanner");
         if (bannerNode instanceof StackPane banner) {
             boolean teacherOnline = "ONLINE".equalsIgnoreCase(summary.getTeacherPcStatus());
-            banner.setStyle("-fx-background-color: " + (teacherOnline ? "#4d8a3a" : "#8f949b") + "; -fx-background-radius: 8;");
+            banner.setStyle("-fx-background-color: " + (teacherOnline ? "#1f7a42" : "#55657c") + "; -fx-background-radius: 10;");
         }
     }
 
@@ -525,9 +576,9 @@ public class DashboardClassroomModule {
             PcStatusDto pc = i < list.size() ? list.get(i) : null;
             String status = pc != null && pc.getStatus() != null ? pc.getStatus().toUpperCase() : "OFFLINE";
             String bg = switch (status) {
-                case "ONLINE" -> "#4d8a3a";
-                case "BROKEN", "FAILED" -> "#cf404a";
-                default -> "#a5a7ab";
+                case "ONLINE" -> "#2f855a";
+                case "BROKEN", "FAILED" -> "#c95f6a";
+                default -> "#94a3b8";
             };
 
             Label cell = new Label(String.valueOf(i + 1));
@@ -606,7 +657,9 @@ public class DashboardClassroomModule {
                            payload.put("configJson", newJson);
                            apiClient.putJson("/dashboards/" + dashId + "/panels/" + panelId, payload)
                                 .exceptionally(ex -> null);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        log.debug("정렬 설정 저장 실패", e);
+                    }
                 }
 
                 renderPcGrid(totalCount, pcCacheByGroupId.get(groupId), pcGrid, panel);
@@ -713,13 +766,16 @@ public class DashboardClassroomModule {
         if (dashboardId <= 0 || dashboardPanelId == null) {
             return;
         }
+        if (panelLayoutCacheUpdater != null) {
+            panelLayoutCacheUpdater.update(dashboardPanelId, x, y, width, height);
+        }
         apiClient.putJson("/dashboards/" + dashboardId + "/panels/" + dashboardPanelId, new LinkedHashMap<>() {{
             put("x", x);
             put("y", y);
             put("width", width);
             put("height", height);
             put("visible", visible);
-        }}).thenAccept(resp -> Platform.runLater(refreshPanelCallback)).exceptionally(ex -> {
+        }}).exceptionally(ex -> {
             Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
             Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "패널 위치 저장 실패: " + cause.getMessage()).show());
             return null;

@@ -1,7 +1,9 @@
 package com.example.backend.controller.status;
 
 import com.example.backend.dto.dashboard.PcStatusDto;
+import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.status.PerformanceStatusService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -31,12 +34,15 @@ public class StatusController {
 
     private final PcMasterRepository pcMasterRepository;
     private final PerformanceStatusService performanceStatusService;
+    private final ClassroomGroupRepository classroomGroupRepository;
 
     @Autowired
     public StatusController(PcMasterRepository pcMasterRepository,
-                            PerformanceStatusService performanceStatusService) {
+                            PerformanceStatusService performanceStatusService,
+                            ClassroomGroupRepository classroomGroupRepository) {
         this.pcMasterRepository = pcMasterRepository;
         this.performanceStatusService = performanceStatusService;
+        this.classroomGroupRepository = classroomGroupRepository;
     }
 
     /**
@@ -46,12 +52,14 @@ public class StatusController {
     @GetMapping("/all")
     @Operation(
         summary = "모든 PC 상태 조회",
-        description = "시스템에서 관리 중인 모든 PC의 온라인 상태, IP, 역할, 마지막 하트비트 정보를 조회합니다."
+        description = "시스템에서 관리 중인 모든 PC의 온라인 상태, IP, 역할, 강의실명, 마지막 하트비트 정보를 조회합니다."
     )
     @ApiResponse(responseCode = "200", description = "PC 상태 목록 조회 성공")
     public List<PcStatusDto> all() {
-        List<PcMaster> all = pcMasterRepository.findAll();
-        return all.stream().map(this::toDto).collect(Collectors.toList());
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findAll().stream()
+            .map(p -> toDto(p, groupNames))
+            .collect(Collectors.toList());
     }
 
     /**
@@ -68,9 +76,39 @@ public class StatusController {
     @ApiResponse(responseCode = "404", description = "해당 MAC의 PC를 찾을 수 없음")
     public ResponseEntity<PcStatusDto> getByMac(
             @Parameter(description = "PC MAC 주소", example = "00:1A:2B:3C:4D:5E") @PathVariable String mac) {
+        Map<Long, String> groupNames = loadGroupNameMap();
         return pcMasterRepository.findById(mac)
-                .map(p -> ResponseEntity.ok(toDto(p)))
+                .map(p -> ResponseEntity.ok(toDto(p, groupNames)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * 특정 역할 PC 목록 조회 (TEACHER / STUDENT)
+     */
+    @GetMapping("/role/{role}")
+    @Operation(summary = "역할별 PC 조회", description = "역할(TEACHER/STUDENT)로 PC 목록을 조회합니다.")
+    @ApiResponse(responseCode = "200", description = "PC 목록 조회 성공")
+    public List<PcStatusDto> byRole(
+            @Parameter(description = "역할 (TEACHER/STUDENT)") @PathVariable String role) {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findAll().stream()
+            .filter(p -> role.equalsIgnoreCase(p.getRole()))
+            .map(p -> toDto(p, groupNames))
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * 특정 강의실 PC 목록 조회 (groupId로)
+     */
+    @GetMapping("/classroom/{groupId}")
+    @Operation(summary = "강의실별 PC 조회", description = "강의실 ID로 PC 목록을 조회합니다.")
+    @ApiResponse(responseCode = "200", description = "PC 목록 조회 성공")
+    public List<PcStatusDto> byClassroom(
+            @Parameter(description = "강의실 ID") @PathVariable Long groupId) {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findByGroupId(groupId).stream()
+            .map(p -> toDto(p, groupNames))
+            .collect(Collectors.toList());
     }
 
     /**
@@ -87,15 +125,23 @@ public class StatusController {
         return ResponseEntity.ok(performanceStatusService.snapshot());
     }
 
-    private PcStatusDto toDto(PcMaster p) {
+    private Map<Long, String> loadGroupNameMap() {
+        return classroomGroupRepository.findAll().stream()
+            .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName, (a, b) -> a));
+    }
+
+    private PcStatusDto toDto(PcMaster p, Map<Long, String> groupNames) {
         PcStatusDto d = new PcStatusDto();
         d.setMacAddress(p.getMacAddress());
         d.setPcName(p.getPcName());
         d.setIpAddress(p.getIpAddress());
         d.setGroupId(p.getGroupId());
+        d.setGroupName(p.getGroupId() != null ? groupNames.getOrDefault(p.getGroupId(), "-") : "-");
         d.setStatus(p.getStatus());
+        d.setOnline("ONLINE".equals(p.getStatus()));
         d.setRole(p.getRole());
         d.setLastSeen(p.getLastSeen());
         return d;
     }
 }
+

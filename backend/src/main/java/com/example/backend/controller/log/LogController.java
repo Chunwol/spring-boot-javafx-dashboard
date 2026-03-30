@@ -1,22 +1,18 @@
 package com.example.backend.controller.log;
 
 import com.example.backend.model.traffic.TrafficLog;
-import com.example.backend.repository.traffic.TrafficLogRepository;
+import com.example.backend.repository.traffic.TrafficLogsRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * 로그/리포트 API
@@ -27,10 +23,10 @@ import java.util.stream.Collectors;
 @Tag(name = "Logs", description = "로그 및 리포트 API")
 public class LogController {
 
-    private final TrafficLogRepository trafficLogRepository;
+    private final TrafficLogsRepository trafficLogRepository;
 
     @Autowired
-    public LogController(TrafficLogRepository trafficLogRepository) {
+    public LogController(TrafficLogsRepository trafficLogRepository) {
         this.trafficLogRepository = trafficLogRepository;
     }
 
@@ -48,17 +44,10 @@ public class LogController {
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "50")
             @RequestParam(defaultValue = "50") int size) {
-        List<TrafficLog> all = trafficLogRepository.findAll();
-        List<java.util.Map<String, Object>> sorted = all.stream()
-                .sorted((a, b) -> b.getTimestamp().compareTo(a.getTimestamp()))
-                .map(l -> java.util.Map.<String, Object>of(
-                        "timestamp", l.getTimestamp(),
-                        "message", "Traffic " + l.getInboundKbps() + " KB/s"))
-                .collect(Collectors.toList());
-        int total = sorted.size();
-        int from = Math.min(page * size, total);
-        int to = Math.min(from + size, total);
-        return new PageImpl<>(from >= total ? List.of() : sorted.subList(from, to),
-                PageRequest.of(page, size), total);
+        PageRequest pageable = PageRequest.of(page, size);
+        Page<TrafficLog> logPage = trafficLogRepository.findAllByOrderByTimestampDesc(pageable);
+        return logPage.map(l -> java.util.Map.<String, Object>of(
+                "timestamp", l.getTimestamp(),
+                "message", "Traffic " + l.getInboundKbps() + " KB/s"));
     }
 }

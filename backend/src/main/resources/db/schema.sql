@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS command_queue (
     command_type TEXT,
     script_url TEXT,
     is_executed BOOLEAN DEFAULT 0,
+    is_admin_operation BOOLEAN DEFAULT 0,
+    scmate_reset_status TEXT,
+    scmate_reset_requested_at TEXT,
+    scmate_reset_completed_at TEXT,
     FOREIGN KEY (mac_address) REFERENCES pc_master(mac_address)
 );
 

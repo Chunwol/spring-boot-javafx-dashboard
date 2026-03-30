@@ -1,5 +1,0 @@
-// Jakarta WebSocket API for JavaFX WebSocket client
-// https://mvnrepository.com/artifact/jakarta.websocket/jakarta.websocket-client-api
-
-// Gradle dependency snippet:
-// implementation 'jakarta.websocket:jakarta.websocket-client-api:2.1.1'

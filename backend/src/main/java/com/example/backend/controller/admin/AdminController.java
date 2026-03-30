@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -36,6 +37,7 @@ public class AdminController {
     private final CommandService commandService;
     private final AgentTokenService agentTokenService;
     private final AuditService auditService;
+    private final JdbcTemplate jdbcTemplate;
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
 
@@ -199,5 +201,47 @@ public class AdminController {
         resp.put("status", "deleted");
         resp.put("mac", mac);
         return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/audit/logs")
+    @Operation(summary = "감사 로그 조회", description = "action 또는 actor 기준으로 최근 감사 로그를 조회합니다.")
+    public ResponseEntity<List<Map<String, Object>>> getAuditLogs(
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String actor,
+            @RequestParam(defaultValue = "100") int limit) {
+        int size = Math.max(1, Math.min(500, limit));
+        List<Map<String, Object>> rows;
+
+        if (action != null && !action.isBlank()) {
+            rows = jdbcTemplate.queryForList(
+                    "SELECT id, actor, action, target_type, target_id, detail_json, ip_address, created_at " +
+                            "FROM audit_logs WHERE action = ? ORDER BY id DESC LIMIT ?",
+                    action, size);
+        } else if (actor != null && !actor.isBlank()) {
+            rows = jdbcTemplate.queryForList(
+                    "SELECT id, actor, action, target_type, target_id, detail_json, ip_address, created_at " +
+                            "FROM audit_logs WHERE actor = ? ORDER BY id DESC LIMIT ?",
+                    actor, size);
+        } else {
+            rows = jdbcTemplate.queryForList(
+                    "SELECT id, actor, action, target_type, target_id, detail_json, ip_address, created_at " +
+                            "FROM audit_logs ORDER BY id DESC LIMIT ?",
+                    size);
+        }
+
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", r.get("id"));
+            row.put("actor", r.get("actor"));
+            row.put("action", r.get("action"));
+            row.put("targetType", r.get("target_type"));
+            row.put("targetId", r.get("target_id"));
+            row.put("detailJson", r.get("detail_json"));
+            row.put("ipAddress", r.get("ip_address"));
+            row.put("createdAt", r.get("created_at"));
+            out.add(row);
+        }
+        return ResponseEntity.ok(out);
     }
 }

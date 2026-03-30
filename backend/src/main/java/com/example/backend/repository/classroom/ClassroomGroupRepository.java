@@ -12,6 +12,12 @@ import java.util.List;
 public interface ClassroomGroupRepository extends JpaRepository<ClassroomGroup, Long> {
     ClassroomGroup findByName(String name);
 
+    @Query("SELECT CASE WHEN COUNT(g) > 0 THEN true ELSE false END FROM ClassroomGroup g WHERE UPPER(g.name) = UPPER(:name)")
+    boolean existsByNameIgnoreCase(@Param("name") String name);
+
+    @Query("SELECT CASE WHEN COUNT(g) > 0 THEN true ELSE false END FROM ClassroomGroup g WHERE UPPER(g.name) = UPPER(:name) AND g.id != :id")
+    boolean existsByNameIgnoreCaseAndIdNot(@Param("name") String name, @Param("id") Long id);
+
     /**
      * 전체 강의실 목록과 각 그룹의 PC 집계(총수/온라인수)를 단일 LEFT JOIN 쿼리로 반환합니다.
      * SQLite TEXT ISO-8601 포맷의 last_seen 컬럼을 문자열 비교로 처리합니다.

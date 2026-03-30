@@ -4,7 +4,6 @@ import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
 import com.example.agent.hardware.HardwareCollector;
 import com.example.agent.heartbeat.HeartbeatSender;
-import com.example.agent.update.OtaUpdater;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import okhttp3.OkHttpClient;
@@ -64,11 +63,6 @@ public class AgentMain {
             System.exit(1);
         }
 
-            // OTA 자가 업데이트 체크 (서버 연결 확인 후)
-            OtaUpdater ota = new OtaUpdater(httpClient, mapper,
-                    config.getGithubOwner(), config.getGithubRepo());
-            ota.checkAndUpdate(); // 업데이트가 있으면 내부에서 System.exit(0) 호출
-
         // 토큰이 없으면 자동 등록
         if (config.getAgentToken() == null || config.getAgentToken().isBlank()) {
             log.info("에이전트 토큰 없음 → 자동 등록 시도...");
@@ -94,7 +88,7 @@ public class AgentMain {
             return t;
         });
 
-        scheduleNextHeartbeat(scheduler, heartbeat, config, configLoader, mapper, httpClient, hardware);
+        scheduleNextHeartbeat(scheduler, heartbeat, config);
 
         // 종료 훅
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -112,11 +106,7 @@ public class AgentMain {
     private static void scheduleNextHeartbeat(
             ScheduledExecutorService scheduler,
             HeartbeatSender heartbeat,
-            AgentConfig config,
-            AgentConfigLoader configLoader,
-            ObjectMapper mapper,
-            OkHttpClient httpClient,
-            HardwareCollector hardware) {
+            AgentConfig config) {
 
         int jitter = RANDOM.nextInt(config.getJitterSec() * 2 + 1) - config.getJitterSec();
         int delaySeconds = Math.max(30, config.getHeartbeatIntervalSec() + jitter);
@@ -146,7 +136,7 @@ public class AgentMain {
                 log.error("하트비트 오류: {}", e.getMessage());
             } finally {
                 // 다음 하트비트 스케줄링 (재귀 방식으로 jitter 적용)
-                scheduleNextHeartbeat(scheduler, heartbeat, config, configLoader, mapper, httpClient, hardware);
+                scheduleNextHeartbeat(scheduler, heartbeat, config);
             }
         }, delaySeconds, TimeUnit.SECONDS);
     }

@@ -19,6 +19,7 @@ public class DashboardPanelUpsertRequest {
     @Min(value = 0, message = "zIndex는 0 이상이어야 합니다.")
     private Integer zIndex;
     private Boolean visible;
+    private String panelName;
 
     public String getPanelType() {
         return panelType;
@@ -90,5 +91,13 @@ public class DashboardPanelUpsertRequest {
 
     public void setVisible(Boolean visible) {
         this.visible = visible;
+    }
+
+    public String getPanelName() {
+        return panelName;
+    }
+
+    public void setPanelName(String panelName) {
+        this.panelName = panelName;
     }
 }

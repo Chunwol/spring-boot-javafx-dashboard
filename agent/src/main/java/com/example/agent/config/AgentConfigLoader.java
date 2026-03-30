@@ -43,16 +43,20 @@ public class AgentConfigLoader {
     }
 
     public AgentConfig load() {
+        AgentConfig config;
         if (!Files.exists(configPath)) {
             log.warn("config.json 없음 → 기본 설정 사용: {}", configPath);
-            return new AgentConfig();
+            config = new AgentConfig();
+        } else {
+            try {
+                config = MAPPER.readValue(configPath.toFile(), AgentConfig.class);
+            } catch (IOException e) {
+                log.error("config.json 파싱 실패: {}", e.getMessage());
+                config = new AgentConfig();
+            }
         }
-        try {
-            return MAPPER.readValue(configPath.toFile(), AgentConfig.class);
-        } catch (IOException e) {
-            log.error("config.json 파싱 실패: {}", e.getMessage());
-            return new AgentConfig();
-        }
+        applyEnvOverrides(config);
+        return config;
     }
 
     /** agentToken 갱신 후 저장 */
@@ -71,4 +75,28 @@ public class AgentConfigLoader {
     }
 
     public Path getConfigPath() { return configPath; }
+
+    private void applyEnvOverrides(AgentConfig config) {
+        config.setServerUrl(readEnv("AGENT_SERVER_URL", readEnv("BACKEND_URL", config.getServerUrl())));
+        config.setInstallKey(readEnv("AGENT_INSTALL_KEY", config.getInstallKey()));
+        config.setAgentToken(readEnv("AGENT_TOKEN", config.getAgentToken()));
+        config.setHeartbeatIntervalSec(parseInt(readEnv("AGENT_HEARTBEAT_INTERVAL_SEC", null), config.getHeartbeatIntervalSec()));
+        config.setJitterSec(parseInt(readEnv("AGENT_JITTER_SEC", null), config.getJitterSec()));
+    }
+
+    private String readEnv(String key, String defaultValue) {
+        String value = System.getenv(key);
+        return value == null || value.isBlank() ? defaultValue : value.trim();
+    }
+
+    private int parseInt(String value, int defaultValue) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            return defaultValue;
+        }
+    }
 }

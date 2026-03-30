@@ -13,6 +13,9 @@ public class ClassroomIpRange {
     @Column(name = "group_id", nullable = false)
     private Long groupId;
 
+    @Transient
+    private String groupName;
+
     @Column(name = "cidr")
     private String cidr;
 
@@ -39,6 +42,14 @@ public class ClassroomIpRange {
 
     public void setGroupId(Long groupId) {
         this.groupId = groupId;
+    }
+
+    public String getGroupName() {
+        return groupName;
+    }
+
+    public void setGroupName(String groupName) {
+        this.groupName = groupName;
     }
 
     public String getCidr() {

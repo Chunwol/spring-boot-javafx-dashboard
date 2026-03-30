@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface DashboardWidgetItemRepository extends JpaRepository<DashboardWidgetItem, Long> {
 	List<DashboardWidgetItem> findByTypeIgnoreCase(String type);
+	List<DashboardWidgetItem> findByTypeIgnoreCaseAndDashboardId(String type, Long dashboardId);
 }

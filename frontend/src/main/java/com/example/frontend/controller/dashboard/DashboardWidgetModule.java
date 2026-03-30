@@ -8,6 +8,7 @@ import javafx.beans.binding.Bindings;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ColorPicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
@@ -16,7 +17,11 @@ import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontPosture;
+import javafx.scene.text.FontWeight;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
+import java.util.function.LongSupplier;
 
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.Validator;
@@ -45,12 +51,19 @@ public class DashboardWidgetModule {
     private final BooleanSupplier editModeSupplier;
     private final BooleanSupplier snapModeSupplier;
     private final Runnable onRefreshPanelList;
+    private LongSupplier dashboardIdSupplier = () -> -1L;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
     private static final double GRID_SIZE = 20.0;
+    private static final double IMAGE_CONTROL_HEIGHT = 34.0;
 
     // 삭제 버튼 추적 (editMode 연동)
     private final Map<Long, Button> textDeleteBtns = new java.util.HashMap<>();
     private final Map<Long, Button> imageDeleteBtns = new java.util.HashMap<>();
+    private final Map<Long, HBox> textHeaders = new java.util.HashMap<>();
+    private final Map<Long, VBox> textResizeHandles = new java.util.HashMap<>();
+    private final Map<Long, TextArea> textEditors = new java.util.HashMap<>();
+    private final Map<Long, Label> textViews = new java.util.HashMap<>();
+    private final Map<Long, VBox> imageResizeHandles = new java.util.HashMap<>();
 
     private List<Map<String, Object>> cachedTexts = new ArrayList<>();
     private List<Map<String, Object>> cachedImages = new ArrayList<>();
@@ -76,6 +89,10 @@ public class DashboardWidgetModule {
         this.onRefreshPanelList = onRefreshPanelList;
     }
 
+    public void setDashboardIdSupplier(LongSupplier supplier) {
+        this.dashboardIdSupplier = supplier != null ? supplier : () -> -1L;
+    }
+
     public List<Map<String, Object>> getCachedTexts() { return cachedTexts; }
     public List<Map<String, Object>> getCachedImages() { return cachedImages; }
 
@@ -85,9 +102,49 @@ public class DashboardWidgetModule {
             btn.setVisible(editMode);
             btn.setManaged(editMode);
         });
+        textHeaders.values().forEach(header -> {
+            header.setVisible(editMode);
+            header.setManaged(editMode);
+        });
+        textResizeHandles.values().forEach(handle -> {
+            handle.setVisible(editMode);
+            handle.setManaged(editMode);
+        });
+        textEditors.values().forEach(editor -> {
+            editor.setEditable(editMode);
+            editor.setMouseTransparent(!editMode);
+            editor.setFocusTraversable(editMode);
+            editor.setVisible(editMode);
+            editor.setManaged(editMode);
+            Object rawColor = editor.getProperties().getOrDefault("fontColor", "#111111");
+            String fontColor = rawColor == null ? "#111111" : rawColor.toString();
+            applyTextStyle(editor, fontColor, editMode);
+        });
+        textViews.values().forEach(view -> {
+            view.setVisible(!editMode);
+            view.setManaged(!editMode);
+        });
+        textItemMap.values().forEach(box -> {
+            box.setStyle(editMode
+                    ? "-fx-border-color: #94a3b8; -fx-border-width: 1; -fx-background-color: rgba(255,255,255,0.55); -fx-padding: 4;"
+                    : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
+        });
         imageDeleteBtns.values().forEach(btn -> {
             btn.setVisible(editMode);
             btn.setManaged(editMode);
+        });
+        imageResizeHandles.values().forEach(handle -> {
+            handle.setVisible(editMode);
+            handle.setManaged(editMode);
+        });
+        imageItemMap.values().forEach(box -> {
+            ImageView iv = findImageView(box);
+            if (iv != null) {
+                box.setPrefSize(iv.getFitWidth(), iv.getFitHeight() + (editMode ? IMAGE_CONTROL_HEIGHT : 0));
+            }
+            box.setStyle(editMode
+                    ? "-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;"
+                    : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
         });
     }
 
@@ -151,6 +208,8 @@ public class DashboardWidgetModule {
         payload.put("fontColor", "#000000");
         payload.put("backgroundColor", "#ffffff");
         payload.put("visible", true);
+        long dashboardId = dashboardIdSupplier.getAsLong();
+        if (dashboardId > 0) payload.put("dashboardId", dashboardId);
         apiClient.postJson("/dashboard/texts", payload)
                 .thenAccept(resp -> Platform.runLater(() -> {
                     loadTextItems();
@@ -164,7 +223,11 @@ public class DashboardWidgetModule {
     }
 
     public void loadTextItems() {
-        apiClient.getJson("/dashboard/texts", new TypeReference<List<Map<String, Object>>>() {})
+        long dashboardId = dashboardIdSupplier.getAsLong();
+        String path = dashboardId > 0
+                ? "/dashboard/texts?dashboardId=" + dashboardId
+                : "/dashboard/texts";
+        apiClient.getJson(path, new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(items -> {
                     cachedTexts = items;
                     Platform.runLater(() -> updateTextItemsUi(items));
@@ -188,6 +251,10 @@ public class DashboardWidgetModule {
             if (!visibleIds.contains(id)) {
                 classroomContainer.getChildren().remove(textItemMap.get(id));
                 textDeleteBtns.remove(id);
+                textHeaders.remove(id);
+                textResizeHandles.remove(id);
+                textEditors.remove(id);
+                textViews.remove(id);
                 return true;
             }
             return false;
@@ -198,12 +265,18 @@ public class DashboardWidgetModule {
             Long id = ((Number) item.get("id")).longValue();
             VBox box = textItemMap.get(id);
 
-            double x = item.getOrDefault("x", 50.0) instanceof Number ? ((Number) item.get("x")).doubleValue() : 50.0;
-            double y = item.getOrDefault("y", 50.0) instanceof Number ? ((Number) item.get("y")).doubleValue() : 50.0;
-            double w = item.getOrDefault("width", 220.0) instanceof Number ? ((Number) item.get("width")).doubleValue() : 220.0;
-            double h = item.getOrDefault("height", 120.0) instanceof Number ? ((Number) item.get("height")).doubleValue() : 120.0;
+            Object xObj = item.get("x");
+            double x = xObj instanceof Number ? ((Number) xObj).doubleValue() : 50.0;
+            Object yObj = item.get("y");
+            double y = yObj instanceof Number ? ((Number) yObj).doubleValue() : 50.0;
+            Object wObj = item.get("width");
+            double w = wObj instanceof Number ? ((Number) wObj).doubleValue() : 220.0;
+            Object hObj = item.get("height");
+            double h = hObj instanceof Number ? ((Number) hObj).doubleValue() : 120.0;
             String text = "New Text";
-            int fontSize = item.getOrDefault("fontSize", 14) instanceof Number ? ((Number) item.get("fontSize")).intValue() : 14;
+            Object fontSizeObj = item.get("fontSize");
+            int fontSize = fontSizeObj instanceof Number ? ((Number) fontSizeObj).intValue() : 14;
+                String fontColor = "#111111";
             boolean bold = Boolean.TRUE.equals(item.get("bold"))
                     || "BOLD".equalsIgnoreCase(String.valueOf(item.getOrDefault("fontWeight", "")));
             boolean italic = Boolean.TRUE.equals(item.get("italic"))
@@ -217,6 +290,7 @@ public class DashboardWidgetModule {
                         if (parsed.containsKey("fontSize") && parsed.get("fontSize") instanceof Number n) fontSize = n.intValue();
                         if (parsed.containsKey("bold")) bold = Boolean.TRUE.equals(parsed.get("bold"));
                         if (parsed.containsKey("italic")) italic = Boolean.TRUE.equals(parsed.get("italic"));
+                        if (parsed.containsKey("fontColor") && parsed.get("fontColor") != null) fontColor = parsed.get("fontColor").toString();
                     }
                 }
                 if (item.containsKey("text")) text = item.get("text").toString();
@@ -227,7 +301,7 @@ public class DashboardWidgetModule {
             if (box == null) {
                 box = new VBox();
                 Button deleteBtn = new Button("삭제");
-                deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
                 deleteBtn.setVisible(editModeSupplier.getAsBoolean());
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteTextItem(id));
@@ -236,59 +310,122 @@ public class DashboardWidgetModule {
                 Button italicBtn = new Button("I");
                 Button sizeDownBtn = new Button("A-");
                 Button sizeUpBtn = new Button("A+");
-                HBox header = new HBox(4, deleteBtn, boldBtn, italicBtn, sizeDownBtn, sizeUpBtn);
+                ColorPicker colorPicker = new ColorPicker(parseColorSafe(fontColor));
+                colorPicker.setPrefWidth(54);
+                HBox header = new HBox(4, deleteBtn, boldBtn, italicBtn, sizeDownBtn, sizeUpBtn, colorPicker);
+                header.setVisible(editModeSupplier.getAsBoolean());
+                header.setManaged(editModeSupplier.getAsBoolean());
+                textHeaders.put(id, header);
 
                 TextArea textArea = new TextArea(text);
                 textArea.setWrapText(true);
                 textArea.getProperties().put("fontSize", fontSize);
                 textArea.getProperties().put("bold", bold);
                 textArea.getProperties().put("italic", italic);
-                applyTextStyle(textArea);
+                textArea.getProperties().put("fontColor", fontColor);
+                textArea.setEditable(editModeSupplier.getAsBoolean());
+                textArea.setMouseTransparent(!editModeSupplier.getAsBoolean());
+                textArea.setFocusTraversable(editModeSupplier.getAsBoolean());
+                textArea.setVisible(editModeSupplier.getAsBoolean());
+                textArea.setManaged(editModeSupplier.getAsBoolean());
+                applyTextStyle(textArea, fontColor, editModeSupplier.getAsBoolean());
                 textArea.setPrefWidth(w);
                 textArea.setPrefHeight(Math.max(80, h - 64));
+                textEditors.put(id, textArea);
+
+                Label textView = new Label(text);
+                textView.setWrapText(true);
+                textView.setVisible(!editModeSupplier.getAsBoolean());
+                textView.setManaged(!editModeSupplier.getAsBoolean());
+                textView.setPrefWidth(w);
+                textViews.put(id, textView);
+                applyTextViewStyle(textView, fontSize, bold, italic, fontColor);
                 final VBox targetBox = box;
 
                 boldBtn.setOnAction(e -> {
                     boolean next = !Boolean.TRUE.equals(textArea.getProperties().get("bold"));
                     textArea.getProperties().put("bold", next);
-                    applyTextStyle(textArea);
+                    applyTextStyle(textArea, String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")), true);
+                    applyTextViewStyle(textView,
+                            ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue(),
+                            Boolean.TRUE.equals(textArea.getProperties().get("bold")),
+                            Boolean.TRUE.equals(textArea.getProperties().get("italic")),
+                            String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")));
                     updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
                 });
                 italicBtn.setOnAction(e -> {
                     boolean next = !Boolean.TRUE.equals(textArea.getProperties().get("italic"));
                     textArea.getProperties().put("italic", next);
-                    applyTextStyle(textArea);
+                    applyTextStyle(textArea, String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")), true);
+                    applyTextViewStyle(textView,
+                            ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue(),
+                            Boolean.TRUE.equals(textArea.getProperties().get("bold")),
+                            Boolean.TRUE.equals(textArea.getProperties().get("italic")),
+                            String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")));
                     updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
                 });
                 sizeDownBtn.setOnAction(e -> {
                     int current = (int) textArea.getProperties().getOrDefault("fontSize", 14);
                     int next = Math.max(10, current - 1);
                     textArea.getProperties().put("fontSize", next);
-                    applyTextStyle(textArea);
+                    applyTextStyle(textArea, String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")), true);
+                    applyTextViewStyle(textView,
+                            ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue(),
+                            Boolean.TRUE.equals(textArea.getProperties().get("bold")),
+                            Boolean.TRUE.equals(textArea.getProperties().get("italic")),
+                            String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")));
                     updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
                 });
                 sizeUpBtn.setOnAction(e -> {
                     int current = (int) textArea.getProperties().getOrDefault("fontSize", 14);
                     int next = Math.min(48, current + 1);
                     textArea.getProperties().put("fontSize", next);
-                    applyTextStyle(textArea);
+                    applyTextStyle(textArea, String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")), true);
+                    applyTextViewStyle(textView,
+                            ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue(),
+                            Boolean.TRUE.equals(textArea.getProperties().get("bold")),
+                            Boolean.TRUE.equals(textArea.getProperties().get("italic")),
+                            String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")));
+                    updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
+                });
+                colorPicker.setOnAction(e -> {
+                    String nextColor = toHexColor(colorPicker.getValue());
+                    textArea.getProperties().put("fontColor", nextColor);
+                    applyTextStyle(textArea, nextColor, true);
+                    applyTextViewStyle(textView,
+                            ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue(),
+                            Boolean.TRUE.equals(textArea.getProperties().get("bold")),
+                            Boolean.TRUE.equals(textArea.getProperties().get("italic")),
+                            nextColor);
                     updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
                 });
 
-                box.getChildren().addAll(header, textArea);
+                textArea.textProperty().addListener((obs, oldVal, newVal) -> textView.setText(newVal));
+
+                box.getChildren().addAll(header, textArea, textView);
                 box.setPrefSize(w, h);
+                box.setStyle(editModeSupplier.getAsBoolean()
+                        ? "-fx-border-color: #94a3b8; -fx-border-width: 1; -fx-background-color: rgba(255,255,255,0.55); -fx-padding: 4;"
+                        : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
                 makeTextItemInteractive(box, textArea, id);
-                addTextResizeHandle(box, textArea, id);
+                VBox resizeHandleWrap = addTextResizeHandle(box, textArea, id);
+                textResizeHandles.put(id, resizeHandleWrap);
                 textItemMap.put(id, box);
                 classroomContainer.getChildren().add(box);
                 box.toFront();
             } else {
-                TextArea textArea = (TextArea) box.getChildren().get(1);
+                TextArea textArea = textEditors.get(id);
+                Label textView = textViews.get(id);
+                if (textArea == null || textView == null) continue;
                 textArea.setText(text);
                 textArea.getProperties().put("fontSize", fontSize);
                 textArea.getProperties().put("bold", bold);
                 textArea.getProperties().put("italic", italic);
-                applyTextStyle(textArea);
+                textArea.getProperties().put("fontColor", fontColor);
+                applyTextStyle(textArea, fontColor, editModeSupplier.getAsBoolean());
+                applyTextViewStyle(textView, fontSize, bold, italic, fontColor);
+                textView.setText(text);
+                textView.setPrefWidth(w);
                 textArea.setPrefWidth(w);
                 textArea.setPrefHeight(Math.max(80, h - 64));
                 box.setPrefSize(w, h);
@@ -342,18 +479,50 @@ public class DashboardWidgetModule {
             payload.put("fontSize", ta.getProperties().getOrDefault("fontSize", 14));
             payload.put("bold", ta.getProperties().getOrDefault("bold", false));
             payload.put("italic", ta.getProperties().getOrDefault("italic", false));
+            payload.put("fontColor", ta.getProperties().getOrDefault("fontColor", "#111111"));
         }
 
         apiClient.putJson("/dashboard/texts/" + id, payload).exceptionally(ex -> null);
     }
 
-    private void applyTextStyle(TextArea textArea) {
+    private void applyTextStyle(TextArea textArea, String fontColor, boolean editMode) {
         int fontSize = ((Number) textArea.getProperties().getOrDefault("fontSize", 14)).intValue();
         boolean bold = Boolean.TRUE.equals(textArea.getProperties().get("bold"));
         boolean italic = Boolean.TRUE.equals(textArea.getProperties().get("italic"));
-        String weight = bold ? "bold" : "normal";
-        String posture = italic ? "italic" : "normal";
-        textArea.setStyle("-fx-font-size: " + fontSize + "px; -fx-font-weight: " + weight + "; -fx-font-style: " + posture + ";");
+        textArea.setFont(Font.font("Malgun Gothic",
+                bold ? FontWeight.BOLD : FontWeight.NORMAL,
+                italic ? FontPosture.ITALIC : FontPosture.REGULAR,
+                fontSize));
+        String baseStyle = "-fx-text-fill: " + fontColor + "; ";
+        if (editMode) {
+            textArea.setStyle(baseStyle + "-fx-control-inner-background: rgba(255,255,255,0.95); -fx-background-color: rgba(255,255,255,0.95); -fx-background-insets: 0; -fx-background-radius: 4; -fx-padding: 6;");
+        } else {
+            textArea.setStyle(baseStyle + "-fx-control-inner-background: transparent; -fx-background-color: transparent; -fx-background-insets: 0; -fx-background-radius: 0; -fx-border-color: transparent; -fx-padding: 0;");
+        }
+    }
+
+    private void applyTextViewStyle(Label label, int fontSize, boolean bold, boolean italic, String fontColor) {
+        label.setFont(Font.font("Malgun Gothic",
+                bold ? FontWeight.BOLD : FontWeight.NORMAL,
+                italic ? FontPosture.ITALIC : FontPosture.REGULAR,
+                fontSize));
+        label.setTextFill(parseColorSafe(fontColor));
+    }
+
+    private Color parseColorSafe(String raw) {
+        try {
+            return Color.web(raw == null || raw.isBlank() ? "#111111" : raw);
+        } catch (Exception e) {
+            return Color.web("#111111");
+        }
+    }
+
+    private String toHexColor(Color color) {
+        if (color == null) return "#111111";
+        return String.format("#%02X%02X%02X",
+                (int) Math.round(color.getRed() * 255),
+                (int) Math.round(color.getGreen() * 255),
+                (int) Math.round(color.getBlue() * 255));
     }
 
     public void handleDeleteTextItem(Long id) {
@@ -384,7 +553,11 @@ public class DashboardWidgetModule {
         );
         if (file == null) return;
 
-        apiClient.uploadImageFile("/dashboard/images/upload", file)
+        long dashboardId = dashboardIdSupplier.getAsLong();
+        String uploadPath = dashboardId > 0
+                ? "/dashboard/images/upload?dashboardId=" + dashboardId
+                : "/dashboard/images/upload";
+        apiClient.uploadImageFile(uploadPath, file)
                 .thenAccept(resp -> Platform.runLater(() -> {
                     loadImageItems();
                     new Alert(Alert.AlertType.INFORMATION, "이미지 파일이 대시보드에 추가되었습니다.").showAndWait();
@@ -397,7 +570,11 @@ public class DashboardWidgetModule {
     }
 
     public void loadImageItems() {
-        apiClient.getJson("/dashboard/images", new TypeReference<List<Map<String, Object>>>() {})
+        long dashboardId = dashboardIdSupplier.getAsLong();
+        String path = dashboardId > 0
+                ? "/dashboard/images?dashboardId=" + dashboardId
+                : "/dashboard/images";
+        apiClient.getJson(path, new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(items -> {
                     cachedImages = items;
                     Platform.runLater(() -> updateImageItemsUi(items));
@@ -421,6 +598,7 @@ public class DashboardWidgetModule {
             if (!visibleIds.contains(id)) {
                 classroomContainer.getChildren().remove(imageItemMap.get(id));
                 imageDeleteBtns.remove(id);
+                imageResizeHandles.remove(id);
                 return true;
             }
             return false;
@@ -464,7 +642,7 @@ public class DashboardWidgetModule {
                 VBox newBox = new VBox(4);
                 newBox.setStyle("-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;");
                 Button deleteBtn = new Button("삭제");
-                deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
                 deleteBtn.setVisible(editModeSupplier.getAsBoolean());
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteImageItem(id));
@@ -472,10 +650,11 @@ public class DashboardWidgetModule {
                 ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true));
                 imageView.setFitWidth(widthFinal);
                 imageView.setFitHeight(heightFinal);
-                Button refreshBtn = new Button("새로고침");
-                refreshBtn.setOnAction(e -> imageView.setImage(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true)));
-                newBox.getChildren().addAll(deleteBtn, imageView, refreshBtn);
-                newBox.setPrefSize(widthFinal, heightFinal + 56);
+                newBox.getChildren().addAll(deleteBtn, imageView);
+                newBox.setPrefSize(widthFinal, heightFinal + (editModeSupplier.getAsBoolean() ? IMAGE_CONTROL_HEIGHT : 0));
+                newBox.setStyle(editModeSupplier.getAsBoolean()
+                        ? "-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;"
+                        : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
                 dashboardInteractionService.attachDragHandlers(
                         newBox,
                         editModeSupplier,
@@ -483,15 +662,16 @@ public class DashboardWidgetModule {
                         () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
                                 "x", newBox.getLayoutX(),
                                 "y", newBox.getLayoutY(),
-                                "width", newBox.getPrefWidth(),
-                                "height", newBox.getPrefHeight() - 56,
+                                "width", imageView.getFitWidth(),
+                                "height", imageView.getFitHeight(),
                                 "visible", true,
                                 "imageUrl", imageUrlFinal
                         )).exceptionally(ex -> null)
                 );
                 imageItemMap.put(id, newBox);
                 classroomContainer.getChildren().add(newBox);
-                addImageResizeHandle(newBox, id, imageUrlFinal);
+                VBox resizeHandleWrap = addImageResizeHandle(newBox, id, imageUrlFinal);
+                imageResizeHandles.put(id, resizeHandleWrap);
                 newBox.toFront();
                 box = newBox;
             } else {
@@ -500,7 +680,7 @@ public class DashboardWidgetModule {
                     iv.setFitWidth(w);
                     iv.setFitHeight(h);
                 }
-                box.setPrefSize(w, h + 56);
+                box.setPrefSize(w, h + (editModeSupplier.getAsBoolean() ? IMAGE_CONTROL_HEIGHT : 0));
             }
             box.setLayoutX(x);
             box.setLayoutY(y);
@@ -589,11 +769,13 @@ public class DashboardWidgetModule {
                 });
     }
 
-    private void addTextResizeHandle(VBox box, TextArea textArea, Long id) {
+    private VBox addTextResizeHandle(VBox box, TextArea textArea, Long id) {
         Label handle = new Label("◢");
         handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
         VBox handleWrap = new VBox(handle);
         handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
+        handleWrap.setVisible(editModeSupplier.getAsBoolean());
+        handleWrap.setManaged(editModeSupplier.getAsBoolean());
         box.getChildren().add(handleWrap);
 
         dashboardInteractionService.attachResizeHandlers(
@@ -615,13 +797,16 @@ public class DashboardWidgetModule {
                         box.getPrefWidth(),
                         box.getPrefHeight())
         );
+        return handleWrap;
     }
 
-    private void addImageResizeHandle(VBox box, Long id, String imageUrlFinal) {
+    private VBox addImageResizeHandle(VBox box, Long id, String imageUrlFinal) {
         Label handle = new Label("◢");
         handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
         VBox handleWrap = new VBox(handle);
         handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
+        handleWrap.setVisible(editModeSupplier.getAsBoolean());
+        handleWrap.setManaged(editModeSupplier.getAsBoolean());
         box.getChildren().add(handleWrap);
 
         dashboardInteractionService.attachResizeHandlers(
@@ -641,12 +826,30 @@ public class DashboardWidgetModule {
                 () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
                         "x", box.getLayoutX(),
                         "y", box.getLayoutY(),
-                        "width", box.getPrefWidth(),
-                        "height", box.getPrefHeight() - 56,
+                        "width", getImagePersistWidth(box),
+                        "height", getImagePersistHeight(box),
                         "visible", true,
                         "imageUrl", imageUrlFinal
                 )).exceptionally(ex -> null)
         );
+        return handleWrap;
+    }
+
+    private ImageView findImageView(VBox box) {
+        if (box == null || box.getChildren().size() <= 1) {
+            return null;
+        }
+        return box.getChildren().get(1) instanceof ImageView iv ? iv : null;
+    }
+
+    private double getImagePersistWidth(VBox box) {
+        ImageView iv = findImageView(box);
+        return iv != null ? iv.getFitWidth() : box.getPrefWidth();
+    }
+
+    private double getImagePersistHeight(VBox box) {
+        ImageView iv = findImageView(box);
+        return iv != null ? iv.getFitHeight() : box.getPrefHeight();
     }
 
     private double applySnap(double value) {

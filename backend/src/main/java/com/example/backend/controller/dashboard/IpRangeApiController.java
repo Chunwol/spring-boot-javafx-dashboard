@@ -3,8 +3,10 @@ package com.example.backend.controller.dashboard;
 import com.example.backend.dto.dashboard.IpRangeBatchRequest;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
+import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.service.classroom.ClassroomValidationService;
 import com.example.backend.util.IpRangeUtil;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * IP 범위 관리 API
@@ -34,13 +37,19 @@ import java.util.Map;
 public class IpRangeApiController {
 
     private final ClassroomIpRangeRepository ipRangeRepository;
+    private final ClassroomGroupRepository classroomGroupRepository;
     private final ClassroomValidationService classroomValidationService;
+    private final ClassroomResolutionService classroomResolutionService;
 
     @Autowired
     public IpRangeApiController(ClassroomIpRangeRepository ipRangeRepository,
-                                ClassroomValidationService classroomValidationService) {
+                                ClassroomGroupRepository classroomGroupRepository,
+                                ClassroomValidationService classroomValidationService,
+                                ClassroomResolutionService classroomResolutionService) {
         this.ipRangeRepository = ipRangeRepository;
+        this.classroomGroupRepository = classroomGroupRepository;
         this.classroomValidationService = classroomValidationService;
+        this.classroomResolutionService = classroomResolutionService;
     }
 
     /**
@@ -63,6 +72,7 @@ public class IpRangeApiController {
         List<ClassroomIpRange> all = (groupId != null)
                 ? ipRangeRepository.findByGroupId(groupId)
                 : ipRangeRepository.findAll();
+        populateGroupNames(all);
         int total = all.size();
         int from = Math.min(page * size, total);
         int to = Math.min(from + size, total);
@@ -84,7 +94,9 @@ public class IpRangeApiController {
     @ApiResponse(responseCode = "200", description = "IP 범위 등록 성공")
     public ResponseEntity<ClassroomIpRange> createIpRange(@RequestBody ClassroomIpRange ipRange) {
         classroomValidationService.validateIpRangeForCreate(ipRange);
-        return ResponseEntity.ok(ipRangeRepository.save(ipRange));
+        ClassroomIpRange saved = ipRangeRepository.save(ipRange);
+        classroomResolutionService.evictIpRangeCache();
+        return ResponseEntity.ok(saved);
     }
 
     /**
@@ -152,6 +164,10 @@ public class IpRangeApiController {
             saved.add(ipRangeRepository.save(item));
         }
 
+        if (!saved.isEmpty()) {
+            classroomResolutionService.evictIpRangeCache();
+        }
+
         return ResponseEntity.ok(Map.of(
                 "created", saved.size(),
                 "items", saved
@@ -172,7 +188,18 @@ public class IpRangeApiController {
     public ResponseEntity<Void> deleteIpRange(
             @Parameter(description = "IP 범위 ID") @PathVariable Long id) {
         ipRangeRepository.deleteById(id);
+        classroomResolutionService.evictIpRangeCache();
         return ResponseEntity.ok().build();
+    }
+
+    private void populateGroupNames(List<ClassroomIpRange> ranges) {
+        if (ranges == null || ranges.isEmpty()) return;
+        Map<Long, String> nameMap = classroomGroupRepository.findAll().stream()
+                .collect(Collectors.toMap(
+                        com.example.backend.model.classroom.ClassroomGroup::getId,
+                        com.example.backend.model.classroom.ClassroomGroup::getName,
+                        (a, b) -> a));
+        ranges.forEach(r -> r.setGroupName(nameMap.getOrDefault(r.getGroupId(), "강의실#" + r.getGroupId())));
     }
 
     private static boolean isIpv4RangeToken(String token) {

@@ -13,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -43,12 +44,13 @@ public class DashboardRealtimeModule {
     private StompSession activeSession;
     private volatile boolean stopped = false;
     private final AtomicBoolean reconnectPending = new AtomicBoolean(false);
+    private final AtomicBoolean connecting = new AtomicBoolean(false);
 
     private Runnable onDashboardMessage;
     private Consumer<String> onAlertMessage;
 
     public DashboardRealtimeModule() {
-        this(com.example.frontend.service.ApiClient.DEFAULT_WS_URL);
+        this(com.example.frontend.service.ApiClient.getInstance().getWsUrl());
     }
 
     public DashboardRealtimeModule(String wsUrl) {
@@ -65,6 +67,14 @@ public class DashboardRealtimeModule {
         this.onDashboardMessage = onDashboard;
         this.onAlertMessage = onAlert;
         stopped = false;
+        if (activeSession != null && activeSession.isConnected()) {
+            log.debug("[WS] 이미 연결된 세션이 있어 재사용합니다: {}", wsUrl);
+            return;
+        }
+        if (!connecting.compareAndSet(false, true)) {
+            log.debug("[WS] 연결 진행 중이어서 중복 start를 스킵합니다: {}", wsUrl);
+            return;
+        }
         doConnect();
     }
 
@@ -99,12 +109,14 @@ public class DashboardRealtimeModule {
             @Override
             public void afterConnected(StompSession session, StompHeaders headers) {
                 activeSession = session;
+                connecting.set(false);
                 log.info("[WS] Connected to {}", wsUrl);
                 subscribeTopics(session);
             }
 
             @Override
             public void handleTransportError(StompSession session, Throwable ex) {
+                connecting.set(false);
                 log.warn("[WS] Transport error", ex);
                 scheduleReconnect();
             }
@@ -118,6 +130,7 @@ public class DashboardRealtimeModule {
             @Override
             public void handleFrame(StompHeaders headers, Object payload) {
                 // ERROR frames
+                connecting.set(false);
                 log.warn("[WS] ERROR frame: {}", payload);
                 scheduleReconnect();
             }
@@ -160,6 +173,7 @@ public class DashboardRealtimeModule {
         log.info("[WS] 재연결 예약 ({}초 후)...", RECONNECT_DELAY_SEC);
         scheduler.schedule(() -> {
             reconnectPending.set(false);
+            connecting.set(false);
             doConnect();
         }, RECONNECT_DELAY_SEC, TimeUnit.SECONDS);
     }

@@ -12,6 +12,7 @@ public class DashboardPanelDto {
     private Double height;
     private Integer zIndex;
     private boolean visible;
+    private String panelName;
     private String createdAt;
     private String updatedAt;
 
@@ -101,6 +102,14 @@ public class DashboardPanelDto {
 
     public void setVisible(boolean visible) {
         this.visible = visible;
+    }
+
+    public String getPanelName() {
+        return panelName;
+    }
+
+    public void setPanelName(String panelName) {
+        this.panelName = panelName;
     }
 
     public String getCreatedAt() {

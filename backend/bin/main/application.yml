@@ -31,9 +31,11 @@ spring:
       max-request-size: ${MAX_FILE_SIZE:20971520}
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8888}
   servlet:
     context-path: /
+  # Nginx 리버스 프록시의 X-Forwarded-Proto/For 헤더 신뢰
+  forward-headers-strategy: NATIVE
   
 scheduler:
   fixed-rate: 60000
@@ -52,10 +54,19 @@ app:
   heartbeat:
     timeout-minutes: ${HEARTBEAT_TIMEOUT_MINUTES:5}
     interval-seconds: ${HEARTBEAT_INTERVAL_SECONDS:120}
+    persist-interval-seconds: ${HEARTBEAT_PERSIST_INTERVAL_SECONDS:30}
   traffic:
     alert-threshold-mbps: ${TRAFFIC_ALERT_THRESHOLD_MBPS:100}
+    log-min-interval-seconds: ${TRAFFIC_LOG_MIN_INTERVAL_SECONDS:30}
+  audit:
+    flush-interval-ms: ${AUDIT_FLUSH_INTERVAL_MS:2000}
+    flush-batch-size: ${AUDIT_FLUSH_BATCH_SIZE:200}
+    queue-max-size: ${AUDIT_QUEUE_MAX_SIZE:20000}
   alert:
     email: ${ALERT_EMAIL:}
+
+agent:
+  install-key: ${AGENT_INSTALL_KEY:INST-CHANGE-ME-BEFORE-DEPLOY}
 
 logging:
   level:

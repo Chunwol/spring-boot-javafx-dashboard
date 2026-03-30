@@ -21,14 +21,24 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.DatePicker;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.layout.HBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
@@ -48,6 +58,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
@@ -69,10 +80,14 @@ public class DashboardManagementModule {
 
     private ComboBox<ClassroomSummaryDto> groupComboBox;
     private ComboBox<ClassroomSummaryDto> teacherGroupCombo;
+    private ComboBox<ClassroomSummaryDto> brokenGroupCombo;
     private TableView<IpRangeItem> ipRangeTable;
     private TableView<TeacherDeviceItem> teacherDeviceTable;
+    private TableView<PcStatusDto> brokenPcTable;
     private TableView<Map<String, Object>> agentTable;
     private Label installKeyLabel;
+    private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
+    private List<PcStatusDto> cachedBrokenPcs = List.of();
 
     public DashboardManagementModule(HttpClient httpClient,
                                      ObjectMapper objectMapper,
@@ -88,18 +103,36 @@ public class DashboardManagementModule {
     public Node createView() {
         VBox container = new VBox(20);
         container.setPadding(new Insets(20));
+        container.setFillWidth(true);
+        container.setMaxWidth(Double.MAX_VALUE);
 
         VBox agentBox = buildAgentInstallBox();
-        VBox scriptBox = buildScriptBox();
         VBox ipBox = buildIpRangeBox();
-        VBox teacherBox = buildTeacherBox();
+        VBox teacherBox = buildTeacherDeviceBox();
+        VBox brokenPcBox = buildBrokenPcBox();
         VBox reportBox = buildReportBox();
 
-        container.getChildren().addAll(agentBox, scriptBox, ipBox, teacherBox, reportBox);
+        agentBox.setMaxWidth(Double.MAX_VALUE);
+        ipBox.setMaxWidth(Double.MAX_VALUE);
+        teacherBox.setMaxWidth(Double.MAX_VALUE);
+        brokenPcBox.setMaxWidth(Double.MAX_VALUE);
+        reportBox.setMaxWidth(Double.MAX_VALUE);
+
+        container.getChildren().addAll(agentBox, ipBox, teacherBox, brokenPcBox, reportBox);
+        reloadData();
+
+        ScrollPane scrollPane = new ScrollPane(container);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setFitToHeight(false);
+        scrollPane.setPannable(true);
+        return scrollPane;
+    }
+
+    public void reloadData() {
         loadIpRangesAndGroups();
         loadAgentList();
         loadInstallKey();
-        return new ScrollPane(container);
+        loadBrokenPcs();
     }
 
     @SuppressWarnings("unchecked")
@@ -107,14 +140,14 @@ public class DashboardManagementModule {
         Label title = new Label("에이전트 설치 관리");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
-        // ── Install Key 행 ──
-        Label keyLabel = new Label("설치키 (Install-Key):");
+        // ── 설치 키 행 ──
+        Label keyLabel = new Label("설치 키:");
         keyLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
         installKeyLabel = new Label("불러오는 중...");
-        installKeyLabel.setStyle("-fx-font-family: monospace; -fx-font-size: 13px; -fx-text-fill: #1e40af; " +
+        installKeyLabel.setStyle("-fx-font-family: monospace; -fx-font-size: 13px; -fx-text-fill: #3182ce; " +
                 "-fx-background-color: #eff6ff; -fx-padding: 4 10 4 10; -fx-background-radius: 4;");
         Button copyKeyBtn = new Button("복사");
-        copyKeyBtn.setStyle("-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
+        copyKeyBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         copyKeyBtn.setOnAction(e -> {
             String key = installKeyLabel.getText();
             if (!key.isBlank() && !key.equals("불러오는 중...") && !key.equals("조회 실패")) {
@@ -129,12 +162,12 @@ public class DashboardManagementModule {
             }
         });
         Button refreshKeyBtn = new Button("↺");
-        refreshKeyBtn.setStyle("-fx-background-color: #6b7280; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
+        refreshKeyBtn.setStyle("-fx-background-color: #718096; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         refreshKeyBtn.setOnAction(e -> loadInstallKey());
 
         // ── config.json 다운로드 ──
-        Button downloadConfigBtn = new Button("config.json 템플릿 다운로드");
-        downloadConfigBtn.setStyle("-fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
+        Button downloadConfigBtn = new Button("설정 파일 다운로드");
+        downloadConfigBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         downloadConfigBtn.setOnAction(e -> downloadConfigJson());
 
         HBox keyRow = new HBox(8, keyLabel, installKeyLabel, copyKeyBtn, refreshKeyBtn, downloadConfigBtn);
@@ -144,7 +177,7 @@ public class DashboardManagementModule {
         Label tableTitle = new Label("등록된 에이전트 목록");
         tableTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
         Button refreshAgentBtn = new Button("새로고침");
-        refreshAgentBtn.setStyle("-fx-background-color: #0f766e; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
+        refreshAgentBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         refreshAgentBtn.setOnAction(e -> loadAgentList());
         HBox tableHeader = new HBox(8, tableTitle, refreshAgentBtn);
         tableHeader.setAlignment(Pos.CENTER_LEFT);
@@ -153,11 +186,11 @@ public class DashboardManagementModule {
         pcNameCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
         pcNameCol.setPrefWidth(130);
 
-        TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP");
+        TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP 주소");
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
         ipCol.setPrefWidth(120);
 
-        TableColumn<Map<String, Object>, String> macCol = new TableColumn<>("MAC");
+        TableColumn<Map<String, Object>, String> macCol = new TableColumn<>("MAC 주소");
         macCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("macAddress"))));
         macCol.setPrefWidth(140);
 
@@ -169,8 +202,8 @@ public class DashboardManagementModule {
                 if (empty || s == null) { setText(null); setStyle(""); return; }
                 setText(s);
                 setStyle("ONLINE".equalsIgnoreCase(s)
-                        ? "-fx-text-fill: #16a34a; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+                        ? "-fx-text-fill: #9fd59f; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #f4a3a3; -fx-font-weight: bold;");
             }
         });
         statusCol.setPrefWidth(80);
@@ -187,7 +220,7 @@ public class DashboardManagementModule {
                 if (empty || s == null) { setText(null); setStyle(""); return; }
                 setText(s);
                 setStyle("활성".equals(s)
-                        ? "-fx-text-fill: #16a34a; -fx-font-weight: bold;"
+                        ? "-fx-text-fill: #22863a; -fx-font-weight: bold;"
                         : "-fx-text-fill: #9ca3af;");
             }
         });
@@ -215,13 +248,14 @@ public class DashboardManagementModule {
         orphanCol.setPrefWidth(80);
 
         TableColumn<Map<String, Object>, Void> actionCol = new TableColumn<>("관리");
+        actionCol.setStyle("-fx-alignment: CENTER;");
         actionCol.setCellFactory(col -> new TableCell<>() {
             private final Button revokeBtn = new Button("토큰폐기");
             private final Button deleteBtn = new Button("삭제");
             private final HBox box = new HBox(4, revokeBtn, deleteBtn);
             {
-                revokeBtn.setStyle("-fx-background-color: #d97706; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                deleteBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                revokeBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
                 box.setAlignment(Pos.CENTER);
                 revokeBtn.setOnAction(e -> {
                     Map<String, Object> row = getTableView().getItems().get(getIndex());
@@ -247,7 +281,8 @@ public class DashboardManagementModule {
         agentTable.setStyle("-fx-background-color: white; -fx-font-size: 12px;");
 
         VBox box = new VBox(10, title, keyRow, tableHeader, agentTable);
-        box.setStyle("-fx-border-color: #3b82f6; -fx-border-width: 2; -fx-padding: 15; -fx-background-color: #f0f7ff; -fx-background-radius: 6;");
+        box.setAlignment(Pos.TOP_LEFT);
+        box.setStyle("-fx-border-color: #3182ce; -fx-border-width: 2; -fx-padding: 15; -fx-background-color: #eff6ff; -fx-background-radius: 6;");
         return box;
     }
 
@@ -342,8 +377,8 @@ public class DashboardManagementModule {
                 "  \"jitterSec\": 30\n" +
                 "}\n";
         FileChooser fc = new FileChooser();
-        fc.setTitle("config.json 저장");
-        fc.setInitialFileName("config.json");
+        fc.setTitle("설정 파일 저장");
+        fc.setInitialFileName("설정파일_config.json");
         fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
         File file = fc.showSaveDialog(sceneSupplier.get().getWindow());
         if (file == null) return;
@@ -353,19 +388,6 @@ public class DashboardManagementModule {
         } catch (IOException e) {
             new Alert(Alert.AlertType.ERROR, "저장 실패: " + e.getMessage()).show();
         }
-    }
-
-    private VBox buildScriptBox() {
-        Label scriptTitle = new Label("원격 명령 및 스크립트 배포");
-        scriptTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-
-        Button uploadPs1Btn = new Button("PowerShell(.ps1) 파일 선택 및 배포...");
-        uploadPs1Btn.setStyle("-fx-background-color: #8e44ad; -fx-text-fill: white; -fx-font-size: 14px;");
-        uploadPs1Btn.setOnAction(e -> handleScriptUploadAndRun());
-
-        VBox scriptBox = new VBox(10, scriptTitle, uploadPs1Btn);
-        scriptBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
-        return scriptBox;
     }
 
     private VBox buildIpRangeBox() {
@@ -400,31 +422,26 @@ public class DashboardManagementModule {
         ipRangeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         ipRangeTable.setPrefHeight(320);
 
-        TableColumn<IpRangeItem, Long> idCol = new TableColumn<>("ID");
+        TableColumn<IpRangeItem, Long> idCol = new TableColumn<>("번호");
         idCol.setCellValueFactory(new PropertyValueFactory<>("id"));
         idCol.setMaxWidth(60);
         TableColumn<IpRangeItem, String> groupNameCol = new TableColumn<>("강의실");
         groupNameCol.setCellValueFactory(new PropertyValueFactory<>("groupName"));
-        TableColumn<IpRangeItem, String> startCol = new TableColumn<>("Start IP");
+        TableColumn<IpRangeItem, String> startCol = new TableColumn<>("시작 IP");
         startCol.setCellValueFactory(new PropertyValueFactory<>("startIp"));
-        TableColumn<IpRangeItem, String> endCol = new TableColumn<>("End IP");
+        TableColumn<IpRangeItem, String> endCol = new TableColumn<>("끝 IP");
         endCol.setCellValueFactory(new PropertyValueFactory<>("endIp"));
-        TableColumn<IpRangeItem, String> descCol = new TableColumn<>("Desc");
+        TableColumn<IpRangeItem, String> descCol = new TableColumn<>("설명");
         descCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        TableColumn<IpRangeItem, Void> actionCol = new TableColumn<>("액션");
-        actionCol.setMinWidth(220);
+        TableColumn<IpRangeItem, Void> actionCol = new TableColumn<>("관리");
+        actionCol.setMinWidth(80);
+        actionCol.setStyle("-fx-alignment: CENTER;");
         actionCol.setCellFactory(param -> new TableCell<>() {
-            private final Button controlBtn = new Button("▶ 개별 제어");
             private final Button deleteBtn = new Button("삭제");
-            private final HBox box = new HBox(6, controlBtn, deleteBtn);
+            private final HBox box = new HBox(deleteBtn);
             {
-                box.setAlignment(Pos.CENTER_LEFT);
-                controlBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white;");
-                controlBtn.setOnAction(event -> {
-                    IpRangeItem item = getTableView().getItems().get(getIndex());
-                    showIndividualControlDialog(item);
-                });
                 deleteBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
+                box.setAlignment(Pos.CENTER);
                 deleteBtn.setOnAction(event -> {
                     IpRangeItem item = getTableView().getItems().get(getIndex());
                     Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "정말 삭제하시겠습니까?", ButtonType.YES, ButtonType.NO);
@@ -444,11 +461,12 @@ public class DashboardManagementModule {
         ipRangeTable.getColumns().addAll(idCol, groupNameCol, startCol, endCol, descCol, actionCol);
 
         VBox ipBox = new VBox(10, ipTitle, ipHint, ipForm, ipRangeTable);
+        ipBox.setAlignment(Pos.TOP_LEFT);
         ipBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return ipBox;
     }
 
-    private VBox buildTeacherBox() {
+    private VBox buildTeacherDeviceBox() {
         Label teacherTitle = new Label("교사 PC 관리");
         teacherTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
@@ -459,7 +477,7 @@ public class DashboardManagementModule {
         TextField teacherIp = new TextField();
         teacherIp.setPromptText("교사 IP");
         TextField teacherMac = new TextField();
-        teacherMac.setPromptText("교사 MAC");
+        teacherMac.setPromptText("교사 MAC (선택)");
         TextField teacherDesc = new TextField();
         teacherDesc.setPromptText("설명");
         Button addTeacherBtn = new Button("교사 등록");
@@ -467,21 +485,24 @@ public class DashboardManagementModule {
 
         teacherDeviceTable = new TableView<>();
         teacherDeviceTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<TeacherDeviceItem, Long> teacherIdCol = new TableColumn<>("ID");
+        TableColumn<TeacherDeviceItem, Long> teacherIdCol = new TableColumn<>("번호");
         teacherIdCol.setCellValueFactory(new PropertyValueFactory<>("id"));
         TableColumn<TeacherDeviceItem, String> teacherGroupCol = new TableColumn<>("강의실");
         teacherGroupCol.setCellValueFactory(new PropertyValueFactory<>("groupName"));
-        TableColumn<TeacherDeviceItem, String> teacherIpCol = new TableColumn<>("IP");
+        TableColumn<TeacherDeviceItem, String> teacherIpCol = new TableColumn<>("IP 주소");
         teacherIpCol.setCellValueFactory(new PropertyValueFactory<>("ipAddress"));
-        TableColumn<TeacherDeviceItem, String> teacherMacCol = new TableColumn<>("MAC");
+        TableColumn<TeacherDeviceItem, String> teacherMacCol = new TableColumn<>("MAC 주소");
         teacherMacCol.setCellValueFactory(new PropertyValueFactory<>("macAddress"));
         TableColumn<TeacherDeviceItem, String> teacherDescCol = new TableColumn<>("설명");
         teacherDescCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        TableColumn<TeacherDeviceItem, Void> teacherActionCol = new TableColumn<>("액션");
+        TableColumn<TeacherDeviceItem, Void> teacherActionCol = new TableColumn<>("관리");
+        teacherActionCol.setStyle("-fx-alignment: CENTER;");
         teacherActionCol.setCellFactory(param -> new TableCell<>() {
             private final Button deleteBtn = new Button("삭제");
+            private final HBox box = new HBox(deleteBtn);
             {
-                deleteBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
+                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
+                box.setAlignment(Pos.CENTER);
                 deleteBtn.setOnAction(event -> {
                     TeacherDeviceItem item = getTableView().getItems().get(getIndex());
                     apiClient.delete("/dashboard/classrooms/teacher-devices/" + item.getId())
@@ -501,9 +522,10 @@ public class DashboardManagementModule {
             @Override
             protected void updateItem(Void item, boolean empty) {
                 super.updateItem(item, empty);
-                setGraphic(empty ? null : deleteBtn);
+                setGraphic(empty ? null : box);
             }
         });
+        teacherDeviceTable.setPrefHeight(220);
         teacherDeviceTable.getColumns().add(teacherIdCol);
         teacherDeviceTable.getColumns().add(teacherGroupCol);
         teacherDeviceTable.getColumns().add(teacherIpCol);
@@ -511,20 +533,117 @@ public class DashboardManagementModule {
         teacherDeviceTable.getColumns().add(teacherDescCol);
         teacherDeviceTable.getColumns().add(teacherActionCol);
 
+        HBox teacherForm = new HBox(10, teacherGroupCombo, teacherIp, teacherMac, teacherDesc, addTeacherBtn);
+        teacherForm.setAlignment(Pos.CENTER_LEFT);
+        VBox teacherBox = new VBox(10, teacherTitle, teacherForm, teacherDeviceTable);
+        teacherBox.setAlignment(Pos.TOP_LEFT);
+        teacherBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
+        return teacherBox;
+    }
+
+    private VBox buildBrokenPcBox() {
         Label brokenTitle = new Label("고장 PC 등록");
         brokenTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        
+        brokenGroupCombo = buildClassroomComboBox();
+        brokenGroupCombo.setPromptText("강의실 필터");
+        brokenGroupCombo.setOnAction(e -> applyBrokenPcFilter());
+        
+        TextField brokenIpField = new TextField();
+        brokenIpField.setPromptText("IP 주소");
         TextField brokenMacField = new TextField();
-        brokenMacField.setPromptText("MAC 주소");
+        brokenMacField.setPromptText("MAC 주소 (선택)");
         TextField brokenNoteField = new TextField();
         brokenNoteField.setPromptText("고장 사유");
         Button brokenRegisterBtn = new Button("고장 등록");
-        brokenRegisterBtn.setOnAction(e -> markBrokenPc(brokenMacField, brokenNoteField));
+        brokenRegisterBtn.setOnAction(e -> markBrokenPc(brokenIpField, brokenMacField, brokenNoteField));
 
-        HBox brokenBox = new HBox(10, brokenMacField, brokenNoteField, brokenRegisterBtn);
-        HBox teacherForm = new HBox(10, teacherGroupCombo, teacherIp, teacherMac, teacherDesc, addTeacherBtn);
-        VBox teacherBox = new VBox(10, teacherTitle, teacherForm, teacherDeviceTable, brokenTitle, brokenBox);
-        teacherBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
-        return teacherBox;
+        brokenPcTable = buildBrokenPcTable();
+        brokenPcTable.setPrefHeight(220);
+
+        HBox brokenFilterBox = new HBox(10, brokenGroupCombo);
+        brokenFilterBox.setAlignment(Pos.CENTER_LEFT);
+        HBox brokenBox = new HBox(10, brokenIpField, brokenMacField, brokenNoteField, brokenRegisterBtn);
+        brokenBox.setAlignment(Pos.CENTER_LEFT);
+        
+        VBox brokenPcBox = new VBox(10, brokenTitle, brokenFilterBox, brokenBox, brokenPcTable);
+        brokenPcBox.setAlignment(Pos.TOP_LEFT);
+        brokenPcBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
+        return brokenPcBox;
+    }
+
+    private TableView<PcStatusDto> buildBrokenPcTable() {
+        TableView<PcStatusDto> table = new TableView<>();
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setPlaceholder(new Label("등록된 고장 PC가 없습니다."));
+
+        TableColumn<PcStatusDto, String> macCol = new TableColumn<>("MAC 주소");
+        macCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getMacAddress())));
+        macCol.setPrefWidth(150);
+
+        TableColumn<PcStatusDto, String> ipCol = new TableColumn<>("IP 주소");
+        ipCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getIpAddress())));
+        ipCol.setPrefWidth(120);
+
+        TableColumn<PcStatusDto, String> groupCol = new TableColumn<>("강의실");
+        groupCol.setCellValueFactory(d -> new SimpleStringProperty(resolveGroupName(d.getValue().getGroupId())));
+        groupCol.setPrefWidth(120);
+
+        TableColumn<PcStatusDto, String> statusCol = new TableColumn<>("상태");
+        statusCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getStatus())));
+        statusCol.setPrefWidth(80);
+        statusCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                    return;
+                }
+                setText(item);
+                setStyle("-fx-text-fill: #d73a49; -fx-font-weight: bold;");
+            }
+        });
+
+        TableColumn<PcStatusDto, String> noteCol = new TableColumn<>("고장 사유");
+        noteCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getBrokenNote())));
+        noteCol.setPrefWidth(220);
+
+        TableColumn<PcStatusDto, Void> actionCol = new TableColumn<>("관리");
+        actionCol.setMinWidth(180);
+        actionCol.setStyle("-fx-alignment: CENTER;");
+        actionCol.setCellFactory(col -> new TableCell<>() {
+            private final Button editBtn = new Button("사유 수정");
+            private final Button clearBtn = new Button("해제");
+            private final HBox box = new HBox(6, editBtn, clearBtn);
+            {
+                editBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                clearBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                box.setAlignment(Pos.CENTER);
+                editBtn.setOnAction(e -> {
+                    PcStatusDto item = getTableView().getItems().get(getIndex());
+                    if (item != null) {
+                        showBrokenNoteEditDialog(item);
+                    }
+                });
+                clearBtn.setOnAction(e -> {
+                    PcStatusDto item = getTableView().getItems().get(getIndex());
+                    if (item != null) {
+                        clearBrokenPc(item);
+                    }
+                });
+            }
+
+            @Override
+            protected void updateItem(Void item, boolean empty) {
+                super.updateItem(item, empty);
+                setGraphic(empty ? null : box);
+            }
+        });
+
+        table.getColumns().addAll(macCol, ipCol, groupCol, statusCol, noteCol, actionCol);
+        return table;
     }
 
     private VBox buildReportBox() {
@@ -532,16 +651,18 @@ public class DashboardManagementModule {
         reportTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
 
         HBox reportBtns = new HBox(15);
+        reportBtns.setAlignment(Pos.CENTER_LEFT);
         Button weekBtn = new Button("주간 보고서 생성");
-        weekBtn.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
-        weekBtn.setOnAction(e -> handleDownloadReport("WEEKLY"));
+        weekBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
+        weekBtn.setOnAction(e -> showReportDateDialog("WEEKLY"));
 
         Button monthBtn = new Button("월간 보고서 생성");
-        monthBtn.setStyle("-fx-background-color: #2980b9; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
-        monthBtn.setOnAction(e -> handleDownloadReport("MONTHLY"));
+        monthBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
+        monthBtn.setOnAction(e -> showReportDateDialog("MONTHLY"));
 
         reportBtns.getChildren().addAll(weekBtn, monthBtn);
         VBox reportBox = new VBox(10, reportTitle, reportBtns);
+        reportBox.setAlignment(Pos.TOP_LEFT);
         reportBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return reportBox;
     }
@@ -562,19 +683,37 @@ public class DashboardManagementModule {
         return comboBox;
     }
 
+    private ClassroomSummaryDto createAllClassroomOption() {
+        ClassroomSummaryDto dto = new ClassroomSummaryDto();
+        dto.setGroupId(null);
+        dto.setGroupName("전체");
+        return dto;
+    }
+
     private void loadIpRangesAndGroups() {
         apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
             .thenAccept(classrooms -> {
                 try {
+                    log.info("Loaded {} classrooms from API", classrooms == null ? "null" : classrooms.size());
+
+                    List<ClassroomSummaryDto> options = new ArrayList<>();
+                    options.add(allClassroomOption);
+                    if (classrooms != null) {
+                        options.addAll(classrooms);
+                    }
+
                     Platform.runLater(() -> {
-                        groupComboBox.getItems().setAll(classrooms);
-                        teacherGroupCombo.getItems().setAll(classrooms);
-                        if (!classrooms.isEmpty()) {
-                            teacherGroupCombo.getSelectionModel().selectFirst();
-                            loadTeacherDevices();
+                        groupComboBox.getItems().setAll(options);
+                        teacherGroupCombo.getItems().setAll(options);
+                        if (brokenGroupCombo != null) {
+                            brokenGroupCombo.getItems().setAll(options);
+                            brokenGroupCombo.getSelectionModel().selectFirst();
                         }
+                        groupComboBox.getSelectionModel().selectFirst();
+                        teacherGroupCombo.getSelectionModel().selectFirst();
+                        loadTeacherDevices();
                     });
-                    // 초기에는 전체 IP 대역 로드
+
                     loadIpRangesForGroup(null);
                 } catch (Exception e) {
                     log.warn("Failed while preparing classroom list", e);
@@ -590,14 +729,12 @@ public class DashboardManagementModule {
 
     /** 선택한 강의실의 IP 대역만 조회. group == null 이면 전체. */
     private void loadIpRangesForGroup(ClassroomSummaryDto group) {
-        String path = (group != null)
+        String path = (group != null && group.getGroupId() != null)
                 ? "/ip-ranges?groupId=" + group.getGroupId()
                 : "/ip-ranges";
         apiClient.getPagedList(path, new TypeReference<List<IpRangeItem>>() {})
                 .thenAccept(items -> {
-                    if (group != null) {
-                        items.forEach(item -> item.setGroupName(group.getGroupName()));
-                    }
+                    items.forEach(item -> item.setGroupName(resolveClassroomName(item.getGroupId(), item.getGroupName())));
                     Platform.runLater(() -> ipRangeTable.getItems().setAll(items));
                 })
                 .exceptionally(ex -> {
@@ -610,12 +747,13 @@ public class DashboardManagementModule {
 
     private void loadTeacherDevices() {
         ClassroomSummaryDto selected = teacherGroupCombo.getValue();
-        if (selected == null) {
+        if (selected == null || selected.getGroupId() == null) {
+            loadAllTeacherDevices();
             return;
         }
         apiClient.getJson("/dashboard/classrooms/" + selected.getGroupId() + "/teacher-devices", new TypeReference<List<TeacherDeviceItem>>() {})
                 .thenAccept(items -> {
-                    items.forEach(it -> it.setGroupName(selected.getGroupName()));
+                    items.forEach(it -> it.setGroupName(resolveClassroomName(it.getGroupId(), selected.getGroupName())));
                     Platform.runLater(() -> teacherDeviceTable.getItems().setAll(items));
                 })
                 .exceptionally(ex -> {
@@ -626,18 +764,84 @@ public class DashboardManagementModule {
                 });
     }
 
+    private void loadAllTeacherDevices() {
+        if (teacherGroupCombo == null || teacherDeviceTable == null) {
+            return;
+        }
+
+        List<ClassroomSummaryDto> classrooms = teacherGroupCombo.getItems().stream()
+                .filter(c -> c != null && c.getGroupId() != null)
+                .toList();
+
+        if (classrooms.isEmpty()) {
+            Platform.runLater(() -> teacherDeviceTable.getItems().clear());
+            return;
+        }
+
+        List<CompletableFuture<List<TeacherDeviceItem>>> futures = new ArrayList<>();
+        for (ClassroomSummaryDto classroom : classrooms) {
+            CompletableFuture<List<TeacherDeviceItem>> future =
+                    apiClient.getJson(
+                                    "/dashboard/classrooms/" + classroom.getGroupId() + "/teacher-devices",
+                                    new TypeReference<List<TeacherDeviceItem>>() {})
+                            .thenApply(items -> {
+                                items.forEach(it -> it.setGroupName(resolveClassroomName(it.getGroupId(), classroom.getGroupName())));
+                                return items;
+                            })
+                            .exceptionally(ex -> {
+                                log.warn("Failed to load teacher devices for group {}", classroom.getGroupId(), ex);
+                                return List.of();
+                            });
+            futures.add(future);
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenAccept(v -> {
+                    List<TeacherDeviceItem> merged = futures.stream()
+                            .map(CompletableFuture::join)
+                            .flatMap(List::stream)
+                            .sorted((a, b) -> {
+                                String ga = a.getGroupName() == null ? "" : a.getGroupName();
+                                String gb = b.getGroupName() == null ? "" : b.getGroupName();
+                                int byGroup = ga.compareToIgnoreCase(gb);
+                                if (byGroup != 0) return byGroup;
+                                String ia = a.getIpAddress() == null ? "" : a.getIpAddress();
+                                String ib = b.getIpAddress() == null ? "" : b.getIpAddress();
+                                return ia.compareToIgnoreCase(ib);
+                            })
+                            .toList();
+                    Platform.runLater(() -> teacherDeviceTable.getItems().setAll(merged));
+                });
+    }
+
     private void addTeacherDevice(TextField ipTF, TextField macTF, TextField descTF) {
         ClassroomSummaryDto selectedGroup = teacherGroupCombo.getValue();
         if (selectedGroup == null) {
             new Alert(Alert.AlertType.ERROR, "강의실을 선택하세요.").show();
             return;
         }
+        if (selectedGroup.getGroupId() == null) {
+            new Alert(Alert.AlertType.ERROR, "'전체'에서는 교사 PC를 등록할 수 없습니다. 특정 강의실을 선택하세요.").show();
+            return;
+        }
         try {
+            String ip = ipTF.getText() == null ? "" : ipTF.getText().trim();
+            String mac = macTF.getText() == null ? "" : macTF.getText().trim();
+            String description = descTF.getText() == null ? "" : descTF.getText().trim();
+            if (ip.isBlank()) {
+                new Alert(Alert.AlertType.ERROR, "교사 IP를 입력하세요.").show();
+                return;
+            }
+
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("groupId", selectedGroup.getGroupId());
-            payload.put("ipAddress", ipTF.getText());
-            payload.put("macAddress", macTF.getText());
-            payload.put("description", descTF.getText());
+            payload.put("ipAddress", ip);
+            if (!mac.isBlank()) {
+                payload.put("macAddress", mac);
+            }
+            if (!description.isBlank()) {
+                payload.put("description", description);
+            }
             apiClient.postJson("/dashboard/classrooms/" + selectedGroup.getGroupId() + "/teacher-devices", payload)
                     .thenAccept(resp -> Platform.runLater(() -> {
                         ipTF.clear();
@@ -655,18 +859,25 @@ public class DashboardManagementModule {
         }
     }
 
-    private void markBrokenPc(TextField macTF, TextField noteTF) {
-        String mac = macTF.getText();
-        if (mac == null || mac.isBlank()) {
-            new Alert(Alert.AlertType.ERROR, "MAC 주소를 입력하세요.").show();
+    private void markBrokenPc(TextField ipTF, TextField macTF, TextField noteTF) {
+        String ip = ipTF.getText() == null ? "" : ipTF.getText().trim();
+        String mac = macTF.getText() == null ? "" : macTF.getText().trim();
+        if (mac.isBlank() && ip.isBlank()) {
+            new Alert(Alert.AlertType.ERROR, "IP 주소 또는 MAC 주소를 입력하세요.").show();
             return;
         }
-        String note = noteTF.getText();
-        apiClient.postJson("/dashboard/pcs/broken", Map.of("macAddress", mac, "note", note == null ? "broken" : note))
+        String note = noteTF.getText() == null ? "" : noteTF.getText().trim();
+        Map<String, String> payload = new LinkedHashMap<>();
+        if (!ip.isBlank()) payload.put("ipAddress", ip);
+        if (!mac.isBlank()) payload.put("macAddress", mac);
+        payload.put("note", note.isBlank() ? "broken" : note);
+        apiClient.postJson("/dashboard/pcs/broken", payload)
                 .thenAccept(resp -> Platform.runLater(() -> {
                     new Alert(Alert.AlertType.INFORMATION, "고장 PC로 등록되었습니다.").show();
+                    ipTF.clear();
                     macTF.clear();
                     noteTF.clear();
+                    loadBrokenPcs();
                 }))
                 .exceptionally(ex -> {
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
@@ -675,10 +886,120 @@ public class DashboardManagementModule {
                 });
     }
 
+    private void loadBrokenPcs() {
+        if (brokenPcTable == null) {
+            return;
+        }
+        apiClient.getJson("/dashboard/pcs/broken", new TypeReference<List<PcStatusDto>>() {})
+                .thenAccept(items -> Platform.runLater(() -> {
+                    cachedBrokenPcs = items;
+                    applyBrokenPcFilter();
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        cachedBrokenPcs = List.of();
+                        brokenPcTable.getItems().clear();
+                    });
+                    return null;
+                });
+    }
+
+    private void applyBrokenPcFilter() {
+        if (brokenPcTable == null) {
+            return;
+        }
+        ClassroomSummaryDto selected = brokenGroupCombo == null ? null : brokenGroupCombo.getValue();
+        List<PcStatusDto> filtered = cachedBrokenPcs;
+        if (selected != null && selected.getGroupId() != null) {
+            filtered = cachedBrokenPcs.stream()
+                    .filter(pc -> selected.getGroupId().equals(pc.getGroupId()))
+                    .toList();
+        }
+        brokenPcTable.getItems().setAll(filtered);
+    }
+
+    private String resolveGroupName(Long groupId) {
+        return resolveClassroomName(groupId, null);
+    }
+
+    private String resolveClassroomName(Long groupId, String fallbackName) {
+        if (groupId == null) {
+            return fallbackName != null && !fallbackName.isBlank() ? fallbackName : "-";
+        }
+
+        String resolved = classroomOptions().stream()
+                .filter(item -> item != null && groupId.equals(item.getGroupId()))
+                .map(ClassroomSummaryDto::getGroupName)
+                .filter(name -> name != null && !name.isBlank() && !"전체".equals(name))
+                .findFirst()
+                .orElse(null);
+
+        if (resolved != null) {
+            return resolved;
+        }
+        if (fallbackName != null && !fallbackName.isBlank() && !"전체".equals(fallbackName)) {
+            return fallbackName;
+        }
+        return "강의실#" + groupId;
+    }
+
+    private List<ClassroomSummaryDto> classroomOptions() {
+        if (groupComboBox != null && !groupComboBox.getItems().isEmpty()) {
+            return groupComboBox.getItems();
+        }
+        if (teacherGroupCombo != null && !teacherGroupCombo.getItems().isEmpty()) {
+            return teacherGroupCombo.getItems();
+        }
+        if (brokenGroupCombo != null && !brokenGroupCombo.getItems().isEmpty()) {
+            return brokenGroupCombo.getItems();
+        }
+        return List.of();
+    }
+
+    private void showBrokenNoteEditDialog(PcStatusDto item) {
+        TextInputDialog dialog = new TextInputDialog(item.getBrokenNote());
+        dialog.setTitle("고장 사유 수정");
+        dialog.setHeaderText(item.getMacAddress() + " / " + safe(item.getIpAddress()));
+        dialog.setContentText("고장 사유:");
+        dialog.showAndWait().ifPresent(note ->
+                apiClient.putJson("/dashboard/pcs/broken/" + item.getMacAddress(), Map.of("note", note == null ? "" : note.trim()))
+                        .thenAccept(resp -> Platform.runLater(this::loadBrokenPcs))
+                        .exceptionally(ex -> {
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                    "사유 수정 실패: " + errorMessage(ex)).show());
+                            return null;
+                        }));
+    }
+
+    private void clearBrokenPc(PcStatusDto item) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION,
+                "고장 상태를 해제하시겠습니까?",
+                ButtonType.YES, ButtonType.NO);
+        alert.showAndWait().ifPresent(type -> {
+            if (type == ButtonType.YES) {
+                apiClient.delete("/dashboard/pcs/broken/" + item.getMacAddress())
+                        .thenAccept(resp -> Platform.runLater(this::loadBrokenPcs))
+                        .exceptionally(ex -> {
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                    "고장 해제 실패: " + errorMessage(ex)).show());
+                            return null;
+                        });
+            }
+        });
+    }
+
+    private String safe(String value) {
+        return value == null ? "-" : value;
+    }
+
     private void addIpRange(TextField startIp, TextField endIp, TextField desc) {
         ClassroomSummaryDto selectedGroup = groupComboBox.getValue();
         if (selectedGroup == null) {
             new Alert(Alert.AlertType.ERROR, "강의실을 선택하세요.").show();
+            return;
+        }
+        if (selectedGroup.getGroupId() == null) {
+            new Alert(Alert.AlertType.ERROR, "'전체'에서는 IP 대역을 추가할 수 없습니다. 특정 강의실을 선택하세요.").show();
             return;
         }
 
@@ -740,8 +1061,8 @@ public class DashboardManagementModule {
                 if (empty || status == null) { setText(null); setStyle(""); return; }
                 setText(status);
                 setStyle("ONLINE".equalsIgnoreCase(status)
-                        ? "-fx-text-fill: #16a34a; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+                        ? "-fx-text-fill: #22863a; -fx-font-weight: bold;"
+                        : "-fx-text-fill: #d73a49; -fx-font-weight: bold;");
             }
         });
         statusCol.setPrefWidth(80);
@@ -753,9 +1074,9 @@ public class DashboardManagementModule {
             private final Button wolBtn      = new Button("켜기(WOL)");
             private final HBox box           = new HBox(4, shutdownBtn, rebootBtn, wolBtn);
             {
-                shutdownBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                rebootBtn.setStyle("-fx-background-color: #e67e22; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                wolBtn.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                shutdownBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                rebootBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                wolBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
                 box.setAlignment(Pos.CENTER);
                 shutdownBtn.setOnAction(e -> {
                     PcStatusDto pc = getTableView().getItems().get(getIndex());
@@ -780,14 +1101,14 @@ public class DashboardManagementModule {
         @SuppressWarnings("unchecked")
         TableView<PcStatusDto> table = new TableView<>();
         table.getColumns().addAll(nameCol, ipCol, statusCol, actionCol);
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("PC 정보를 불러오는 중..."));
         table.setStyle("-fx-background-color: white; -fx-font-size: 13px;");
         table.setPrefHeight(440);
 
         VBox root = new VBox(8);
         root.setPadding(new Insets(12));
-        root.setStyle("-fx-background-color: #f8fafc;");
+        root.setStyle("-fx-background-color: #f8fbff;");
         Label headerLabel = new Label(title);
         headerLabel.setStyle("-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #1e293b;");
         root.getChildren().addAll(headerLabel, table);
@@ -963,12 +1284,95 @@ public class DashboardManagementModule {
         return msg == null || msg.isBlank() ? cause.toString() : msg;
     }
 
-    private void handleDownloadReport(String type) {
+    private void showReportDateDialog(String defaultType) {
+        Dialog<Map<String, Object>> dialog = new Dialog<>();
+        dialog.setTitle("보고서 생성");
+        dialog.setHeaderText("보고서 유형과 기간을 선택하세요");
+        ButtonType generateBtn = new ButtonType("생성", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(generateBtn, ButtonType.CANCEL);
+
+        ToggleGroup typeGroup = new ToggleGroup();
+        RadioButton weeklyBtn = new RadioButton("주간 보고서");
+        weeklyBtn.setToggleGroup(typeGroup);
+        RadioButton monthlyBtn = new RadioButton("월간 보고서");
+        monthlyBtn.setToggleGroup(typeGroup);
+        if ("MONTHLY".equalsIgnoreCase(defaultType)) {
+            monthlyBtn.setSelected(true);
+        } else {
+            weeklyBtn.setSelected(true);
+        }
+
+        LocalDate now = LocalDate.now();
+        LocalDate monday = now.with(java.time.DayOfWeek.MONDAY);
+        LocalDate weekStart = monday;
+        LocalDate weekEnd = monday.plusDays(6);
+        LocalDate monthStart = now.withDayOfMonth(1);
+        LocalDate monthEnd = now.withDayOfMonth(now.lengthOfMonth());
+
+        DatePicker fromPicker = new DatePicker(weeklyBtn.isSelected() ? weekStart : monthStart);
+        DatePicker toPicker = new DatePicker(weeklyBtn.isSelected() ? weekEnd : monthEnd);
+
+        weeklyBtn.selectedProperty().addListener((obs, oldVal, selected) -> {
+            if (selected) {
+                fromPicker.setValue(weekStart);
+                toPicker.setValue(weekEnd);
+            }
+        });
+        monthlyBtn.selectedProperty().addListener((obs, oldVal, selected) -> {
+            if (selected) {
+                fromPicker.setValue(monthStart);
+                toPicker.setValue(monthEnd);
+            }
+        });
+
+        GridPane form = new GridPane();
+        form.setHgap(10);
+        form.setVgap(8);
+        form.setPadding(new Insets(12));
+        form.add(new Label("유형:"), 0, 0);
+        form.add(new HBox(10, weeklyBtn, monthlyBtn), 1, 0);
+        form.add(new Label("시작일:"), 0, 1);
+        form.add(fromPicker, 1, 1);
+        form.add(new Label("종료일:"), 0, 2);
+        form.add(toPicker, 1, 2);
+        dialog.getDialogPane().setContent(form);
+
+        dialog.setResultConverter(btn -> {
+            if (btn != generateBtn) return null;
+            LocalDate from = fromPicker.getValue();
+            LocalDate to = toPicker.getValue();
+            if (from == null || to == null) {
+                Platform.runLater(() -> new Alert(Alert.AlertType.WARNING, "시작일/종료일을 모두 선택하세요.").show());
+                return null;
+            }
+            if (from.isAfter(to)) {
+                Platform.runLater(() -> new Alert(Alert.AlertType.WARNING, "시작일은 종료일보다 늦을 수 없습니다.").show());
+                return null;
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("type", monthlyBtn.isSelected() ? "MONTHLY" : "WEEKLY");
+            result.put("from", from);
+            result.put("to", to);
+            return result;
+        });
+
+        dialog.showAndWait().ifPresent(result -> {
+            String type = String.valueOf(result.get("type"));
+            LocalDate from = (LocalDate) result.get("from");
+            LocalDate to = (LocalDate) result.get("to");
+            handleDownloadReport(type, from, to);
+        });
+    }
+
+    private void handleDownloadReport(String type, LocalDate fromDate, LocalDate toDate) {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle(type + " 보고서 PDF 저장");
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PDF Files", "*.pdf"));
         String defaultName = "WEEKLY".equals(type) ? "주간보고서" : "월간보고서";
-        fileChooser.setInitialFileName(defaultName + "_" + LocalDate.now() + ".pdf");
+        String periodName = (fromDate != null && toDate != null)
+                ? fromDate + "_" + toDate
+                : String.valueOf(LocalDate.now());
+        fileChooser.setInitialFileName(defaultName + "_" + periodName + ".pdf");
 
         File file = fileChooser.showSaveDialog(sceneSupplier.get().getWindow());
         if (file == null) return;
@@ -976,33 +1380,30 @@ public class DashboardManagementModule {
         javafx.scene.Scene scene = sceneSupplier.get();
         scene.setCursor(Cursor.WAIT);
 
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(apiBaseUrl + "/reports/pdf?type=" + type))
-                .GET()
-                .build();
-
-        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
-                .thenAccept(response -> {
+        String url = apiBaseUrl + "/reports/pdf?type=" + type
+            + (fromDate != null ? "&fromDate=" + fromDate : "")
+            + (toDate != null ? "&toDate=" + toDate : "");
+        apiClient.getBytes(url)
+                .thenAccept(bytes -> {
                     Platform.runLater(() -> scene.setCursor(Cursor.DEFAULT));
-                    if (response.statusCode() == 200) {
-                        try {
-                            Files.write(file.toPath(), response.body());
-                            Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
-                                    "보고서가 저장되었습니다:\n" + file.getAbsolutePath()).show());
-                        } catch (IOException e) {
-                            log.warn("Failed to save report file {}", file.getAbsolutePath(), e);
-                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                    "파일 저장 중 오류가 발생했습니다.").show());
-                        }
-                    } else {
+                    try {
+                        Files.write(file.toPath(), bytes);
+                        Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
+                                "보고서가 저장되었습니다:\n" + file.getAbsolutePath()).show());
+                    } catch (IOException e) {
+                        log.warn("Failed to save report file {}", file.getAbsolutePath(), e);
                         Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                "보고서 생성 실패 (상태 코드: " + response.statusCode() + ")").show());
+                                "파일 저장 중 오류가 발생했습니다.").show());
                     }
                 })
                 .exceptionally(e -> {
                     Platform.runLater(() -> {
                         scene.setCursor(Cursor.DEFAULT);
-                        new Alert(Alert.AlertType.ERROR, "네트워크 오류: " + e.getMessage()).show();
+                        Throwable cause = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+                        String msg = cause == null || cause.getMessage() == null || cause.getMessage().isBlank()
+                                ? "알 수 없는 오류"
+                                : cause.getMessage();
+                        new Alert(Alert.AlertType.ERROR, "보고서 생성 실패: " + msg).show();
                     });
                     return null;
                 });

@@ -46,10 +46,10 @@ public class DashboardCanvasModule {
         this.imageDropHandler = imageDropHandler;
 
         this.classroomContainer = new Pane();
-        this.classroomContainer.setStyle("-fx-background-color: #f0f2f5;");
-        this.classroomContainer.setPrefSize(2000, 2000);
+        this.classroomContainer.setStyle("-fx-background-color: #f8fbff;");
+        this.classroomContainer.setPrefSize(1, 1);
 
-        this.gridCanvas = new Canvas(2000, 2000);
+        this.gridCanvas = new Canvas(1, 1);
         this.gridCanvas.setMouseTransparent(true);
         this.gridCanvas.setVisible(false);
         this.classroomContainer.getChildren().add(gridCanvas);
@@ -78,9 +78,9 @@ public class DashboardCanvasModule {
 
     public void applyEditMode(boolean enabled) {
         if (enabled) {
-            classroomContainer.setStyle("-fx-background-color: #e8f0fe; -fx-border-color: #1a73e8; -fx-border-style: dashed;");
+            classroomContainer.setStyle("-fx-background-color: #eff6ff; -fx-border-color: #3182ce; -fx-border-style: dashed;");
         } else {
-            classroomContainer.setStyle("-fx-background-color: #f0f2f5;");
+            classroomContainer.setStyle("-fx-background-color: #f8fbff;");
             clearSelection();
             selectionRect.setVisible(false);
         }
@@ -94,16 +94,30 @@ public class DashboardCanvasModule {
 
         GraphicsContext gc = gridCanvas.getGraphicsContext2D();
         gc.clearRect(0, 0, gridCanvas.getWidth(), gridCanvas.getHeight());
-        gc.setStroke(Color.LIGHTGRAY);
-        gc.setLineWidth(0.5);
 
         double gridSize = 20.0;
+        double majorStep = gridSize * 5;
+
+        // 마이너 그리드: 부드러운 배경 가이드
+        gc.setLineWidth(0.45);
+        gc.setStroke(Color.rgb(148, 163, 184, 0.12));
         for (double x = 0; x < gridCanvas.getWidth(); x += gridSize) {
             gc.strokeLine(x, 0, x, gridCanvas.getHeight());
         }
         for (double y = 0; y < gridCanvas.getHeight(); y += gridSize) {
             gc.strokeLine(0, y, gridCanvas.getWidth(), y);
         }
+
+        // 메이저 그리드: 주요 가이드 라인
+        gc.setLineWidth(0.75);
+        gc.setStroke(Color.rgb(100, 116, 139, 0.22));
+        for (double x = 0; x < gridCanvas.getWidth(); x += majorStep) {
+            gc.strokeLine(x, 0, x, gridCanvas.getHeight());
+        }
+        for (double y = 0; y < gridCanvas.getHeight(); y += majorStep) {
+            gc.strokeLine(0, y, gridCanvas.getWidth(), y);
+        }
+
         gridCanvas.toBack();
     }
 

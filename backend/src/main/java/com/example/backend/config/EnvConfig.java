@@ -2,8 +2,10 @@ package com.example.backend.config;
 
 import io.github.cdimascio.dotenv.Dotenv;
 import io.github.cdimascio.dotenv.DotenvEntry;
+import org.apache.commons.logging.Log;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
+import org.springframework.boot.logging.DeferredLog;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 
@@ -17,20 +19,37 @@ import java.util.stream.Collectors;
  */
 public class EnvConfig implements EnvironmentPostProcessor {
 
+    private static final Log log = new DeferredLog();
+
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        // .env 파일 경로 (프로젝트 루트)
-        String envFilePath = ".env";
-        File envFile = new File(envFilePath);
+        // backend/.env 파일 경로 우선 시도
+        String[] searchPaths = {
+            "backend/.env",    // 프로젝트 루트에서 backend 폴더
+            "backend.env",      // 프로젝트 루트에 backend.env 파일
+            ".env"              // 호환성: 기본 .env 파일
+        };
+        
+        Dotenv dotenv = null;
+        File foundFile = null;
+        
+        for (String path : searchPaths) {
+            File file = new File(path);
+            if (file.exists()) {
+                foundFile = file;
+                String dir = file.getParent() != null ? file.getParent() : ".";
+                String filename = file.getName();
+                dotenv = Dotenv.configure()
+                        .directory(dir)
+                        .filename(filename)
+                        .ignoreIfMissing()
+                        .load();
+                log.info("Loaded backend env from: " + file.getAbsolutePath());
+                break;
+            }
+        }
 
-        // .env 파일이 존재하면 로드
-        if (envFile.exists()) {
-            Dotenv dotenv = Dotenv.configure()
-                    .directory(".")
-                    .filename(".env")
-                    .ignoreIfMissing()
-                    .load();
-
+        if (dotenv != null) {
             // .env의 모든 값을 Map으로 변환
             Map<String, Object> envProperties = dotenv.entries()
                     .stream()
@@ -41,8 +60,10 @@ public class EnvConfig implements EnvironmentPostProcessor {
                     ));
 
             // Spring 환경에 MapPropertySource로 추가
-            MapPropertySource envPropertySource = new MapPropertySource("dotenv", envProperties);
+            MapPropertySource envPropertySource = new MapPropertySource("backend-dotenv", envProperties);
             environment.getPropertySources().addFirst(envPropertySource);
+        } else {
+            log.warn("No backend env file found. Using defaults.");
         }
     }
 }
