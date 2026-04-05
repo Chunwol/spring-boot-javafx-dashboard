@@ -41,6 +41,26 @@ import org.controlsfx.validation.Validator;
  * 대시보드 위젯(텍스트/이미지 아이템) CRUD 및 UI 렌더링 모듈.
  */
 public class DashboardWidgetModule {
+    /**
+     * 텍스트 위젯 이름 인라인 변경 (id, 새 이름, 완료 콜백)
+     */
+    public void renameTextItem(Long id, String newName, Runnable onComplete) {
+        if (id == null || newName == null || newName.isBlank()) return;
+        long dashboardId = dashboardIdSupplier.getAsLong();
+        String path = "/dashboard/texts/" + id + "/rename";
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("name", newName);
+        if (dashboardId > 0) payload.put("dashboardId", dashboardId);
+        apiClient.putJson(path, payload)
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    loadTextItems();
+                    if (onComplete != null) onComplete.run();
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이름 변경 실패: " + ex.getMessage()).showAndWait());
+                    return null;
+                });
+    }
 
     private final ApiClient apiClient;
     private final ObjectMapper objectMapper;
@@ -172,9 +192,12 @@ public class DashboardWidgetModule {
         validationSupport.registerValidator(
             input,
             Validator.createPredicateValidator(
-                (TextArea textArea) -> textArea != null
-                    && textArea.getText() != null
-                    && !textArea.getText().trim().isEmpty(),
+                (Object value) -> {
+                    if (value instanceof TextArea textArea) {
+                        return textArea.getText() != null && !textArea.getText().trim().isEmpty();
+                    }
+                    return false;
+                },
                 "텍스트 내용을 입력하세요."
             )
         );

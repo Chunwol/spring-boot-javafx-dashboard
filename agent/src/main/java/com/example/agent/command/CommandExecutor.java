@@ -1,6 +1,7 @@
 package com.example.agent.command;
 
 import com.example.agent.config.AgentConfig;
+import com.example.agent.config.AgentConfigLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
@@ -12,6 +13,7 @@ import java.net.*;
 import java.nio.file.*;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -22,15 +24,25 @@ public class CommandExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(CommandExecutor.class);
     private static final int OUTPUT_LIMIT = 4 * 1024; // 4KB
+    private static final String RUN_MODE_BACKGROUND = "BACKGROUND";
+    private static final String WINDOW_MODE_VISIBLE = "VISIBLE";
 
     private final AgentConfig config;
+    private final AgentConfigLoader configLoader;
     private final OkHttpClient httpClient;
     private final ObjectMapper mapper;
+    private final PendingCommandResultStore pendingResultStore;
 
-    public CommandExecutor(AgentConfig config, OkHttpClient httpClient, ObjectMapper mapper) {
+    public CommandExecutor(AgentConfig config,
+                           AgentConfigLoader configLoader,
+                           OkHttpClient httpClient,
+                           ObjectMapper mapper,
+                           PendingCommandResultStore pendingResultStore) {
         this.config = config;
+        this.configLoader = configLoader;
         this.httpClient = httpClient;
         this.mapper = mapper;
+        this.pendingResultStore = pendingResultStore;
     }
 
     /**
@@ -63,10 +75,23 @@ public class CommandExecutor {
                 case "WOL_RELAY"  -> executeWolRelay(payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
-            sendResult(taskId, result);
+            persistAndSendResult(taskId, result);
         } catch (Exception e) {
             log.error("명령 실행 실패 taskId={}: {}", taskId, e.getMessage());
-            sendResult(taskId, new CommandResult(1, "", e.getMessage()));
+            persistAndSendResult(taskId, new CommandResult(1, "", e.getMessage()));
+        }
+    }
+
+    public void flushPendingResults() {
+        if (config.getAgentToken() == null || config.getAgentToken().isBlank()) {
+            return;
+        }
+        List<PendingCommandResultStore.PendingCommandResult> pendingResults = pendingResultStore.findAll();
+        for (PendingCommandResultStore.PendingCommandResult pending : pendingResults) {
+            boolean delivered = sendStoredResult(pending);
+            if (!delivered) {
+                break;
+            }
         }
     }
 
@@ -79,7 +104,14 @@ public class CommandExecutor {
                     .header("X-Agent-Token", config.getAgentToken())
                     .post(RequestBody.create("{}", MediaType.parse("application/json")))
                     .build();
-            httpClient.newCall(req).execute().close();
+            try (Response resp = httpClient.newCall(req).execute()) {
+                if (!resp.isSuccessful()) {
+                    log.warn("ACK 전송 응답 비정상 taskId={} HTTP={}", taskId, resp.code());
+                    if (resp.code() == 401 || resp.code() == 403) {
+                        handleAuthFailure("ACK", taskId, resp.code());
+                    }
+                }
+            }
         } catch (Exception e) {
             log.warn("ACK 전송 실패 taskId={}: {}", taskId, e.getMessage());
         }
@@ -87,12 +119,29 @@ public class CommandExecutor {
 
     // ─── Result ─────────────────────────────────────────────────────────
 
-    private void sendResult(long taskId, CommandResult result) {
+    private void persistAndSendResult(long taskId, CommandResult result) {
+        CommandResult sanitized = new CommandResult(
+                result.exitCode(),
+                truncate(result.stdout()),
+                truncate(result.stderr())
+        );
+        pendingResultStore.upsert(taskId, sanitized);
+        sendStoredResult(new PendingCommandResultStore.PendingCommandResult(
+                taskId,
+                sanitized.exitCode(),
+                sanitized.stdout(),
+                sanitized.stderr(),
+                java.time.LocalDateTime.now()
+        ));
+    }
+
+    private boolean sendStoredResult(PendingCommandResultStore.PendingCommandResult pending) {
+        long taskId = pending.taskId();
         try {
             String body = mapper.writeValueAsString(java.util.Map.of(
-                    "exitCode", result.exitCode(),
-                    "stdout",   truncate(result.stdout()),
-                    "stderr",   truncate(result.stderr())
+                    "exitCode", pending.exitCode(),
+                    "stdout", pending.stdout(),
+                    "stderr", pending.stderr()
             ));
             Request req = new Request.Builder()
                     .url(config.getServerUrl() + "/api/v1/agent/commands/" + taskId + "/result")
@@ -100,10 +149,21 @@ public class CommandExecutor {
                     .post(RequestBody.create(body, MediaType.parse("application/json")))
                     .build();
             try (Response resp = httpClient.newCall(req).execute()) {
-                log.info("결과 보고 taskId={} HTTP={}", taskId, resp.code());
+                if (resp.isSuccessful()) {
+                    log.info("결과 보고 taskId={} HTTP={}", taskId, resp.code());
+                    pendingResultStore.remove(taskId);
+                    return true;
+                } else {
+                    log.warn("결과 보고 실패 taskId={} HTTP={}", taskId, resp.code());
+                    if (resp.code() == 401 || resp.code() == 403) {
+                        handleAuthFailure("RESULT", taskId, resp.code());
+                    }
+                    return false;
+                }
             }
         } catch (Exception e) {
             log.error("결과 보고 실패 taskId={}: {}", taskId, e.getMessage());
+            return false;
         }
     }
 
@@ -133,48 +193,75 @@ public class CommandExecutor {
             return new CommandResult(1, "", "scriptUrl 누락");
         }
 
-        // 절대 URL이 아닌 경우 서버 base URL 붙임
-        String url = scriptUrl.startsWith("http") ? scriptUrl
-                : config.getServerUrl() + scriptUrl;
+        JsonNode p = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+        String runMode = p.has("runMode") ? p.get("runMode").asText("FOREGROUND") : "FOREGROUND";
+        boolean background = RUN_MODE_BACKGROUND.equalsIgnoreCase(runMode);
+        String windowMode = p.has("windowMode") ? p.get("windowMode").asText("HIDDEN") : "HIDDEN";
+        boolean visibleWindow = WINDOW_MODE_VISIBLE.equalsIgnoreCase(windowMode);
 
-        Path tmpDir = Files.createTempDirectory("pcagent-ps1-");
-        Path tmpFile = tmpDir.resolve("script-" + taskId + ".ps1");
+        Path tmpDir = background
+            ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
+            : Files.createTempDirectory("pcagent-ps1-");
+        Path tmpFile = background
+            ? tmpDir.resolve("script-" + taskId + "-" + System.currentTimeMillis() + ".ps1")
+            : tmpDir.resolve("script-" + taskId + ".ps1");
 
         try {
             // 다운로드
             byte[] scriptBytes;
-            Request dlReq = new Request.Builder()
-                    .url(url)
-                    .header("X-Agent-Token", config.getAgentToken())
-                    .get()
-                    .build();
-            try (Response resp = httpClient.newCall(dlReq).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) {
-                    return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
+            String source = scriptUrl.trim();
+            Path localPath = resolveLocalScriptPath(source);
+            if (localPath != null) {
+                if (!Files.exists(localPath)) {
+                    return new CommandResult(1, "", "로컬 스크립트 파일 없음: " + localPath);
                 }
-                scriptBytes = resp.body().bytes();
-                // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
-                String serverHash = resp.header("X-Script-SHA256");
-                if (serverHash != null && !serverHash.isBlank()) {
-                    String localHash = sha256(scriptBytes);
-                    if (!localHash.equalsIgnoreCase(serverHash)) {
-                        return new CommandResult(1, "", "스크립트 무결성 검증 실패");
+                scriptBytes = Files.readAllBytes(localPath);
+            } else {
+                String url = resolveRemoteScriptUrl(source);
+                Request dlReq = new Request.Builder()
+                        .url(url)
+                        .header("X-Agent-Token", config.getAgentToken())
+                        .get()
+                        .build();
+                try (Response resp = httpClient.newCall(dlReq).execute()) {
+                    if (!resp.isSuccessful() || resp.body() == null) {
+                        return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
+                    }
+                    scriptBytes = resp.body().bytes();
+                    // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
+                    String serverHash = resp.header("X-Script-SHA256");
+                    if (serverHash != null && !serverHash.isBlank()) {
+                        String localHash = sha256(scriptBytes);
+                        if (!localHash.equalsIgnoreCase(serverHash)) {
+                            return new CommandResult(1, "", "스크립트 무결성 검증 실패");
+                        }
                     }
                 }
             }
             Files.write(tmpFile, scriptBytes);
 
-            // payload에서 args 추출
-            JsonNode p = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
             String args = p.has("args") ? p.get("args").asText() : "";
 
-            Process proc = new ProcessBuilder(
-                    "powershell.exe",
-                    "-ExecutionPolicy", "Bypass",
-                    "-Scope", "Process",
-                    "-File", tmpFile.toAbsolutePath().toString(),
-                    args
-            ).redirectErrorStream(false).start();
+            java.util.List<String> command = new java.util.ArrayList<>();
+            command.add("powershell.exe");
+            command.add("-NoProfile");
+            command.add("-WindowStyle");
+            command.add(visibleWindow ? "Normal" : "Hidden");
+            command.add("-ExecutionPolicy");
+            command.add("Bypass");
+            command.add("-File");
+            command.add(tmpFile.toAbsolutePath().toString());
+            if (args != null && !args.isBlank()) {
+                command.add(args);
+            }
+
+            Process proc = new ProcessBuilder(command)
+                    .redirectErrorStream(false)
+                    .start();
+
+            if (background) {
+                return new CommandResult(0, "백그라운드 실행 시작", "");
+            }
 
             try {
                 boolean finished = proc.waitFor(5, TimeUnit.MINUTES);
@@ -190,8 +277,10 @@ public class CommandExecutor {
             }
         } finally {
             // 임시 파일 정리 (예외 발생 시에도 보장)
-            try { Files.deleteIfExists(tmpFile); } catch (IOException ignored) {}
-            try { Files.deleteIfExists(tmpDir); } catch (IOException ignored) {}
+            if (!background) {
+                try { Files.deleteIfExists(tmpFile); } catch (IOException ignored) {}
+                try { Files.deleteIfExists(tmpDir); } catch (IOException ignored) {}
+            }
         }
     }
 
@@ -246,6 +335,47 @@ public class CommandExecutor {
     private static String truncate(String s) {
         if (s == null) return "";
         return s.length() <= OUTPUT_LIMIT ? s : s.substring(0, OUTPUT_LIMIT);
+    }
+
+    private void handleAuthFailure(String channel, long taskId, int statusCode) {
+        log.warn("{} 인증 실패(taskId={}, HTTP={}) -> 토큰 초기화 후 자동 재등록 유도", channel, taskId, statusCode);
+        try {
+            configLoader.saveToken(config, "");
+        } catch (Exception e) {
+            log.warn("토큰 초기화 실패 taskId={}: {}", taskId, e.getMessage());
+        }
+    }
+
+    private String resolveRemoteScriptUrl(String scriptUrl) {
+        if (scriptUrl.startsWith("http://") || scriptUrl.startsWith("https://")) {
+            return scriptUrl;
+        }
+        String base = config.getServerUrl().endsWith("/")
+                ? config.getServerUrl().substring(0, config.getServerUrl().length() - 1)
+                : config.getServerUrl();
+        String path = scriptUrl.startsWith("/") ? scriptUrl : "/" + scriptUrl;
+        return base + path;
+    }
+
+    private Path resolveLocalScriptPath(String scriptUrl) {
+        String s = scriptUrl.trim();
+        // Windows 절대경로 (예: D:\\temp\\a.ps1)
+        if (s.matches("^[A-Za-z]:\\\\.*")) {
+            return Paths.get(s);
+        }
+        // UNC 경로 (예: \\\\server\\share\\a.ps1)
+        if (s.startsWith("\\\\")) {
+            return Paths.get(s);
+        }
+        // file URI
+        if (s.startsWith("file:/")) {
+            try {
+                return Paths.get(URI.create(s));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /** 명령 실행 결과 레코드 */

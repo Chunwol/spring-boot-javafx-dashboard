@@ -44,12 +44,21 @@ public class SchedulerService {
     private long heartbeatTimeoutMinutes;
 
     /** 전달/실행 타임아웃 후 재큐잉까지 대기시간(초) */
-    @Value("${app.command.timeout-seconds:180}")
+    @Value("${app.command.timeout-seconds:45}")
     private long commandTimeoutSeconds;
 
     /** 명령 최대 재시도 횟수 */
     @Value("${app.command.max-retries:3}")
     private int maxCommandRetries;
+
+    @Value("${app.command.verify-offline-timeout-seconds:120}")
+    private long commandVerifyOfflineTimeoutSeconds;
+
+    @Value("${app.command.verify-offline-silence-seconds:40}")
+    private long commandVerifyOfflineSilenceSeconds;
+
+    @Value("${app.command.verify-online-timeout-seconds:240}")
+    private long commandVerifyOnlineTimeoutSeconds;
 
     /** 중복 알림 방지: MAC → 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlertTime = new ConcurrentHashMap<>();
@@ -116,6 +125,11 @@ public class SchedulerService {
         @Scheduled(fixedRate = 60_000, initialDelay = 20_000)
         @org.springframework.transaction.annotation.Transactional
         public void retryStaleCommands() {
+        reconcileStaleCommandsNow();
+        }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void reconcileStaleCommandsNow() {
         LocalDateTime threshold = LocalDateTime.now().minusSeconds(commandTimeoutSeconds);
 
         // DELIVERED 상태에서 ACK 누락된 명령
@@ -127,7 +141,66 @@ public class SchedulerService {
         List<CommandQueue> staleAcked = commandQueueRepository
             .findTop200ByStatusAndAckedAtBeforeOrderByAckedAtAsc("ACKED", threshold);
         staleAcked.forEach(this::handleRetryOrFail);
+
+        reconcilePowerStateVerificationNow();
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void reconcilePowerStateVerificationNow() {
+        LocalDateTime now = LocalDateTime.now();
+        List<CommandQueue> pendingVerifications = commandQueueRepository
+                .findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
+                        List.of("PENDING_OFFLINE", "PENDING_ONLINE"));
+
+        for (CommandQueue cmd : pendingVerifications) {
+            PcMaster pc = pcRepo.findById(cmd.getMacAddress()).orElse(null);
+            if ("PENDING_OFFLINE".equals(cmd.getVerificationStatus())) {
+                if (isOfflineObserved(pc, now)) {
+                    cmd.setVerificationObservedOfflineAt(now);
+                    if ("REBOOT".equalsIgnoreCase(cmd.getCommandType())) {
+                        cmd.setVerificationStatus("PENDING_ONLINE");
+                        cmd.setVerificationDeadlineAt(now.plusSeconds(commandVerifyOnlineTimeoutSeconds));
+                    } else {
+                        cmd.setVerificationStatus("CONFIRMED");
+                        cmd.setVerificationCompletedAt(now);
+                    }
+                    commandQueueRepository.save(cmd);
+                    continue;
+                }
+                if (isDeadlineExceeded(cmd, now)) {
+                    markVerificationFailed(cmd, now,
+                            "power-state verification failed: device did not go offline");
+                }
+                continue;
+            }
+
+            if ("PENDING_ONLINE".equals(cmd.getVerificationStatus())) {
+                if (isOnlineObserved(pc, cmd, now)) {
+                    cmd.setVerificationStatus("CONFIRMED");
+                    cmd.setVerificationCompletedAt(now);
+                    commandQueueRepository.save(cmd);
+                    continue;
+                }
+                if (isDeadlineExceeded(cmd, now)) {
+                    markVerificationFailed(cmd, now,
+                            "power-state verification failed: device did not come back online after reboot");
+                }
+            }
         }
+    }
+
+    public void armPostExecutionVerification(CommandQueue cmd, LocalDateTime now) {
+        clearVerification(cmd);
+        if (!isPowerStateCommand(cmd)) {
+            return;
+        }
+        if (!"COMPLETED".equalsIgnoreCase(cmd.getStatus()) || cmd.getExitCode() == null || cmd.getExitCode() != 0) {
+            return;
+        }
+        cmd.setVerificationStatus("PENDING_OFFLINE");
+        cmd.setVerificationStartedAt(now);
+        cmd.setVerificationDeadlineAt(now.plusSeconds(commandVerifyOfflineTimeoutSeconds));
+    }
 
     // ─── 실시간 부하/문제 신호 모니터 (1분 주기) ───────────────────────────
     @Scheduled(fixedRate = 60_000, initialDelay = 15_000)
@@ -223,10 +296,75 @@ public class SchedulerService {
         cmd.setAckedAt(null);
         cmd.setCompletedAt(null);
         cmd.setIsExecuted(false);
+        clearVerification(cmd);
         commandQueueRepository.save(cmd);
         log.info("[CMD RETRY] taskId={} mac={} retryCount={}",
             cmd.getTaskId(), cmd.getMacAddress(), cmd.getRetryCount());
         }
+
+    private boolean isPowerStateCommand(CommandQueue cmd) {
+        if (cmd == null || cmd.getCommandType() == null) {
+            return false;
+        }
+        String type = cmd.getCommandType().trim().toUpperCase(java.util.Locale.ROOT);
+        return "SHUTDOWN".equals(type) || "REBOOT".equals(type);
+    }
+
+    private boolean isOfflineObserved(PcMaster pc, LocalDateTime now) {
+        if (pc == null) {
+            return true;
+        }
+        if ("OFFLINE".equalsIgnoreCase(pc.getStatus())) {
+            return true;
+        }
+        if (pc.getLastSeen() == null) {
+            return true;
+        }
+        return pc.getLastSeen().isBefore(now.minusSeconds(commandVerifyOfflineSilenceSeconds));
+    }
+
+    private boolean isOnlineObserved(PcMaster pc, CommandQueue cmd, LocalDateTime now) {
+        if (pc == null || !"ONLINE".equalsIgnoreCase(pc.getStatus()) || pc.getLastSeen() == null) {
+            return false;
+        }
+        LocalDateTime threshold = cmd.getVerificationObservedOfflineAt() != null
+                ? cmd.getVerificationObservedOfflineAt()
+                : now.minusSeconds(commandVerifyOfflineSilenceSeconds);
+        return !pc.getLastSeen().isBefore(threshold);
+    }
+
+    private boolean isDeadlineExceeded(CommandQueue cmd, LocalDateTime now) {
+        return cmd.getVerificationDeadlineAt() != null && now.isAfter(cmd.getVerificationDeadlineAt());
+    }
+
+    private void markVerificationFailed(CommandQueue cmd, LocalDateTime now, String message) {
+        cmd.setStatus("FAILED");
+        cmd.setIsExecuted(true);
+        cmd.setVerificationStatus("FAILED");
+        cmd.setVerificationCompletedAt(now);
+        cmd.setCompletedAt(now);
+        cmd.setStderr(appendMessage(cmd.getStderr(), message));
+        commandQueueRepository.save(cmd);
+        log.warn("[CMD VERIFY FAIL] taskId={} mac={} message={}", cmd.getTaskId(), cmd.getMacAddress(), message);
+    }
+
+    private String appendMessage(String current, String message) {
+        if (current == null || current.isBlank()) {
+            return message;
+        }
+        if (current.contains(message)) {
+            return current;
+        }
+        return current + System.lineSeparator() + message;
+    }
+
+    private void clearVerification(CommandQueue cmd) {
+        cmd.setVerificationStatus(null);
+        cmd.setVerificationStartedAt(null);
+        cmd.setVerificationDeadlineAt(null);
+        cmd.setVerificationObservedOfflineAt(null);
+        cmd.setVerificationCompletedAt(null);
+    }
 
     /** 동일 MAC에 대해 10분 이내 중복 알림 방지 */
     private boolean isAlertCooldownPassed(String mac) {

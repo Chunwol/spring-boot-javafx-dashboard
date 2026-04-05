@@ -70,6 +70,21 @@ public class CommandQueue {
     @Column(name = "scmate_reset_completed_at")
     private LocalDateTime scmateResetCompletedAt;
 
+    @Column(name = "verification_status")
+    private String verificationStatus;
+
+    @Column(name = "verification_started_at")
+    private LocalDateTime verificationStartedAt;
+
+    @Column(name = "verification_deadline_at")
+    private LocalDateTime verificationDeadlineAt;
+
+    @Column(name = "verification_observed_offline_at")
+    private LocalDateTime verificationObservedOfflineAt;
+
+    @Column(name = "verification_completed_at")
+    private LocalDateTime verificationCompletedAt;
+
     public CommandQueue() {
     }
 
@@ -224,5 +239,45 @@ public class CommandQueue {
 
     public void setScmateResetCompletedAt(LocalDateTime scmateResetCompletedAt) {
         this.scmateResetCompletedAt = scmateResetCompletedAt;
+    }
+
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+
+    public LocalDateTime getVerificationStartedAt() {
+        return verificationStartedAt;
+    }
+
+    public void setVerificationStartedAt(LocalDateTime verificationStartedAt) {
+        this.verificationStartedAt = verificationStartedAt;
+    }
+
+    public LocalDateTime getVerificationDeadlineAt() {
+        return verificationDeadlineAt;
+    }
+
+    public void setVerificationDeadlineAt(LocalDateTime verificationDeadlineAt) {
+        this.verificationDeadlineAt = verificationDeadlineAt;
+    }
+
+    public LocalDateTime getVerificationObservedOfflineAt() {
+        return verificationObservedOfflineAt;
+    }
+
+    public void setVerificationObservedOfflineAt(LocalDateTime verificationObservedOfflineAt) {
+        this.verificationObservedOfflineAt = verificationObservedOfflineAt;
+    }
+
+    public LocalDateTime getVerificationCompletedAt() {
+        return verificationCompletedAt;
+    }
+
+    public void setVerificationCompletedAt(LocalDateTime verificationCompletedAt) {
+        this.verificationCompletedAt = verificationCompletedAt;
     }
 }

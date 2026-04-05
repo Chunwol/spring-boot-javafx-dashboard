@@ -18,8 +18,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.Consumer;
 
 public class ApiClient {
     private static final Logger log = LoggerFactory.getLogger(ApiClient.class);
@@ -89,6 +91,9 @@ public class ApiClient {
     private volatile String baseUrl;
     private volatile String wsUrl;
     private volatile String bearerToken;
+    private volatile Consumer<Throwable> connectionFailureHandler;
+    private volatile Consumer<ApiClientException> authFailureHandler;
+    private final AtomicBoolean authFailureNotified = new AtomicBoolean(false);
 
     public ApiClient() {
         this(DEFAULT_BASE_URL);
@@ -113,6 +118,17 @@ public class ApiClient {
 
     public void setBearerToken(String bearerToken) {
         this.bearerToken = bearerToken;
+        if (bearerToken != null && !bearerToken.isBlank()) {
+            authFailureNotified.set(false);
+        }
+    }
+
+    public void setConnectionFailureHandler(Consumer<Throwable> handler) {
+        this.connectionFailureHandler = handler;
+    }
+
+    public void setAuthFailureHandler(Consumer<ApiClientException> handler) {
+        this.authFailureHandler = handler;
     }
 
     public String getBearerToken() {
@@ -293,7 +309,9 @@ public class ApiClient {
                     if (retriesLeft > 0) {
                         return sendWithRetry(request, retriesLeft - 1);
                     }
-                    return CompletableFuture.<HttpResponse<String>>failedFuture(unwrap(error));
+                    Throwable unwrapped = unwrap(error);
+                    notifyConnectionFailure(unwrapped);
+                    return CompletableFuture.<HttpResponse<String>>failedFuture(unwrapped);
                 })
                 .thenCompose(future -> future);
     }
@@ -304,9 +322,36 @@ public class ApiClient {
                     if (error == null) {
                         return CompletableFuture.completedFuture(response);
                     }
-                    return CompletableFuture.<HttpResponse<byte[]>>failedFuture(unwrap(error));
+                    Throwable unwrapped = unwrap(error);
+                    notifyConnectionFailure(unwrapped);
+                    return CompletableFuture.<HttpResponse<byte[]>>failedFuture(unwrapped);
                 })
                 .thenCompose(future -> future);
+    }
+
+    private void notifyConnectionFailure(Throwable error) {
+        Consumer<Throwable> handler = this.connectionFailureHandler;
+        if (handler == null || error == null) {
+            return;
+        }
+        Throwable root = unwrap(error);
+        if (root instanceof java.net.ConnectException
+                || root instanceof java.net.UnknownHostException
+                || root instanceof java.net.SocketTimeoutException
+                || root instanceof java.net.http.HttpTimeoutException
+                || root instanceof java.nio.channels.ClosedChannelException) {
+            handler.accept(root);
+        }
+    }
+
+    private void notifyAuthFailure(ApiClientException exception) {
+        Consumer<ApiClientException> handler = this.authFailureHandler;
+        if (handler == null || exception == null) {
+            return;
+        }
+        if (authFailureNotified.compareAndSet(false, true)) {
+            handler.accept(exception);
+        }
     }
 
     private HttpResponse<String> ensureSuccess(HttpResponse<String> response) {
@@ -315,10 +360,14 @@ public class ApiClient {
             return response;
         }
         if (code == 401) {
-            throw new CompletionException(new ApiClientException(code, "인증이 필요합니다. 다시 로그인해주세요."));
+            ApiClientException exception = new ApiClientException(code, "인증이 필요합니다. 다시 로그인해주세요.");
+            notifyAuthFailure(exception);
+            throw new CompletionException(exception);
         }
         if (code == 403) {
-            throw new CompletionException(new ApiClientException(code, "권한이 없거나 로그인 세션이 만료되었습니다."));
+            ApiClientException exception = new ApiClientException(code, "권한이 없거나 로그인 세션이 만료되었습니다.");
+            notifyAuthFailure(exception);
+            throw new CompletionException(exception);
         }
         throw new CompletionException(new ApiClientException(code, extractMessage(response.body())));
     }

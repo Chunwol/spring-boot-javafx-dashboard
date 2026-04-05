@@ -65,10 +65,10 @@ cp .env.example .env
 # (자세한 설정 방법은 ENV_GUIDE.md 참고)
 
 # 3. 백엔드 실행
-./gradlew :backend:bootRun
+./scripts/run-backend.bat
 
-# 4. 프론트엔드 실행 (다른 터미널에서)
-./gradlew :frontend:run
+# 4. 프론트엔드 개발 실행 (다른 터미널에서)
+./scripts/run-frontend-dev.bat
 ```
 
 ### 상세 설정
@@ -102,16 +102,19 @@ JWT_SECRET=your-secret-key
 ## 실행 방법
 
 1. 백엔드 서버를 실행합니다:
-   ```
-   cd backend
-   ./gradlew bootRun
-   ```
+       ```bat
+       scripts\run-backend.bat
+       ```
 
 2. 프론트엔드 애플리케이션을 실행합니다:
-   ```
-   cd frontend
-   ./gradlew run
-   ```
+       ```bat
+       scripts\run-frontend-dev.bat
+       ```
+
+3. 패키징된 프론트 EXE를 실행하려면:
+       ```bat
+       scripts\run-frontend.bat
+       ```
 
 ## 운영 스모크 테스트
 
@@ -144,7 +147,7 @@ Windows PowerShell:
 |------|----------|------|
 | **Backend** | `backend-0.0.1-SNAPSHOT.jar` | `backend/build/libs/` |
 | **Agent** | `agent-1.0.0.jar` | `agent/build/libs/` |
-| **Frontend** | `dashboard-0.0.1.jar` | `frontend/build/libs/` |
+| **Frontend** | `ClassroomDashboard.exe` | `frontend/build/package/ClassroomDashboard/` |
 
 ### 빠른 배포 (Windows)
 
@@ -170,6 +173,11 @@ chmod +x scripts/deploy.sh
 ```bash
 # Windows
 .\scripts\build-all.bat
+
+# 개별 빌드
+.\scripts\build-backend.bat
+.\scripts\build-agent.bat
+.\scripts\build-frontend.bat
 
 # Linux/Mac
 ./scripts/build-all.sh

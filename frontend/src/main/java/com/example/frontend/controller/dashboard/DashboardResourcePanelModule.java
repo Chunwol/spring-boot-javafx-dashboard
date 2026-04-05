@@ -90,7 +90,22 @@ public class DashboardResourcePanelModule {
         leftPane.setPrefWidth(270);
         leftPane.setMinWidth(220);
         leftPane.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; "
-                + "-fx-border-color: #dbe5f1; -fx-border-radius: 12;");
+            + "-fx-border-color: #dbe5f1; -fx-border-radius: 12;");
+
+        // 기본값: 작은 폰트 스타일 적용
+        javafx.scene.Scene scene = leftPane.getScene();
+        if (scene == null) {
+            Platform.runLater(() -> {
+                javafx.scene.Scene s = leftPane.getScene();
+                if (s != null && s.getRoot() != null) {
+                    s.getRoot().getStyleClass().removeAll("font-large");
+                    s.getRoot().getStyleClass().add("font-small");
+                }
+            });
+        } else if (scene.getRoot() != null) {
+            scene.getRoot().getStyleClass().removeAll("font-large");
+            scene.getRoot().getStyleClass().add("font-small");
+        }
 
         Label listTitle = new Label("리소스");
         listTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
@@ -193,9 +208,46 @@ public class DashboardResourcePanelModule {
 
                 Label nameLabel = new Label(model.name());
                 nameLabel.setStyle("-fx-font-weight: 600;");
+                // 인라인 편집용 TextField
+                javafx.scene.control.TextField nameField = new javafx.scene.control.TextField(model.name());
+                nameField.setVisible(false);
+                nameField.setManaged(false);
+                nameField.setPrefWidth(120);
+
+                // 더블클릭 시 편집 모드 진입
+                nameLabel.setOnMouseClicked(e -> {
+                    if (e.getClickCount() == 2 && editModeSupplier.getAsBoolean()) {
+                        nameLabel.setVisible(false);
+                        nameLabel.setManaged(false);
+                        nameField.setVisible(true);
+                        nameField.setManaged(true);
+                        nameField.requestFocus();
+                        nameField.selectAll();
+                    }
+                });
+                // 엔터/포커스아웃 시 이름 변경
+                Runnable commitEdit = () -> {
+                    String newName = nameField.getText().trim();
+                    if (!newName.isEmpty() && !newName.equals(model.name())) {
+                        // 패널/위젯/강의실 이름 변경 API 호출
+                        if (model.kind() == ResourceKind.CLASSROOM && model.refId() != null) {
+                            classroomModule.renameGroup(model.refId(), newName, () -> refreshListView());
+                        } else if (model.kind() == ResourceKind.TEXT && model.refId() != null) {
+                            widgetModule.renameTextItem(model.refId(), newName, () -> refreshListView());
+                        } // 기타 타입 확장 가능
+                    }
+                    nameLabel.setText(newName.isEmpty() ? model.name() : newName);
+                    nameLabel.setVisible(true);
+                    nameLabel.setManaged(true);
+                    nameField.setVisible(false);
+                    nameField.setManaged(false);
+                };
+                nameField.setOnAction(e -> commitEdit.run());
+                nameField.focusedProperty().addListener((obs, oldV, newV) -> { if (!newV) commitEdit.run(); });
+
                 Label subLabel = new Label(model.subLabel());
                 subLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-                VBox textBox = new VBox(2, nameLabel, subLabel);
+                VBox textBox = new VBox(2, nameLabel, nameField, subLabel);
 
                 Region spacer = new Region();
                 HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -301,10 +353,23 @@ public class DashboardResourcePanelModule {
 
     private Button tinyDeleteButton(String text) {
         Button button = new Button(text);
-        button.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 10px; "
-                + "-fx-font-weight: 700; -fx-background-radius: 6; -fx-padding: 4 8 4 8;");
-        button.setFocusTraversable(false);
+        button.setStyle("-fx-background-color: #c81d25; -fx-text-fill: #fff; -fx-font-size: 12px; "
+            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
+            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.13), 4, 0, 0, 1);");
+        button.setFocusTraversable(true);
+        button.setAccessibleText(text + " 버튼");
         button.setOnDragDetected(event -> event.consume());
+        button.setOnMouseEntered(e -> button.setStyle("-fx-background-color: #a61b1b; -fx-text-fill: #fff; -fx-font-size: 12px; "
+            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
+            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 6, 0, 0, 2);"));
+        button.setOnMouseExited(e -> button.setStyle("-fx-background-color: #c81d25; -fx-text-fill: #fff; -fx-font-size: 12px; "
+            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
+            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.13), 4, 0, 0, 1);"));
+        // Tab 키로 접근 가능, 포커스 시 테두리 표시
+        button.focusedProperty().addListener((obs, oldV, newV) -> {
+            if (newV) button.setStyle(button.getStyle() + "-fx-border-color: #2563eb; -fx-border-width: 2;");
+            else button.setStyle(button.getStyle().replace("-fx-border-color: #2563eb; -fx-border-width: 2;", ""));
+        });
         return button;
     }
 
@@ -321,7 +386,6 @@ public class DashboardResourcePanelModule {
         button.setOnAction(e -> {
             ClassroomSummaryDto selected = panelClassroomCombo.getValue();
             if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
                 return;
             }
             List<DashboardPanelDto> panels = viewModel.getCachedDashboardPanels();
@@ -329,7 +393,6 @@ public class DashboardResourcePanelModule {
                     "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
                             && selected.getGroupId().equals(p.getRefGroupId()));
             if (exists) {
-                new Alert(Alert.AlertType.INFORMATION, "Classroom panel already exists on dashboard.").showAndWait();
                 return;
             }
             double[] size = responsiveSizeFn.apply("CLASSROOM");
@@ -357,7 +420,6 @@ public class DashboardResourcePanelModule {
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> {
             if (currentDashboardId.get() == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
                 return;
             }
             double[] size = responsiveSizeFn.apply("DISCONNECT");
@@ -392,11 +454,9 @@ public class DashboardResourcePanelModule {
         button.setOnAction(e -> {
             ClassroomSummaryDto selected = networkClassroomCombo.getValue();
             if (selected == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a classroom first.").showAndWait();
                 return;
             }
             if (currentDashboardId.get() == null) {
-                new Alert(Alert.AlertType.WARNING, "Select a dashboard first.").showAndWait();
                 return;
             }
             double[] size = responsiveSizeFn.apply("NETWORK");

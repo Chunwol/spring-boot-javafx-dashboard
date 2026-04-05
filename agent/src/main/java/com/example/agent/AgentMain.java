@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
 import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -20,7 +21,8 @@ import java.util.concurrent.TimeUnit;
  *
  * 실행 흐름:
  *   1. config.json 로드
- *   2. 서버 health check
+ *   2. 인터넷 연결 확인
+ *   3. 서버 health check
  *   3. agentToken이 없으면 자동 등록 (POST /api/v1/agent/register)
  *   4. 하트비트 스케줄러 시작 (heartbeatIntervalSec ± jitter)
  *   5. 하트비트 응답에서 명령 수신 → CommandExecutor에 위임
@@ -29,6 +31,10 @@ public class AgentMain {
 
     private static final Logger log = LoggerFactory.getLogger(AgentMain.class);
     private static final Random RANDOM = new Random();
+    private static final int SERVER_INITIAL_RETRY = 5;
+    private static final long SERVER_RETRY_SLEEP_MS = 10_000L;
+    private static final long SERVER_BACKOFF_MS = 10 * 60 * 1000L;
+    private static final long INTERNET_RETRY_MS = 30_000L;
 
     public static void main(String[] args) throws InterruptedException {
         log.info("=== PC 관제 에이전트 v1.0.0 시작 ===");
@@ -48,20 +54,7 @@ public class AgentMain {
         HardwareCollector hardware = new HardwareCollector();
         HeartbeatSender heartbeat = new HeartbeatSender(config, configLoader, hardware, httpClient, mapper);
 
-        // 서버 연결 확인 (최대 5회 재시도)
-        boolean serverAlive = false;
-        for (int i = 1; i <= 5; i++) {
-            if (heartbeat.checkServerAlive()) {
-                serverAlive = true;
-                break;
-            }
-            log.warn("서버 연결 대기 중... ({}/5)", i);
-            Thread.sleep(10_000);
-        }
-        if (!serverAlive) {
-            log.error("서버에 연결할 수 없습니다. 에이전트를 종료합니다.");
-            System.exit(1);
-        }
+        waitUntilServerReachable(heartbeat);
 
         // 토큰이 없으면 자동 등록
         if (config.getAgentToken() == null || config.getAgentToken().isBlank()) {
@@ -88,6 +81,14 @@ public class AgentMain {
             return t;
         });
 
+        // 시작 직후 첫 하트비트를 즉시 보내 ONLINE 상태를 빠르게 반영한다.
+        try {
+            heartbeat.send();
+            log.info("초기 하트비트 전송 완료.");
+        } catch (Exception e) {
+            log.warn("초기 하트비트 전송 실패: {}", e.getMessage());
+        }
+
         scheduleNextHeartbeat(scheduler, heartbeat, config);
 
         // 종료 훅
@@ -103,13 +104,53 @@ public class AgentMain {
         Thread.currentThread().join();
     }
 
+    private static void waitUntilServerReachable(HeartbeatSender heartbeat) throws InterruptedException {
+        while (true) {
+            waitForInternetConnection();
+
+            boolean serverAlive = false;
+            for (int i = 1; i <= SERVER_INITIAL_RETRY; i++) {
+                if (heartbeat.checkServerAlive()) {
+                    serverAlive = true;
+                    break;
+                }
+                log.warn("서버 연결 대기 중... ({}/{})", i, SERVER_INITIAL_RETRY);
+                Thread.sleep(SERVER_RETRY_SLEEP_MS);
+            }
+
+            if (serverAlive) {
+                log.info("서버 연결 확인 완료.");
+                return;
+            }
+
+            log.warn("서버 연결 5회 실패. 10분 후 다시 확인합니다.");
+            Thread.sleep(SERVER_BACKOFF_MS);
+        }
+    }
+
+    private static void waitForInternetConnection() throws InterruptedException {
+        while (!isInternetAvailable()) {
+            log.warn("인터넷 연결 없음. 30초 후 재확인합니다.");
+            Thread.sleep(INTERNET_RETRY_MS);
+        }
+    }
+
+    private static boolean isInternetAvailable() {
+        try {
+            InetAddress address = InetAddress.getByName("one.one.one.one");
+            return address.isReachable(3000);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private static void scheduleNextHeartbeat(
             ScheduledExecutorService scheduler,
             HeartbeatSender heartbeat,
             AgentConfig config) {
 
         int jitter = RANDOM.nextInt(config.getJitterSec() * 2 + 1) - config.getJitterSec();
-        int delaySeconds = Math.max(30, config.getHeartbeatIntervalSec() + jitter);
+        int delaySeconds = Math.max(10, config.getHeartbeatIntervalSec() + jitter);
 
         scheduler.schedule(() -> {
             try {

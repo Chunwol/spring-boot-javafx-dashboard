@@ -368,26 +368,30 @@ public class DashboardManagementModule {
             new Alert(Alert.AlertType.WARNING, "설치키를 먼저 불러와 주세요.").show();
             return;
         }
-        String serverUrl = apiBaseUrl.replaceAll("/api/v1$", "");
-        String json = "{\n" +
-                "  \"serverUrl\": \"" + serverUrl + "\",\n" +
-                "  \"installKey\": \"" + key + "\",\n" +
-                "  \"agentToken\": \"\",\n" +
-                "  \"heartbeatIntervalSec\": 120,\n" +
-                "  \"jitterSec\": 30\n" +
-                "}\n";
-        FileChooser fc = new FileChooser();
-        fc.setTitle("설정 파일 저장");
-        fc.setInitialFileName("설정파일_config.json");
-        fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
-        File file = fc.showSaveDialog(sceneSupplier.get().getWindow());
-        if (file == null) return;
-        try {
-            java.nio.file.Files.writeString(file.toPath(), json);
-            new Alert(Alert.AlertType.INFORMATION, "config.json 저장 완료:\n" + file.getAbsolutePath()).show();
-        } catch (IOException e) {
-            new Alert(Alert.AlertType.ERROR, "저장 실패: " + e.getMessage()).show();
-        }
+        
+        // 백엔드 API에서 config.json 다운로드
+        // (현재 연결된 서버 정보 자동 포함)
+        apiClient.getBytes("/agent/config/download")
+                .thenAccept(jsonBytes -> Platform.runLater(() -> {
+                    FileChooser fc = new FileChooser();
+                    fc.setTitle("설정 파일 저장");
+                    fc.setInitialFileName("config.json");
+                    fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
+                    File file = fc.showSaveDialog(sceneSupplier.get().getWindow());
+                    if (file == null) return;
+                    try {
+                        Files.write(file.toPath(), jsonBytes);
+                        new Alert(Alert.AlertType.INFORMATION, "설정 파일이 저장되었습니다:\n" + file.getAbsolutePath()).show();
+                    } catch (IOException e) {
+                        new Alert(Alert.AlertType.ERROR, "파일 저장 실패: " + e.getMessage()).show();
+                    }
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        new Alert(Alert.AlertType.ERROR, "설정 파일 다운로드 실패: " + ex.getMessage()).show();
+                    });
+                    return null;
+                });
     }
 
     private VBox buildIpRangeBox() {
@@ -721,6 +725,9 @@ public class DashboardManagementModule {
             })
             .exceptionally(ex -> {
                 log.warn("Failed to load classrooms", ex);
+                if (isAuthExpired(ex)) {
+                    return null;
+                }
                 Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                         "강의실 목록 조회 실패: " + errorMessage(ex)).show());
                 return null;
@@ -739,6 +746,9 @@ public class DashboardManagementModule {
                 })
                 .exceptionally(ex -> {
                     log.warn("Failed to load IP ranges for group {}", group, ex);
+                    if (isAuthExpired(ex)) {
+                        return null;
+                    }
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                             "IP 대역 목록 조회 실패: " + errorMessage(ex)).show());
                     return null;
@@ -758,6 +768,9 @@ public class DashboardManagementModule {
                 })
                 .exceptionally(ex -> {
                     log.warn("Failed to load teacher devices for group {}", selected.getGroupId(), ex);
+                    if (isAuthExpired(ex)) {
+                        return null;
+                    }
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
                             "교사 PC 목록 조회 실패: " + errorMessage(ex)).show());
                     return null;
@@ -1220,7 +1233,9 @@ public class DashboardManagementModule {
         SCRIPT_EXECUTOR.execute(() -> {
             try {
                 HttpRequest uploadRequest = MultipartUtil
-                        .newMultipartRequest(apiBaseUrl + "/scripts", Map.of("file", file.toPath().toString()))
+                    .newMultipartRequest(apiBaseUrl + "/scripts",
+                        Map.of("file", file.toPath().toString()),
+                        buildAuthHeaders())
                         .build();
                 HttpResponse<String> uploadResponse = httpClient.send(uploadRequest, HttpResponse.BodyHandlers.ofString());
 
@@ -1282,6 +1297,24 @@ public class DashboardManagementModule {
         if (cause == null) return "알 수 없는 오류";
         String msg = cause.getMessage();
         return msg == null || msg.isBlank() ? cause.toString() : msg;
+    }
+
+    private boolean isAuthExpired(Throwable ex) {
+        Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
+                ? ex.getCause()
+                : ex;
+        if (cause instanceof com.example.frontend.service.ApiClientException apiEx) {
+            return apiEx.getStatusCode() == 401 || apiEx.getStatusCode() == 403;
+        }
+        return false;
+    }
+
+    private Map<String, String> buildAuthHeaders() {
+        String bearerToken = apiClient.getBearerToken();
+        if (bearerToken == null || bearerToken.isBlank()) {
+            return Map.of();
+        }
+        return Map.of("Authorization", "Bearer " + bearerToken);
     }
 
     private void showReportDateDialog(String defaultType) {

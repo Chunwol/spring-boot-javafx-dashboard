@@ -48,6 +48,7 @@ public class DashboardRealtimeModule {
 
     private Runnable onDashboardMessage;
     private Consumer<String> onAlertMessage;
+    private Runnable onConnectionLost;
 
     public DashboardRealtimeModule() {
         this(com.example.frontend.service.ApiClient.getInstance().getWsUrl());
@@ -64,8 +65,13 @@ public class DashboardRealtimeModule {
      * @param onAlert     알림 메시지 수신 시 호출 (payload = JSON 문자열)
      */
     public void start(Runnable onDashboard, Consumer<String> onAlert) {
+        start(onDashboard, onAlert, null);
+    }
+
+    public void start(Runnable onDashboard, Consumer<String> onAlert, Runnable onConnectionLost) {
         this.onDashboardMessage = onDashboard;
         this.onAlertMessage = onAlert;
+        this.onConnectionLost = onConnectionLost;
         stopped = false;
         if (activeSession != null && activeSession.isConnected()) {
             log.debug("[WS] 이미 연결된 세션이 있어 재사용합니다: {}", wsUrl);
@@ -118,6 +124,7 @@ public class DashboardRealtimeModule {
             public void handleTransportError(StompSession session, Throwable ex) {
                 connecting.set(false);
                 log.warn("[WS] Transport error", ex);
+                notifyConnectionLost();
                 scheduleReconnect();
             }
 
@@ -132,9 +139,17 @@ public class DashboardRealtimeModule {
                 // ERROR frames
                 connecting.set(false);
                 log.warn("[WS] ERROR frame: {}", payload);
+                notifyConnectionLost();
                 scheduleReconnect();
             }
         });
+    }
+
+    private void notifyConnectionLost() {
+        if (onConnectionLost == null) {
+            return;
+        }
+        Platform.runLater(onConnectionLost);
     }
 
     private void subscribeTopics(StompSession session) {

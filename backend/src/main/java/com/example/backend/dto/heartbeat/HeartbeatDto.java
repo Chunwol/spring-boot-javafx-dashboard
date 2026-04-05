@@ -11,6 +11,7 @@ public class HeartbeatDto {
     private String macAddress;
     private String hostname;
     private String ipAddress;
+    private String agentSessionId;
 
     /**
      * 하위 호환용 트래픽 필드.

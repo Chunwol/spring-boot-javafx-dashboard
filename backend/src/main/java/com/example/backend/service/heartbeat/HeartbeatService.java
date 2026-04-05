@@ -16,9 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,6 +32,8 @@ import java.util.concurrent.ConcurrentMap;
 @Service
 @RequiredArgsConstructor
 public class HeartbeatService {
+
+    private static final Logger log = LoggerFactory.getLogger(HeartbeatService.class);
 
     private final PcMasterRepository pcMasterRepository;
     private final ClassroomResolutionService classroomResolutionService;
@@ -41,6 +46,9 @@ public class HeartbeatService {
 
     @Value("${app.traffic.log-min-interval-seconds:30}")
     private int trafficLogMinIntervalSeconds;
+
+    @Value("${app.command.max-retries:3}")
+    private int maxCommandRetries;
 
     private final ConcurrentMap<String, LocalDateTime> lastPcPersistedAt = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, LocalDateTime> lastTrafficPersistedAt = new ConcurrentHashMap<>();
@@ -68,10 +76,12 @@ public class HeartbeatService {
         String previousStatus = pc.getStatus();
         String previousRole = pc.getRole();
         Long previousGroupId = pc.getGroupId();
+        String previousAgentSessionId = pc.getLastAgentSessionId();
 
         pc.setPcName(heartbeat.getHostname());
         pc.setIpAddress(heartbeat.getIpAddress());
         pc.setStatus("ONLINE");
+        pc.setLastAgentSessionId(normalizeSessionId(heartbeat.getAgentSessionId()));
 
         // 자동 그룹핑 (IP 매칭 실패 시 기존 groupId를 해제)
         Long groupId = classroomResolutionService.resolveGroupIdByIp(heartbeat.getIpAddress());
@@ -95,7 +105,8 @@ public class HeartbeatService {
             || !Objects.equals(previousIp, pc.getIpAddress())
             || !Objects.equals(previousStatus, pc.getStatus())
             || !Objects.equals(previousRole, pc.getRole())
-            || !Objects.equals(previousGroupId, pc.getGroupId());
+            || !Objects.equals(previousGroupId, pc.getGroupId())
+            || !Objects.equals(previousAgentSessionId, pc.getLastAgentSessionId());
         boolean shouldPersistPc = pcStateChanged || shouldPersistByInterval(mac, now, lastPcPersistedAt,
             heartbeatPersistIntervalSeconds);
         if (shouldPersistPc) {
@@ -103,6 +114,8 @@ public class HeartbeatService {
             pcMasterRepository.save(pc);
             lastPcPersistedAt.put(mac, now);
         }
+
+        handleAgentSessionChange(mac, previousAgentSessionId, pc.getLastAgentSessionId(), now);
 
         // SCMATE 초기화 복구 완료 자동 감지
         // PC가 OFFLINE → ONLINE으로 복귀하면 SCMATE 복구 완료로 표시
@@ -195,6 +208,51 @@ public class HeartbeatService {
             return "";
         }
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private String normalizeSessionId(String sessionId) {
+        if (sessionId == null) {
+            return null;
+        }
+        String trimmed = sessionId.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private void handleAgentSessionChange(String mac,
+                                          String previousSessionId,
+                                          String currentSessionId,
+                                          LocalDateTime now) {
+        if (previousSessionId == null || currentSessionId == null || previousSessionId.equals(currentSessionId)) {
+            return;
+        }
+
+        List<CommandQueue> inFlightCommands = commandQueueRepository
+                .findByMacAddressAndStatusInOrderByCreatedAtAsc(mac, List.of("DELIVERED", "ACKED"));
+        if (inFlightCommands.isEmpty()) {
+            return;
+        }
+
+        for (CommandQueue cmd : inFlightCommands) {
+            int retryCount = cmd.getRetryCount() == null ? 0 : cmd.getRetryCount();
+            if (retryCount >= maxCommandRetries) {
+                cmd.setStatus("FAILED");
+                cmd.setCompletedAt(now);
+                cmd.setIsExecuted(true);
+                cmd.setStderr("agent session changed before result reported");
+            } else {
+                cmd.setRetryCount(retryCount + 1);
+                cmd.setStatus("QUEUED");
+                cmd.setDeliveredAt(null);
+                cmd.setAckedAt(null);
+                cmd.setCompletedAt(null);
+                cmd.setIsExecuted(false);
+                cmd.setStderr("agent restarted before result reported; requeued");
+            }
+            commandQueueRepository.save(cmd);
+        }
+
+        log.warn("[CMD SESSION RESET] mac={} previousSessionId={} currentSessionId={} requeued={}",
+                mac, previousSessionId, currentSessionId, inFlightCommands.size());
     }
 
     private boolean shouldPersistByInterval(String mac,

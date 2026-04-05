@@ -1,6 +1,7 @@
 package com.example.frontend.controller.panel;
 
 import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.DashboardService;
 import javafx.scene.layout.VBox;
@@ -26,6 +27,8 @@ import javafx.animation.KeyFrame;
 import javafx.util.Duration;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,7 +74,7 @@ public class NetworkPanelController {
         HBox gaugeRow = createGaugeRow();
 
         Label listTitle = new Label("PC별 트래픽");
-        listTitle.setStyle("-fx-font-size: 12px; -fx-font-weight: bold; -fx-text-fill: #334155;");
+        listTitle.setStyle("-fx-font-size: 15px; -fx-font-weight: 800; -fx-text-fill: #334155;");
 
         this.panel = new VBox(8, gaugeRow, networkChart, listTitle, pcTrafficTable);
         this.panel.setPadding(new Insets(10));
@@ -91,6 +94,9 @@ public class NetworkPanelController {
         chart.setTitle("실시간 전체 네트워크 트래픽");
         chart.setCreateSymbols(false);
         chart.setAnimated(false);
+        xAxis.setStyle("-fx-font-size: 13px;");
+        yAxis.setStyle("-fx-font-size: 13px;");
+        chart.setStyle("-fx-font-size: 13px;");
         chart.getData().add(inboundSeries);
         chart.getData().add(outboundSeries);
         return chart;
@@ -98,30 +104,29 @@ public class NetworkPanelController {
 
     private TableView<Map<String, Object>> createPcTrafficTable() {
         TableView<Map<String, Object>> table = new TableView<>();
-        table.setPrefHeight(380);  // 40개 PC를 간결하게 보이도록 확대
-        table.setFixedCellSize(9.0);  // 셀 높이 압축
+        table.setPrefHeight(300);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("PC 트래픽 데이터가 없습니다."));
+        Label placeholder = new Label("PC 트래픽 데이터가 없습니다.");
+        placeholder.setStyle("-fx-font-size: 13px; -fx-text-fill: #64748b;");
+        table.setPlaceholder(placeholder);
 
         TableColumn<Map<String, Object>, String> pcCol = new TableColumn<>("PC명");
         pcCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
-        pcCol.setPrefWidth(70);
-        pcCol.setStyle("-fx-font-size: 9px;");
+        pcCol.setPrefWidth(90);
 
         TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP주소");
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
-        ipCol.setPrefWidth(85);
-        ipCol.setStyle("-fx-font-size: 9px;");
+        ipCol.setPrefWidth(110);
 
         TableColumn<Map<String, Object>, String> inCol = new TableColumn<>("입력(Mbps)");
         inCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("inboundMbps"))));
-        inCol.setPrefWidth(60);
-        inCol.setStyle("-fx-font-size: 9px; -fx-alignment: CENTER_RIGHT;");
+        inCol.setPrefWidth(80);
+        inCol.setStyle("-fx-alignment: CENTER_RIGHT;");
 
         TableColumn<Map<String, Object>, String> outCol = new TableColumn<>("출력(Mbps)");
         outCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("outboundMbps"))));
-        outCol.setPrefWidth(60);
-        outCol.setStyle("-fx-font-size: 9px; -fx-alignment: CENTER_RIGHT;");
+        outCol.setPrefWidth(80);
+        outCol.setStyle("-fx-alignment: CENTER_RIGHT;");
 
         TableColumn<Map<String, Object>, Double> loadCol = new TableColumn<>("부하율");
         loadCol.setCellValueFactory(d -> new javafx.beans.property.SimpleObjectProperty<>(
@@ -182,7 +187,7 @@ public class NetworkPanelController {
         });
 
         table.getColumns().addAll(pcCol, ipCol, inCol, outCol, loadCol);
-        table.setStyle("-fx-font-family: 'Noto Sans CJK KR'; -fx-font-size: 10px;");
+        table.setStyle("-fx-font-family: 'Noto Sans CJK KR'; -fx-font-size: 14px;");
         return table;
     }
 
@@ -236,6 +241,57 @@ public class NetworkPanelController {
         Platform.runLater(() -> pcTrafficTable.getItems().setAll(rows == null ? List.of() : rows));
     }
 
+    public void refreshAllPcTraffic() {
+        if (summary != null && summary.getGroupId() != null) {
+            dashboardService.fetchClassroomPcTrafficAsync(summary.getGroupId(), this::updatePcTraffic);
+            return;
+        }
+
+        apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
+                .thenCompose(classrooms -> {
+                    if (classrooms == null || classrooms.isEmpty()) {
+                        return CompletableFuture.completedFuture(List.<Map<String, Object>>of());
+                    }
+
+                    List<CompletableFuture<List<Map<String, Object>>>> futures = new ArrayList<>();
+                    for (ClassroomSummaryDto classroom : classrooms) {
+                        if (classroom == null || classroom.getGroupId() == null) {
+                            continue;
+                        }
+                        CompletableFuture<List<Map<String, Object>>> future = apiClient.getJson(
+                                        "/dashboard/classrooms/" + classroom.getGroupId() + "/traffic/pcs",
+                                        new TypeReference<List<Map<String, Object>>>() {})
+                                .exceptionally(ex -> {
+                                    log.warn("Failed to fetch pc traffic for classroom {}", classroom.getGroupId(), ex);
+                                    return List.of();
+                                });
+                        futures.add(future);
+                    }
+
+                    if (futures.isEmpty()) {
+                        return CompletableFuture.completedFuture(List.<Map<String, Object>>of());
+                    }
+
+                    return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                            .thenApply(v -> {
+                                List<Map<String, Object>> merged = new ArrayList<>();
+                                for (CompletableFuture<List<Map<String, Object>>> future : futures) {
+                                    List<Map<String, Object>> rows = future.getNow(List.of());
+                                    if (rows != null && !rows.isEmpty()) {
+                                        merged.addAll(rows);
+                                    }
+                                }
+                                return merged;
+                            });
+                })
+                .thenAccept(this::updatePcTraffic)
+                .exceptionally(ex -> {
+                    log.warn("Failed to fetch all pc traffic", ex);
+                    updatePcTraffic(List.of());
+                    return null;
+                });
+    }
+
     private String str(Object value) {
         if (value == null) {
             return "-";
@@ -265,7 +321,7 @@ public class NetworkPanelController {
 
     private VBox createGaugeBox(String titleText, ProgressBar gauge, Label valueLabel) {
         Label title = new Label(titleText);
-        title.setStyle("-fx-font-size: 11px; -fx-font-weight: bold; -fx-text-fill: #334155;");
+        title.setStyle("-fx-font-size: 15px; -fx-font-weight: 800; -fx-text-fill: #334155;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox top = new HBox(8, title, spacer, valueLabel);
@@ -287,7 +343,7 @@ public class NetworkPanelController {
 
     private Label createGaugeValueLabel() {
         Label label = new Label("0.00 Mbps");
-        label.setStyle("-fx-font-size: 11px; -fx-text-fill: #0f172a; -fx-font-weight: 600;");
+        label.setStyle("-fx-font-size: 15px; -fx-text-fill: #0f172a; -fx-font-weight: 700;");
         return label;
     }
 

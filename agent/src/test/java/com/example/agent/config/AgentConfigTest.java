@@ -12,8 +12,8 @@ class AgentConfigTest {
         assertThat(config.getServerUrl()).isEqualTo("http://localhost:8888");
         assertThat(config.getInstallKey()).isEmpty();
         assertThat(config.getAgentToken()).isEmpty();
-        assertThat(config.getHeartbeatIntervalSec()).isEqualTo(120);
-        assertThat(config.getJitterSec()).isEqualTo(30);
+        assertThat(config.getHeartbeatIntervalSec()).isEqualTo(30);
+        assertThat(config.getJitterSec()).isEqualTo(5);
     }
 
     @Test

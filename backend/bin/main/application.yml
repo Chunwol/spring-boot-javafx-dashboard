@@ -55,6 +55,11 @@ app:
     timeout-minutes: ${HEARTBEAT_TIMEOUT_MINUTES:5}
     interval-seconds: ${HEARTBEAT_INTERVAL_SECONDS:120}
     persist-interval-seconds: ${HEARTBEAT_PERSIST_INTERVAL_SECONDS:30}
+  command:
+    timeout-seconds: ${COMMAND_TIMEOUT_SECONDS:45}
+    verify-offline-timeout-seconds: ${COMMAND_VERIFY_OFFLINE_TIMEOUT_SECONDS:120}
+    verify-offline-silence-seconds: ${COMMAND_VERIFY_OFFLINE_SILENCE_SECONDS:40}
+    verify-online-timeout-seconds: ${COMMAND_VERIFY_ONLINE_TIMEOUT_SECONDS:240}
   traffic:
     alert-threshold-mbps: ${TRAFFIC_ALERT_THRESHOLD_MBPS:100}
     log-min-interval-seconds: ${TRAFFIC_LOG_MIN_INTERVAL_SECONDS:30}

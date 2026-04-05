@@ -60,4 +60,6 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
 
            /** SCMATE 초기화 복구 상태로 명령 조회 */
            List<CommandQueue> findByMacAddressAndScmateResetStatus(String macAddress, String scmateResetStatus);
+
+           List<CommandQueue> findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(List<String> verificationStatuses);
 }

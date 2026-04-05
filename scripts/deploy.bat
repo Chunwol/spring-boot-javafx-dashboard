@@ -72,6 +72,8 @@ echo   • Backend API:  https://pelmon.kro.kr/api/...
 echo   • WebSocket:    wss://pelmon.kro.kr/ws/...
 echo   • Health Check: https://pelmon.kro.kr/health
 echo   • Frontend EXE: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe
+echo   • Backend Run:  scripts\run-backend.bat
+echo   • Frontend Dev: scripts\run-frontend-dev.bat
 echo   • Frontend Run: scripts\run-frontend.bat
 echo   • Agent Run:    scripts\run-agent.bat
 echo.

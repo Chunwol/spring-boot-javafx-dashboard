@@ -29,6 +29,9 @@ public class PcMaster {
     @Column(name = "last_seen")
     private LocalDateTime lastSeen;
 
+    @Column(name = "last_agent_session_id")
+    private String lastAgentSessionId;
+
     @Column(name = "role")
     private String role;
 
@@ -85,6 +88,14 @@ public class PcMaster {
 
     public void setLastSeen(LocalDateTime lastSeen) {
         this.lastSeen = lastSeen;
+    }
+
+    public String getLastAgentSessionId() {
+        return lastAgentSessionId;
+    }
+
+    public void setLastAgentSessionId(String lastAgentSessionId) {
+        this.lastAgentSessionId = lastAgentSessionId;
     }
 
     public String getRole() {

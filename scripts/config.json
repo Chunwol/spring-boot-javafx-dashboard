@@ -1,9 +1,7 @@
 {
-  "serverUrl": "http://192.168.0.1:8080",
-  "installKey": "CHANGE_ME_INSTALL_KEY",
-  "agentToken": "",
-  "heartbeatIntervalSec": 120,
-  "jitterSec": 30,
-  "githubOwner": "",
-  "githubRepo": ""
+  "serverUrl" : "http://127.0.0.1:8888",
+  "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
+  "agentToken" : "agt_16e925f64c1b41769a01b49ae6c36839",
+  "heartbeatIntervalSec" : 30,
+  "jitterSec" : 5
 }

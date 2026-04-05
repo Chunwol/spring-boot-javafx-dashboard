@@ -22,7 +22,7 @@ class AgentConfigLoaderTest {
         AgentConfig config = loader.load();
 
         assertThat(config.getServerUrl()).isEqualTo("http://localhost:8888");
-        assertThat(config.getHeartbeatIntervalSec()).isEqualTo(120);
+        assertThat(config.getHeartbeatIntervalSec()).isEqualTo(30);
     }
 
     @Test
@@ -58,6 +58,7 @@ class AgentConfigLoaderTest {
         AgentConfig config = loader.load();
 
         assertThat(config.getServerUrl()).isEqualTo("http://localhost:8888");
+        assertThat(config.getJitterSec()).isEqualTo(5);
     }
 
     @Test

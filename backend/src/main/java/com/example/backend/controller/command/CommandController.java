@@ -1,11 +1,14 @@
 package com.example.backend.controller.command;
 
 import com.example.backend.dto.command.CommandRequestDto;
+import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.command.CommandQueue;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.audit.AuditService;
+import com.example.backend.service.scheduler.SchedulerService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -14,9 +17,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,10 +46,15 @@ import java.util.stream.Collectors;
 @Tag(name = "Commands", description = "PC 원격 제어 및 명령 관리 API")
 public class CommandController {
 
+    private static final Logger log = LoggerFactory.getLogger(CommandController.class);
+
     private final CommandQueueRepository commandQueueRepository;
     private final PcMasterRepository pcMasterRepository;
+    private final ClassroomGroupRepository classroomGroupRepository;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final JdbcTemplate jdbcTemplate;
+    private final SchedulerService schedulerService;
 
     /**
      * 명령 발행 (POST /api/v1/commands)
@@ -296,6 +307,7 @@ public class CommandController {
         String newStatus = exitCode != null && exitCode == 0 ? "COMPLETED" : "FAILED";
         c.setStatus(newStatus);
         c.setIsExecuted(true);
+        schedulerService.armPostExecutionVerification(c, c.getCompletedAt());
         commandQueueRepository.save(c);
 
         String agentMac = (String) request.getAttribute("agentMac");
@@ -363,9 +375,14 @@ public class CommandController {
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "20")
             @RequestParam(defaultValue = "20") int size) {
+        schedulerService.reconcileStaleCommandsNow();
+        normalizeCommandQueueTimestamps();
+
         if (taskId != null) {
             return commandQueueRepository.findById(taskId)
-                    .map(c -> ResponseEntity.ok(c))
+                .map(c -> ResponseEntity.ok(toCommandView(c,
+                    pcMasterRepository.findById(c.getMacAddress()).orElse(null),
+                    null)))
                     .orElse(ResponseEntity.notFound().build());
         }
 
@@ -381,7 +398,100 @@ public class CommandController {
                 statuses,
                 PageRequest.of(Math.max(0, page), Math.max(1, size))
         );
-        return ResponseEntity.ok(pageResult);
+
+        Map<String, PcMaster> pcByMac = pcMasterRepository.findAllById(
+                        pageResult.getContent().stream()
+                                .map(CommandQueue::getMacAddress)
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.toSet()))
+                .stream()
+                .collect(Collectors.toMap(PcMaster::getMacAddress, pc -> pc));
+
+        Map<Long, String> groupNameById = classroomGroupRepository.findAllById(
+                        pcByMac.values().stream()
+                                .map(PcMaster::getGroupId)
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.toSet()))
+                .stream()
+                .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName));
+
+        Page<Map<String, Object>> viewPage = pageResult.map(c ->
+                toCommandView(c, pcByMac.get(c.getMacAddress()), groupNameById));
+
+        return ResponseEntity.ok(viewPage);
+    }
+
+    private Map<String, Object> toCommandView(CommandQueue c, PcMaster pc, Map<Long, String> groupNameById) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("taskId", c.getTaskId());
+        row.put("macAddress", c.getMacAddress());
+        row.put("commandType", c.getCommandType());
+        row.put("status", c.getStatus());
+        row.put("payloadJson", c.getPayloadJson());
+        row.put("scriptUrl", c.getScriptUrl());
+        row.put("createdAt", c.getCreatedAt());
+        row.put("deliveredAt", c.getDeliveredAt());
+        row.put("ackedAt", c.getAckedAt());
+        row.put("completedAt", c.getCompletedAt());
+        row.put("exitCode", c.getExitCode());
+        row.put("stdout", c.getStdout());
+        row.put("stderr", c.getStderr());
+        row.put("retryCount", c.getRetryCount());
+        row.put("isExecuted", c.getIsExecuted());
+        row.put("verificationStatus", c.getVerificationStatus());
+        row.put("verificationStartedAt", c.getVerificationStartedAt());
+        row.put("verificationDeadlineAt", c.getVerificationDeadlineAt());
+        row.put("verificationObservedOfflineAt", c.getVerificationObservedOfflineAt());
+        row.put("verificationCompletedAt", c.getVerificationCompletedAt());
+        row.put("scmateResetStatus", c.getScmateResetStatus());
+        row.put("scmateResetRequestedAt", c.getScmateResetRequestedAt());
+        row.put("scmateResetCompletedAt", c.getScmateResetCompletedAt());
+
+        if (pc != null) {
+            row.put("pcName", pc.getPcName());
+            row.put("ipAddress", pc.getIpAddress());
+            row.put("groupId", pc.getGroupId());
+            row.put("pcStatus", pc.getStatus());
+            row.put("role", pc.getRole());
+            if (pc.getGroupId() != null && groupNameById != null) {
+                row.put("groupName", groupNameById.get(pc.getGroupId()));
+            }
+        }
+        return row;
+    }
+
+    /**
+     * SQLite에 숫자형 epoch 문자열로 남은 시간값을 datetime text로 정규화한다.
+     * 일부 데이터에서 JDBC Timestamp 파싱 오류가 발생하는 것을 방지한다.
+     */
+    private void normalizeCommandQueueTimestamps() {
+        String[] columns = {
+                "created_at",
+                "delivered_at",
+                "acked_at",
+                "completed_at",
+                "scmate_reset_requested_at",
+                "scmate_reset_completed_at"
+        };
+
+        for (String column : columns) {
+            String sql = "UPDATE command_queue " +
+                    "SET " + column + " = datetime(" +
+                    "CASE " +
+                    "WHEN length(trim(CAST(" + column + " AS TEXT))) >= 13 THEN CAST(substr(trim(CAST(" + column + " AS TEXT)), 1, 10) AS INTEGER) " +
+                    "ELSE CAST(trim(CAST(" + column + " AS TEXT)) AS INTEGER) " +
+                    "END, 'unixepoch') " +
+                    "WHERE " + column + " IS NOT NULL " +
+                    "AND trim(CAST(" + column + " AS TEXT)) <> '' " +
+                    "AND trim(CAST(" + column + " AS TEXT)) GLOB '[0-9]*' " +
+                    "AND trim(CAST(" + column + " AS TEXT)) NOT LIKE '%-%'";
+            try {
+                jdbcTemplate.update(sql);
+            } catch (Exception e) {
+                // SQLite 외 DB에서는 문법 차이가 있을 수 있으므로 조회 자체는 계속 진행한다.
+                log.debug("Timestamp normalization skipped for column {}: {}", column, e.getMessage());
+            }
+        }
     }
 }
 

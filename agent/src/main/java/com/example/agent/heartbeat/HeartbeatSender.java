@@ -1,6 +1,7 @@
 package com.example.agent.heartbeat;
 
 import com.example.agent.command.CommandExecutor;
+import com.example.agent.command.PendingCommandResultStore;
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
 import com.example.agent.hardware.HardwareCollector;
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 서버에 하트비트를 전송하고 응답으로 받은 명령을 처리한다.
@@ -28,6 +30,7 @@ public class HeartbeatSender {
     private final OkHttpClient httpClient;
     private final ObjectMapper mapper;
     private final CommandExecutor commandExecutor;
+    private final String agentSessionId;
 
     public HeartbeatSender(AgentConfig config, AgentConfigLoader configLoader,
                            HardwareCollector hardware, OkHttpClient httpClient,
@@ -37,7 +40,10 @@ public class HeartbeatSender {
         this.hardware = hardware;
         this.httpClient = httpClient;
         this.mapper = mapper;
-        this.commandExecutor = new CommandExecutor(config, httpClient, mapper);
+        this.agentSessionId = UUID.randomUUID().toString();
+        PendingCommandResultStore pendingResultStore = new PendingCommandResultStore(
+            configLoader.getConfigPath().getParent(), mapper);
+        this.commandExecutor = new CommandExecutor(config, configLoader, httpClient, mapper, pendingResultStore);
     }
 
     /**
@@ -51,7 +57,13 @@ public class HeartbeatSender {
                     .get()
                     .build();
             try (Response resp = httpClient.newCall(req).execute()) {
-                return resp.isSuccessful();
+                // 보안 정책으로 /actuator/health가 401/403일 수 있어도
+                // HTTP 응답 자체가 오면 서버 도달은 가능한 상태로 본다.
+                if (resp.code() >= 200 && resp.code() < 300) {
+                    return true;
+                }
+                log.info("서버 health endpoint 응답 코드: {} (도달 성공으로 처리)", resp.code());
+                return true;
             }
         } catch (Exception e) {
             log.warn("서버 health check 실패: {}", e.getMessage());
@@ -104,12 +116,15 @@ public class HeartbeatSender {
      */
     public void send() {
         try {
+            commandExecutor.flushPendingResults();
+
             double[] kbps = hardware.getDeltaKbps();
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("macAddress", hardware.getMacAddress());
             body.put("hostname",   hardware.getHostname());
             body.put("ipAddress",  hardware.getIpAddress());
             body.put("agentVersion", AGENT_VERSION);
+            body.put("agentSessionId", agentSessionId);
             body.put("inboundKbps",  kbps[0]);
             body.put("outboundKbps", kbps[1]);
 
@@ -133,8 +148,15 @@ public class HeartbeatSender {
                     if (cmd != null && !cmd.isNull()) {
                         long taskId = cmd.has("taskId") ? cmd.get("taskId").asLong() : 0;
                         // 비동기로 명령 실행 (하트비트 스레드 블로킹 방지)
-                        Thread cmdThread = new Thread(() -> commandExecutor.execute(cmd),
-                                "cmd-exec-" + taskId);
+                        Thread cmdThread = new Thread(() -> {
+                            commandExecutor.execute(cmd);
+                            // 명령 처리 직후 한 번 더 하트비트를 보내 후속 대기 명령을 빠르게 가져온다.
+                            try {
+                                send();
+                            } catch (Exception e) {
+                                log.debug("추가 하트비트 전송 실패 taskId={}: {}", taskId, e.getMessage());
+                            }
+                        }, "cmd-exec-" + taskId);
                         cmdThread.setDaemon(true);
                         cmdThread.start();
                     }

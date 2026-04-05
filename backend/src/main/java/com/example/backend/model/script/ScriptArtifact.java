@@ -1,5 +1,6 @@
 package com.example.backend.model.script;
 
+import com.example.backend.common.persistence.LenientLocalDateTimeStringConverter;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -28,6 +29,7 @@ public class ScriptArtifact {
     private String contentType;
 
     @Column(name = "created_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime createdAt;
 
     public Long getId() {

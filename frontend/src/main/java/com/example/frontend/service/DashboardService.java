@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -139,6 +140,10 @@ public class DashboardService {
             log.warn("Invalid dashboard create request", e);
             callback.accept(null);
         }
+    }
+
+    public CompletableFuture<String> deleteDashboardAsync(Long dashboardId) {
+        return apiClient.delete("/dashboards/" + dashboardId);
     }
 
     public void fetchDashboardPanelsAsync(Long dashboardId, Consumer<List<DashboardPanelDto>> callback) {

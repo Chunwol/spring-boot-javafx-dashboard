@@ -1,6 +1,13 @@
 .root {
     -fx-font-family: "Segoe UI";
     -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
+    -fx-font-size: 15px;
+}
+.root.font-small {
+    -fx-font-size: 13px;
+}
+.root.font-large {
+    -fx-font-size: 18px;
 }
 
 .label {

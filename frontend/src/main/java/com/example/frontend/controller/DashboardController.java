@@ -20,6 +20,7 @@ import com.example.frontend.controller.dashboard.DashboardPcManagementModule;
 import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.ApiClient;
+import com.example.frontend.service.ApiClientException;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,6 +39,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -118,6 +120,13 @@ public class DashboardController {
     private int viewportSnapshotCount = 0;
     private int fitAllSnapshotCount = 0;
     private boolean awaitingInitialWindowShow = true;
+    private boolean initialFitApplied = false;
+    private String lastFitSignature = "";
+    private double lastFitScale = Double.NaN;
+    private double lastFitHValue = Double.NaN;
+    private double lastFitVValue = Double.NaN;
+    private double lastFitContainerW = Double.NaN;
+    private double lastFitContainerH = Double.NaN;
     private final ChangeListener<Number> sceneWidthListener = (o, oldW, newW) -> {
         if (mainSplitPane != null) {
             mainSplitPane.setDividerPositions(newW.doubleValue() < 1600 ? 0.20 : 0.18);
@@ -152,10 +161,13 @@ public class DashboardController {
     });
     private volatile boolean shutdownRequested = false;
     private final AtomicBoolean snapshotRefreshInFlight = new AtomicBoolean(false);
+    private final AtomicBoolean serverDisconnectHandled = new AtomicBoolean(false);
 
     @FXML
     public void initialize() {
         dashboardViewModel = new DashboardViewModel();
+        ApiClient.getInstance().setConnectionFailureHandler(this::handleServerConnectionLost);
+        ApiClient.getInstance().setAuthFailureHandler(this::handleSessionExpired);
 
         if (rootVBox == null) {
             return;
@@ -192,17 +204,7 @@ public class DashboardController {
             }
             expandCanvasToContentBounds();
             pendingInitialViewportAdjust = false;
-            // 패널 CSS/폰트 렌더링이 완료된 후 전체맞춤 적용.
-            // 즉시 실행하면 bounds가 부정확하므로 짧은 딜레이 후 실행 + 검증 패스 추가.
-            PauseTransition fitDelay = new PauseTransition(Duration.millis(150));
-            fitDelay.setOnFinished(ev -> {
-                fitAllPanelsToViewport(false);
-                // 검증 패스: CSS/폰트 late-layout 후 bounds가 바뀌었을 수 있으므로 재계산
-                PauseTransition verifyPass = new PauseTransition(Duration.millis(250));
-                verifyPass.setOnFinished(ev2 -> fitAllPanelsToViewport(false));
-                verifyPass.play();
-            });
-            fitDelay.play();
+            triggerInitialFitIfNeeded();
         });
 
         rootVBox.sceneProperty().addListener((obs, oldScene, newScene) -> {
@@ -255,7 +257,7 @@ public class DashboardController {
 
         dashboardSelector = new ComboBox<>();
         dashboardSelector.setPromptText("대시보드 선택");
-        dashboardSelector.setPrefWidth(240);
+        dashboardSelector.setPrefWidth(200);
         dashboardSelector.setCellFactory(param -> new ListCell<>() {
             @Override
             protected void updateItem(DashboardInfoDto item, boolean empty) {
@@ -277,6 +279,12 @@ public class DashboardController {
             }
         });
 
+        // 대시보드 삭제 버튼
+        Button deleteDashboardBtn = createIconActionButton("삭제", "mdi2d-delete", "#d73a49", "white");
+        deleteDashboardBtn.setOnAction(e -> handleDeleteDashboard());
+        deleteDashboardBtn.setDisable(true); // 최초엔 비활성화, 목록 로드 후 갱신
+
+        // 대시보드 추가 버튼
         Button addDashboardBtn = createIconActionButton("+ 대시보드", "mdi2p-plus", "#15803d", "white");
         addDashboardBtn.setOnAction(e -> handleCreateDashboard());
 
@@ -298,17 +306,61 @@ public class DashboardController {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        // ComboBox + 삭제 버튼 묶기
+        HBox dashboardBox = new HBox(6, dashboardSelector, deleteDashboardBtn);
+        dashboardBox.setAlignment(Pos.CENTER_LEFT);
+
         topBar.getChildren().addAll(
-                titleBox,
-                dashboardSelector,
-                addDashboardBtn,
-                logoutBtn,
-                statusSummaryLabel,
-                connectivityLabel,
-                spacer,
-                clockLabel
+            titleBox,
+            dashboardBox,
+            addDashboardBtn,
+            logoutBtn,
+            spacer
         );
+        // 대시보드 목록이 바뀔 때마다 삭제 버튼 활성화/비활성화 갱신
+        dashboardSelector.getItems().addListener((javafx.collections.ListChangeListener<DashboardInfoDto>) c -> {
+            updateDeleteDashboardBtnState(deleteDashboardBtn);
+        });
+        dashboardSelector.valueProperty().addListener((obs, ov, nv) -> {
+            updateDeleteDashboardBtnState(deleteDashboardBtn);
+        });
         return topBar;
+    }
+
+    // 대시보드 삭제 버튼 활성화/비활성화 로직
+    private void updateDeleteDashboardBtnState(Button deleteDashboardBtn) {
+        List<DashboardInfoDto> dashboards = dashboardSelector.getItems();
+        DashboardInfoDto selected = dashboardSelector.getValue();
+        deleteDashboardBtn.setDisable(
+            dashboards == null || dashboards.size() <= 1 || selected == null
+        );
+    }
+
+    // 대시보드 삭제 처리
+    private void handleDeleteDashboard() {
+        List<DashboardInfoDto> dashboards = dashboardSelector.getItems();
+        DashboardInfoDto selected = dashboardSelector.getValue();
+        if (dashboards == null || dashboards.size() <= 1 || selected == null) {
+            showToast("대시보드는 최소 1개 이상 존재해야 합니다.", true);
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+                "정말로 대시보드 [" + selected.getName() + "]을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+                ButtonType.YES, ButtonType.NO);
+        confirm.setTitle("대시보드 삭제");
+        confirm.showAndWait().ifPresent(type -> {
+            if (type == ButtonType.YES) {
+                dashboardService.deleteDashboardAsync(selected.getId())
+                        .thenAccept(resp -> Platform.runLater(() -> {
+                            showToast("대시보드가 삭제되었습니다.", false);
+                            loadDashboards();
+                        }))
+                        .exceptionally(ex -> {
+                            Platform.runLater(() -> showToast("대시보드 삭제 실패: " + ex.getMessage(), true));
+                            return null;
+                        });
+            }
+        });
     }
 
     private void handleLogout() {
@@ -347,6 +399,29 @@ public class DashboardController {
                 stage.setTitle("스마트 강의실 대시보드 - 로그인");
                 stage.setMinWidth(420);
                 stage.setMinHeight(320);
+                // 상태바/요약 정보 하단 고정 HBox 추가
+                statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
+                statusSummaryLabel.setTextFill(Color.web("#64748b"));
+                statusSummaryLabel.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
+
+                connectivityLabel = new Label("연결 대기 중");
+                connectivityLabel.setTextFill(Color.web("#64748b"));
+                connectivityLabel.setFont(Font.font("Segoe UI", 12));
+
+                clockLabel = new Label();
+                clockLabel.setTextFill(Color.web("#64748b"));
+                clockLabel.setFont(Font.font("Consolas", FontWeight.BOLD, 16));
+
+                // 하단 상태바 고정
+                HBox statusBar = new HBox(18, statusSummaryLabel, connectivityLabel);
+                Region statusSpacer = new Region();
+                HBox.setHgrow(statusSpacer, Priority.ALWAYS);
+                statusBar.getChildren().addAll(statusSpacer, clockLabel);
+                statusBar.setAlignment(Pos.CENTER_LEFT);
+                statusBar.setPadding(new Insets(8, 18, 8, 18));
+                statusBar.setStyle("-fx-background-color: #f1f5f9; -fx-background-radius: 10; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 6, 0, 0, 1);");
+                rootVBox.getChildren().add(statusBar);
+
                 stage.setMaximized(false);
                 stage.setWidth(460);
                 stage.setHeight(360);
@@ -362,21 +437,10 @@ public class DashboardController {
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabPane.setStyle("-fx-background-insets: 0; -fx-padding: 0 6 6 6; -fx-background-color: #f8fafc;");
 
-        Tab mainTab = new Tab("메인 대시보드", createMainDashboardView());
+        // 1. 대시보드
+        Tab mainTab = new Tab("대시보드", createMainDashboardView());
 
-        networkPanelController = new NetworkPanelController(null);
-        Tab networkTab = new Tab("네트워크 트래픽", networkPanelController.getPanel());
-
-        commandStatusPanelController = new CommandStatusPanelController();
-        Tab commandTab = new Tab("명령 상태", commandStatusPanelController.getPanel());
-
-        Tab manageTab = new Tab("관리", createManagementView());
-        manageTab.setOnSelectionChanged(event -> {
-            if (manageTab.isSelected() && managementModule != null) {
-                managementModule.reloadData();
-            }
-        });
-
+        // 2. PC 관리
         Tab pcManageTab = new Tab("PC 관리", createPcManagementView());
         pcManageTab.setOnSelectionChanged(event -> {
             if (pcManageTab.isSelected() && pcManagementModule != null) {
@@ -384,7 +448,28 @@ public class DashboardController {
             }
         });
 
-        tabPane.getTabs().addAll(mainTab, networkTab, commandTab, manageTab, pcManageTab);
+        // 3. 네트워크
+        networkPanelController = new NetworkPanelController(null);
+        Tab networkTab = new Tab("네트워크", networkPanelController.getPanel());
+        networkTab.setOnSelectionChanged(event -> {
+            if (networkTab.isSelected()) {
+                refreshNetworkTabData();
+            }
+        });
+
+        // 4. 명령
+        commandStatusPanelController = new CommandStatusPanelController();
+        Tab commandTab = new Tab("명령", commandStatusPanelController.getPanel());
+
+        // 5. 설정(기존 관리)
+        Tab manageTab = new Tab("설정", createManagementView());
+        manageTab.setOnSelectionChanged(event -> {
+            if (manageTab.isSelected() && managementModule != null) {
+                managementModule.reloadData();
+            }
+        });
+
+        tabPane.getTabs().addAll(mainTab, pcManageTab, networkTab, commandTab, manageTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
         return tabPane;
     }
@@ -791,8 +876,85 @@ public class DashboardController {
         }
         realtimeModule.start(
                 () -> Platform.runLater(this::refreshDashboardSnapshot),
-                alertPayload -> showToast("실시간 알림 수신", false)
+                alertPayload -> showToast("실시간 알림 수신", false),
+                () -> handleServerConnectionLost(new RuntimeException("WebSocket disconnected"))
         );
+    }
+
+    private void handleServerConnectionLost(Throwable throwable) {
+        if (!serverDisconnectHandled.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(() -> {
+            if (shutdownRequested) {
+                return;
+            }
+            if (connectivityLabel != null) {
+                connectivityLabel.setText("연결 끊김");
+                connectivityLabel.setTextFill(Color.web("#fca5a5"));
+            }
+            forceMoveToLoginWithAlert("서버 연결이 끊어졌습니다. 로그인 페이지로 이동합니다.");
+        });
+    }
+
+    private void handleSessionExpired(ApiClientException exception) {
+        if (!serverDisconnectHandled.compareAndSet(false, true)) {
+            return;
+        }
+        Platform.runLater(() -> {
+            if (shutdownRequested) {
+                return;
+            }
+            if (connectivityLabel != null) {
+                connectivityLabel.setText("세션 만료");
+                connectivityLabel.setTextFill(Color.web("#fca5a5"));
+            }
+            forceMoveToLoginWithAlert("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+        });
+    }
+
+    private void forceMoveToLoginWithAlert(String message) {
+        try {
+            ApiClient.getInstance().setBearerToken(null);
+            var fxmlUrl = getClass().getResource("/fxml/login.fxml");
+            if (fxmlUrl == null) {
+                showToast("로그인 화면을 찾을 수 없습니다.", true);
+                return;
+            }
+
+            FXMLLoader loader = new FXMLLoader(fxmlUrl);
+            Parent loginRoot = loader.load();
+            LoginController loginController = loader.getController();
+
+            if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
+                showToast("윈도우 핸들을 찾을 수 없습니다.", true);
+                return;
+            }
+
+            shutdown();
+            loginController.setPrimaryStage(stage);
+            Scene loginScene = new Scene(loginRoot, 420, 320);
+            var css = getClass().getResource("/dashboard-theme.css");
+            if (css != null) {
+                loginScene.getStylesheets().add(css.toExternalForm());
+            }
+            stage.setScene(loginScene);
+            stage.setTitle("스마트 강의실 대시보드 - 로그인");
+            stage.setMinWidth(420);
+            stage.setMinHeight(320);
+            stage.setMaximized(false);
+            stage.setWidth(460);
+            stage.setHeight(360);
+            stage.centerOnScreen();
+
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle("서버 연결 실패");
+            alert.setHeaderText("서버 연결이 끊어졌습니다.");
+            alert.setContentText(message);
+            alert.show();
+        } catch (Exception ex) {
+            showToast("로그인 화면 이동 실패: " + ex.getMessage(), true);
+        }
     }
 
     private String currentApiBaseUrl() {
@@ -894,9 +1056,31 @@ public class DashboardController {
             }
 
             refreshPanelListAndDashboard();
+            refreshAuxiliaryTabs();
         } finally {
             snapshotRefreshInFlight.set(false);
         }
+    }
+
+    private void refreshAuxiliaryTabs() {
+        if (pcManagementModule != null) {
+            pcManagementModule.reloadData();
+        }
+        if (managementModule != null) {
+            managementModule.reloadData();
+        }
+        refreshNetworkTabData();
+        if (commandStatusPanelController != null) {
+            commandStatusPanelController.refresh();
+        }
+    }
+
+    private void refreshNetworkTabData() {
+        if (networkPanelController == null) {
+            return;
+        }
+        networkPanelController.updateNetworkChart();
+        networkPanelController.refreshAllPcTraffic();
     }
 
     private void loadDashboards() {
@@ -936,10 +1120,7 @@ public class DashboardController {
             }
             pendingInitialViewportAdjust = true;
             scheduleInitialViewportAdjust();
-            // 패널 노드 렌더링 후 추가 fitAll 보장 (위젯 로드 완료 대기)
-            PauseTransition panelFitDelay = new PauseTransition(Duration.millis(400));
-            panelFitDelay.setOnFinished(ev -> fitAllPanelsToViewport(false));
-            panelFitDelay.play();
+            triggerInitialFitIfNeeded();
         }));
     }
 
@@ -1023,8 +1204,12 @@ public class DashboardController {
     }
 
     private void fitAllPanelsToViewport(boolean showUserToast) {
+        fitAllPanelsToViewport(showUserToast, false);
+    }
+
+    private boolean fitAllPanelsToViewport(boolean showUserToast, boolean markInitialApplied) {
         if (dashboardScrollPane == null || classroomContainer == null) {
-            return;
+            return false;
         }
 
         List<Node> nodes = classroomContainer.getChildren().stream()
@@ -1045,12 +1230,15 @@ public class DashboardController {
         }
         if (nodes.isEmpty() && cachedPanels.isEmpty()) {
             applyZoom(1.0);
-            return;
+            if (markInitialApplied) {
+                initialFitApplied = true;
+            }
+            return true;
         }
 
         if (dashboardScrollPane.getViewportBounds().getWidth() <= 1 || dashboardScrollPane.getViewportBounds().getHeight() <= 1) {
             Platform.runLater(this::fitAllPanelsToViewport);
-            return;
+            return false;
         }
 
         double minX = Double.MAX_VALUE;
@@ -1110,7 +1298,10 @@ public class DashboardController {
 
         if (counted == 0) {
             applyZoom(1.0);
-            return;
+            if (markInitialApplied) {
+                initialFitApplied = true;
+            }
+            return true;
         }
 
         // 콘텐츠 경계 기반으로만 맞춤 계산한다. (뷰포트 배율 기반 가짜 캔버스 확장 제거)
@@ -1120,12 +1311,45 @@ public class DashboardController {
         double viewportW = Math.max(1, dashboardScrollPane.getViewportBounds().getWidth());
         double viewportH = Math.max(1, dashboardScrollPane.getViewportBounds().getHeight());
 
-        double targetScale = Math.min(viewportW / contentW, viewportH / contentH);
+        double targetScale = normalizeFitValue(Math.min(viewportW / contentW, viewportH / contentH));
+
+        String fitSignature = String.format(
+                "%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%d",
+                normalizeFitValue(minX),
+                normalizeFitValue(minY),
+                normalizeFitValue(maxX),
+                normalizeFitValue(maxY),
+                normalizeFitValue(viewportW),
+                normalizeFitValue(viewportH),
+                counted
+        );
+        if (fitSignature.equals(lastFitSignature)
+                && Double.isFinite(lastFitScale)
+                && Double.isFinite(lastFitHValue)
+                && Double.isFinite(lastFitVValue)) {
+            applyZoom(lastFitScale);
+            if (Double.isFinite(lastFitContainerW) && Double.isFinite(lastFitContainerH)) {
+                classroomContainer.setPrefSize(lastFitContainerW, lastFitContainerH);
+                if (canvasModule != null && canvasModule.getGridCanvas() != null) {
+                    canvasModule.getGridCanvas().setWidth(lastFitContainerW);
+                    canvasModule.getGridCanvas().setHeight(lastFitContainerH);
+                }
+            }
+            applyViewportPosition(lastFitHValue, lastFitVValue);
+            if (markInitialApplied) {
+                initialFitApplied = true;
+            }
+            if (showUserToast) {
+                showToast("전체 맞춤 적용", false);
+            }
+            return true;
+        }
+
         applyZoom(targetScale);
 
         double currentScale = currentZoomScale();
         if (currentScale <= 0) {
-            return;
+            return false;
         }
 
         // 콘텐츠 중심이 뷰포트 중심에 오도록 캔버스를 대칭 크기로 설정한다.
@@ -1144,8 +1368,8 @@ public class DashboardController {
         // 비정상적인 대형 레이아웃으로 UI가 버벅이는 것을 방지하기 위한 안전 상한.
         double hardMaxW = Math.max(viewportW / currentScale * 6.0, 12000.0);
         double hardMaxH = Math.max(viewportH / currentScale * 6.0, 9000.0);
-        contentBaseW = Math.min(contentBaseW, hardMaxW);
-        contentBaseH = Math.min(contentBaseH, hardMaxH);
+        contentBaseW = normalizeFitValue(Math.min(contentBaseW, hardMaxW));
+        contentBaseH = normalizeFitValue(Math.min(contentBaseH, hardMaxH));
 
         classroomContainer.setPrefSize(contentBaseW, contentBaseH);
         if (canvasModule != null && canvasModule.getGridCanvas() != null) {
@@ -1159,8 +1383,8 @@ public class DashboardController {
         double vRangePx = contentScaledH - viewportH;
 
         // 콘텐츠 중심을 뷰포트 중심에 맞추는 스크롤 값 계산
-        final double hVal = hRangePx > 1 ? Math.max(0, Math.min(1, (contentCenterX * currentScale - viewportW / 2.0) / hRangePx)) : 0.0;
-        final double vVal = vRangePx > 1 ? Math.max(0, Math.min(1, (contentCenterY * currentScale - viewportH / 2.0) / vRangePx)) : 0.0;
+        final double hVal = normalizeScrollValue(hRangePx > 1 ? Math.max(0, Math.min(1, (contentCenterX * currentScale - viewportW / 2.0) / hRangePx)) : 0.0);
+        final double vVal = normalizeScrollValue(vRangePx > 1 ? Math.max(0, Math.min(1, (contentCenterY * currentScale - viewportH / 2.0) / vRangePx)) : 0.0);
 
         logFitAllSnapshot(
             counted,
@@ -1184,6 +1408,41 @@ public class DashboardController {
             vVal
         );
 
+        applyViewportPosition(hVal, vVal);
+
+        lastFitSignature = fitSignature;
+        lastFitScale = currentScale;
+        lastFitHValue = hVal;
+        lastFitVValue = vVal;
+        lastFitContainerW = contentBaseW;
+        lastFitContainerH = contentBaseH;
+        if (markInitialApplied) {
+            initialFitApplied = true;
+        }
+
+        if (showUserToast) {
+            showToast("전체 맞춤 적용", false);
+        }
+        return true;
+    }
+
+    private void triggerInitialFitIfNeeded() {
+        if (initialFitApplied || !isDashboardWindowShowing()) {
+            return;
+        }
+        PauseTransition fitDelay = new PauseTransition(Duration.millis(180));
+        fitDelay.setOnFinished(ev -> {
+            boolean applied = fitAllPanelsToViewport(false, true);
+            if (!applied && !initialFitApplied) {
+                PauseTransition retry = new PauseTransition(Duration.millis(220));
+                retry.setOnFinished(retryEv -> triggerInitialFitIfNeeded());
+                retry.play();
+            }
+        });
+        fitDelay.play();
+    }
+
+    private void applyViewportPosition(double hVal, double vVal) {
         Platform.runLater(() -> {
             dashboardScrollPane.setHvalue(hVal);
             dashboardScrollPane.setVvalue(vVal);
@@ -1192,10 +1451,14 @@ public class DashboardController {
                 dashboardScrollPane.setVvalue(vVal);
             });
         });
+    }
 
-        if (showUserToast) {
-            showToast("전체 맞춤 적용", false);
-        }
+    private double normalizeFitValue(double value) {
+        return Math.round(value * 1000.0) / 1000.0;
+    }
+
+    private double normalizeScrollValue(double value) {
+        return Math.round(value * 10000.0) / 10000.0;
     }
 
     private void scheduleInitialViewportAdjust() {
@@ -1551,11 +1814,14 @@ public class DashboardController {
             return;
         }
         Label toast = new Label(message);
-        toast.setStyle("-fx-background-color: " + (error ? "#d73a49" : "#22863a")
-                + "; -fx-text-fill: white; -fx-padding: 8 12 8 12; -fx-background-radius: 8; -fx-font-weight: 600;");
+        toast.setStyle("-fx-background-color: " + (error ? "#c81d25" : "#15803d")
+                + "; -fx-text-fill: #fff; -fx-padding: 10 18 10 18; -fx-background-radius: 10; -fx-font-weight: 700;"
+                + " -fx-font-size: 15px; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 6, 0, 0, 2);");
+        toast.setWrapText(true);
         toastContainer.getChildren().add(0, toast);
 
-        PauseTransition delay = new PauseTransition(Duration.seconds(2.2));
+        double duration = error ? 3.5 : 2.2;
+        PauseTransition delay = new PauseTransition(Duration.seconds(duration));
         delay.setOnFinished(e -> toastContainer.getChildren().remove(toast));
         delay.play();
     }
@@ -1641,6 +1907,8 @@ public class DashboardController {
             return;
         }
         shutdownRequested = true;
+        ApiClient.getInstance().setConnectionFailureHandler(null);
+        ApiClient.getInstance().setAuthFailureHandler(null);
         scheduler.shutdownNow();
         if (realtimeModule != null) {
             realtimeModule.stop();

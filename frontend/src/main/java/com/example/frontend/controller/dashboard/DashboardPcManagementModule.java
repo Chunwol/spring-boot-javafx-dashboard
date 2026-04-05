@@ -2,6 +2,7 @@ package com.example.frontend.controller.dashboard;
 
 import com.example.dto.dashboard.PcStatusDto;
 import com.example.frontend.service.ApiClient;
+import com.example.util.MultipartUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.layout.Region;
 import javafx.stage.FileChooser;
 
 import java.io.File;
@@ -458,6 +460,7 @@ public class DashboardPcManagementModule {
     private void showConfirmationDialog(String commandType, String commandLabel, List<PcStatusDto> targetPcs, String scriptPath) {
         long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
         long offlineCount = targetPcs.size() - onlineCount;
+        boolean scriptCommand = "RUN_PS1".equals(commandType) && scriptPath != null;
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("명령 전송 확인");
@@ -476,10 +479,55 @@ public class DashboardPcManagementModule {
             styledLabel("미전송: " + offlineCount + "대 (오프라인)", "-fx-font-size: 12; -fx-text-fill: #9ca3af;"),
             styledLabel("전송 예정: " + onlineCount + "대 (온라인)", "-fx-font-size: 12; -fx-text-fill: #10b981; -fx-font-weight: bold;")
         );
-        if ("RUN_PS1".equals(commandType) && scriptPath != null) {
+        if (scriptCommand) {
             summaryBox.getChildren().add(styledLabel("스크립트: " + scriptPath, "-fx-font-size: 11; -fx-text-fill: #475569;"));
         }
         content.getChildren().add(summaryBox);
+
+        ComboBox<String> runModeCombo = null;
+        ComboBox<String> windowModeCombo = null;
+        TextField argsField = null;
+        if (scriptCommand) {
+            VBox optionsBox = new VBox(8);
+            optionsBox.setStyle("-fx-background-color: #f8fafc; -fx-padding: 10; -fx-border-color: #e2e8f0; -fx-border-radius: 6; -fx-background-radius: 6;");
+
+            Label optionTitle = styledLabel("스크립트 실행 옵션", "-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #334155;");
+            HBox modeRow = new HBox(8);
+            modeRow.setAlignment(Pos.CENTER_LEFT);
+            Label modeLabel = styledLabel("결과 처리", "-fx-font-size: 12; -fx-text-fill: #475569;");
+            ComboBox<String> modeComboLocal = new ComboBox<>(FXCollections.observableArrayList(
+                "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"
+            ));
+            modeComboLocal.setValue("대기 실행 (완료까지 수집)");
+            modeComboLocal.setPrefWidth(220);
+            modeRow.getChildren().addAll(modeLabel, modeComboLocal);
+
+            HBox windowRow = new HBox(8);
+            windowRow.setAlignment(Pos.CENTER_LEFT);
+            Label windowLabel = styledLabel("콘솔 창", "-fx-font-size: 12; -fx-text-fill: #475569;");
+            ComboBox<String> windowComboLocal = new ComboBox<>(FXCollections.observableArrayList(
+                "창 숨김", "창 표시"
+            ));
+            windowComboLocal.setValue("창 숨김");
+            windowComboLocal.setPrefWidth(220);
+            windowRow.getChildren().addAll(windowLabel, windowComboLocal);
+
+            VBox argsBox = new VBox(4);
+            Label argsLabel = styledLabel("추가 인자", "-fx-font-size: 12; -fx-text-fill: #475569;");
+            TextField argsFieldLocal = new TextField();
+            argsFieldLocal.setPromptText("예: -Mode Test");
+            Label hintLabel = styledLabel(
+                "즉시 실행은 프로세스 시작 성공만 확인합니다. 대기 실행은 종료까지 기다리며 stdout/stderr를 수집합니다. 창 표시는 에이전트 실행 계정/세션 정책에 따라 보이지 않을 수 있습니다.",
+                "-fx-font-size: 11; -fx-text-fill: #64748b;"
+            );
+            argsBox.getChildren().addAll(argsLabel, argsFieldLocal, hintLabel);
+
+            optionsBox.getChildren().addAll(optionTitle, modeRow, windowRow, argsBox);
+            content.getChildren().add(optionsBox);
+            runModeCombo = modeComboLocal;
+            windowModeCombo = windowComboLocal;
+            argsField = argsFieldLocal;
+        }
 
         Label listTitle = styledLabel("대상 PC 목록", "-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #374151;");
         content.getChildren().add(listTitle);
@@ -542,7 +590,17 @@ public class DashboardPcManagementModule {
 
         Optional<ButtonType> result = dialog.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            executeCommand(commandType, targetPcs, scriptPath);
+            ScriptExecutionOptions scriptOptions = scriptCommand
+                ? new ScriptExecutionOptions(
+                    scriptPath,
+                    runModeCombo != null && runModeCombo.getValue() != null && runModeCombo.getValue().startsWith("즉시 실행")
+                        ? "BACKGROUND" : "FOREGROUND",
+                    windowModeCombo != null && windowModeCombo.getValue() != null && windowModeCombo.getValue().startsWith("창 표시")
+                        ? "VISIBLE" : "HIDDEN",
+                    argsField != null ? argsField.getText() : ""
+                )
+                : ScriptExecutionOptions.none();
+            executeCommand(commandType, targetPcs, scriptOptions);
         }
     }
 
@@ -550,7 +608,7 @@ public class DashboardPcManagementModule {
     // 명령 실행 (온라인 PC만)
     // ─────────────────────────────────────────
 
-    private void executeCommand(String commandType, List<PcStatusDto> targetPcs, String scriptPath) {
+    private void executeCommand(String commandType, List<PcStatusDto> targetPcs, ScriptExecutionOptions scriptOptions) {
         // PC 켜기(PCON)는 오프라인 대상까지 포함해서 서버의 WOL 릴레이 로직으로 전달
         List<PcStatusDto> onlinePcs = "PCON".equals(commandType)
                 ? new ArrayList<>(targetPcs)
@@ -563,14 +621,48 @@ public class DashboardPcManagementModule {
         Thread t = new Thread(() -> {
             int success = 0;
             int fail = 0;
+            String uploadedScriptUrl = null;
+
+            if ("RUN_PS1".equals(commandType) && scriptOptions.hasScript()) {
+                try {
+                    Map<String, String> uploadHeaders = new HashMap<>();
+                    String bearerToken = apiClient.getBearerToken();
+                    if (bearerToken != null && !bearerToken.isBlank()) {
+                        uploadHeaders.put("Authorization", "Bearer " + bearerToken);
+                    }
+                    HttpRequest uploadRequest = MultipartUtil
+                            .newMultipartRequest(apiPath("/scripts"), Map.of("file", scriptOptions.scriptPath()), uploadHeaders)
+                            .build();
+                    HttpResponse<String> uploadResp = httpClient.send(uploadRequest, HttpResponse.BodyHandlers.ofString());
+                    if (uploadResp.statusCode() < 200 || uploadResp.statusCode() >= 300) {
+                        throw new RuntimeException("스크립트 업로드 실패 HTTP=" + uploadResp.statusCode());
+                    }
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> uploadBody = objectMapper.readValue(uploadResp.body(), Map.class);
+                    uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
+                    if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
+                        throw new RuntimeException("스크립트 업로드 응답에 downloadUrl이 없습니다.");
+                    }
+                } catch (Exception ex) {
+                    log.warn("스크립트 업로드 실패: {}", ex.getMessage());
+                    int skipped = targetPcs.size() - onlinePcs.size();
+                    Platform.runLater(() -> showAlert("전송 실패",
+                        "스크립트 업로드 실패로 명령 전송을 중단했습니다.\n" + ex.getMessage() +
+                            "\n오프라인 미전송: " + skipped + "대",
+                        Alert.AlertType.ERROR));
+                    return;
+                }
+            }
+
             for (PcStatusDto pc : onlinePcs) {
                 try {
                     Map<String, Object> body = new HashMap<>();
                     body.put("scope", "SINGLE");
                     body.put("macAddress", pc.getMacAddress());
                     body.put("type", commandType);
-                    if ("RUN_PS1".equals(commandType) && scriptPath != null && !scriptPath.isBlank()) {
-                        body.put("scriptUrl", scriptPath);
+                    if ("RUN_PS1".equals(commandType) && scriptOptions.hasScript()) {
+                        body.put("scriptUrl", uploadedScriptUrl);
+                        body.put("payloadJson", objectMapper.writeValueAsString(scriptOptions.toPayload()));
                     }
 
                     HttpRequest req = authorizedRequest(apiPath("/commands"))
@@ -653,6 +745,26 @@ public class DashboardPcManagementModule {
     /** 탭 선택 시 호출 */
     public void reloadData() {
         loadAllData();
+    }
+
+    private record ScriptExecutionOptions(String scriptPath, String runMode, String windowMode, String args) {
+        private static ScriptExecutionOptions none() {
+            return new ScriptExecutionOptions(null, "FOREGROUND", "HIDDEN", "");
+        }
+
+        private boolean hasScript() {
+            return scriptPath != null && !scriptPath.isBlank();
+        }
+
+        private Map<String, Object> toPayload() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("runMode", runMode == null || runMode.isBlank() ? "FOREGROUND" : runMode);
+            payload.put("windowMode", windowMode == null || windowMode.isBlank() ? "HIDDEN" : windowMode);
+            if (args != null && !args.isBlank()) {
+                payload.put("args", args);
+            }
+            return payload;
+        }
     }
 }
 

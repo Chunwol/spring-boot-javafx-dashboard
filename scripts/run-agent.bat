@@ -31,5 +31,6 @@ if not exist "%AGENT_JAR%" (
     exit /b 1
 )
 
-java -jar "%AGENT_JAR%"
+REM scripts 폴더의 config.json을 인식하도록 -D 옵션 추가
+java -Dpcagent.config.dir=%~dp0 -jar "%AGENT_JAR%"
 exit /b 0

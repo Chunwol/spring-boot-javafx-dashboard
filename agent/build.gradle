@@ -45,6 +45,7 @@ test {
 
 application {
     mainClass = 'com.example.agent.AgentMain'
+    applicationDefaultJvmArgs = ["-Dpcagent.config.dir=${rootDir}/scripts"]
 }
 
 compileJava {
@@ -66,6 +67,56 @@ jar {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 배포 패키지 자동화 (Zip)
+// 용법: gradlew :agent:deployPackage
+// 출력: dist/agent-${version}-deploy.zip
+// ═══════════════════════════════════════════════════════════════════════
+task deployPackage(type: Zip) {
+    group = 'distribution'
+    description = 'Create deployment package with JAR, config, and scripts'
+
+    // JAR 파일 포함
+    from("${project.buildDir}/libs") {
+        include 'agent-*.jar'
+        into 'agent-package'
+    }
+
+    // 설정 및 배포 스크립트 포함
+    from("${rootDir}/scripts") {
+        include 'config.json'
+        include 'install.bat'
+        include 'uninstall.bat'
+        include 'agent-watchdog.ps1'
+        into 'agent-package'
+    }
+
+    // 설치 가이드 포함 (문서)
+    from("${rootDir}/docs") {
+        include 'AGENT_INSTALL_GUIDE.md'
+        into 'agent-package/docs'
+    }
+
+    archiveFileName = "agent-${project.version}-deploy.zip"
+    destinationDirectory = file("${rootDir}/dist")
+}
+
+// deployPackage는 JAR 빌드 완료 후 실행
+deployPackage.dependsOn(jar)
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dockerfile 및 Docker Compose 이미지 빌드 (선택사항)
+// ═══════════════════════════════════════════════════════════════════════
+task buildDockerImage {
+    group = 'docker'
+    description = 'Build Docker image for agent'
+    doLast {
+        exec {
+            commandLine 'docker', 'build', '-t', 'pcagent:1.0.0', '-f', 'Dockerfile', '.'
+        }
+    }
 }
 
 // graalvmNative 설정 (GraalVM JDK 환경에서만 동작)

@@ -12,8 +12,8 @@ public class AgentConfig {
     private String serverUrl = "http://localhost:8888";
     private String installKey = "";
     private String agentToken = "";
-    private int heartbeatIntervalSec = 120;
-    private int jitterSec = 30;
+    private int heartbeatIntervalSec = 30;
+    private int jitterSec = 5;
 
     // ----- getters / setters -----
 

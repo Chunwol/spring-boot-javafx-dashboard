@@ -38,6 +38,23 @@ import java.util.function.LongSupplier;
  * 강의실 CRUD API 호출을 담당하는 모듈.
  */
 public class DashboardClassroomModule {
+    /**
+     * 강의실 그룹명 변경
+     * @param groupId 그룹 ID
+     * @param newName 새 이름
+     * @param onComplete 완료 콜백
+     */
+    public void renameGroup(Long groupId, String newName, Runnable onComplete) {
+        if (groupId == null || newName == null || newName.isBlank()) return;
+        apiClient.putJson("/groups/" + groupId, java.util.Map.of("name", newName))
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    if (onComplete != null) onComplete.run();
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이름 변경 실패: " + ex.getMessage()).showAndWait());
+                    return null;
+                });
+    }
 
     private static final Logger log = LoggerFactory.getLogger(DashboardClassroomModule.class);
     private static final double LAYOUT_EPSILON = 0.5;
