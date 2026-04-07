@@ -181,6 +181,14 @@ public class DashboardController {
         rootVBox.getChildren().add(buildTopBar());
         rootVBox.getChildren().add(buildTabs());
 
+        // Bind zoom property to UI updates
+        dashboardViewModel.zoomScaleProperty().addListener((obs, oldV, newV) -> {
+            if (dashboardUIService != null) {
+                dashboardUIService.applyZoom(newV.doubleValue());
+            }
+            updateZoomButtonLabel(newV.doubleValue());
+        });
+
         viewportAdjustDebounce.setOnFinished(e -> {
             if (dashboardScrollPane == null || classroomContainer == null) {
                 return;
@@ -648,7 +656,7 @@ public class DashboardController {
 
         classroomContainer = canvasModule.getClassroomContainer();
         classroomContainer.getStyleClass().add("dashboard-canvas-bg");
-        applyZoom(currentZoomScale());
+        // 초기 줌 레벨 설정은 initialize() 후 ViewModel 리스너를 통해 처리
 
         // Group 래퍼: Scale(0,0) 트랜스폼이 적용된 classroomContainer의 실제 시각적 크기를
         // ScrollPane이 인식하도록 Group으로 감쌉니다.
@@ -816,14 +824,14 @@ public class DashboardController {
     private Button createZoomOutButton() {
         Button zoomOutBtn = new Button("-");
         zoomOutBtn.getStyleClass().add("dashboard-zoom-btn");
-        zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
+        zoomOutBtn.setOnAction(e -> dashboardViewModel.zoomOut());
         return zoomOutBtn;
     }
 
     private Button createZoomResetButton() {
         Button zoomResetBtn = new Button("100%");
         zoomResetBtn.getStyleClass().add("dashboard-zoom-btn");
-        zoomResetBtn.setOnAction(e -> applyZoom(1.0));
+        zoomResetBtn.setOnAction(e -> dashboardViewModel.resetZoom());
         zoomResetButton = zoomResetBtn;
         return zoomResetBtn;
     }
@@ -831,14 +839,14 @@ public class DashboardController {
     private Button createZoomInButton() {
         Button zoomInBtn = new Button("+");
         zoomInBtn.getStyleClass().add("dashboard-zoom-btn");
-        zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
+        zoomInBtn.setOnAction(e -> dashboardViewModel.zoomIn());
         return zoomInBtn;
     }
 
     private Button createFitAllButton() {
         Button fitAllBtn = new Button("전체 맞춤");
         fitAllBtn.getStyleClass().add("dashboard-zoom-btn");
-        fitAllBtn.setOnAction(e -> fitAllPanelsToViewport(true));
+        fitAllBtn.setOnAction(e -> dashboardUIService.fitAllPanelsToViewport(new ArrayList<>(classroomContainer.getChildren())));
         return fitAllBtn;
     }
 
@@ -1182,18 +1190,6 @@ public class DashboardController {
         expandCanvasToContentBounds();
     }
 
-    private void applyZoom(double targetScale) {
-        double clamped = Math.max(0.2, Math.min(2.2, targetScale));
-        dashboardViewModel.setZoom(clamped);
-        double scale = currentZoomScale();
-        if (dashboardUIService != null) {
-            dashboardUIService.applyZoom(scale);
-        } else if (classroomContainer != null) {
-            classroomContainer.getTransforms().setAll(new Scale(scale, scale, 0, 0));
-        }
-        updateZoomButtonLabel(scale);
-    }
-
     private void fitAllPanelsToViewport() {
         fitAllPanelsToViewport(true);
     }
@@ -1224,7 +1220,7 @@ public class DashboardController {
             }
         }
         if (nodes.isEmpty() && cachedPanels.isEmpty()) {
-            applyZoom(1.0);
+            dashboardViewModel.setZoom(1.0);
             if (markInitialApplied) {
                 initialFitApplied = true;
             }
@@ -1292,7 +1288,7 @@ public class DashboardController {
         }
 
         if (counted == 0) {
-            applyZoom(1.0);
+            dashboardViewModel.setZoom(1.0);
             if (markInitialApplied) {
                 initialFitApplied = true;
             }
@@ -1322,7 +1318,7 @@ public class DashboardController {
                 && Double.isFinite(lastFitScale)
                 && Double.isFinite(lastFitHValue)
                 && Double.isFinite(lastFitVValue)) {
-            applyZoom(lastFitScale);
+            dashboardViewModel.setZoom(lastFitScale);
             if (Double.isFinite(lastFitContainerW) && Double.isFinite(lastFitContainerH)) {
                 classroomContainer.setPrefSize(lastFitContainerW, lastFitContainerH);
                 if (canvasModule != null && canvasModule.getGridCanvas() != null) {
@@ -1340,9 +1336,9 @@ public class DashboardController {
             return true;
         }
 
-        applyZoom(targetScale);
+        dashboardViewModel.setZoom(targetScale);
 
-        double currentScale = currentZoomScale();
+        double currentScale = dashboardViewModel.getZoomScale();
         if (currentScale <= 0) {
             return false;
         }
