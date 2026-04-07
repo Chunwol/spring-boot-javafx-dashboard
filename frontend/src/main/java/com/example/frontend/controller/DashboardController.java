@@ -176,7 +176,7 @@ public class DashboardController {
         rootVBox.getChildren().clear();
         rootVBox.setSpacing(10);
         rootVBox.setPadding(new Insets(8, 8, 8, 8));
-        rootVBox.setStyle("-fx-background-color: linear-gradient(to bottom, #f0f4ff, #f8fbff 45%, #ffffff 100%);");
+        rootVBox.getStyleClass().add("dashboard-root-bg");
 
         rootVBox.getChildren().add(buildTopBar());
         rootVBox.getChildren().add(buildTabs());
@@ -244,7 +244,7 @@ public class DashboardController {
         this.topBarRef = topBar;
         topBar.setPadding(new Insets(13, 18, 13, 18));
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setStyle("-fx-background-color: linear-gradient(to right, #1e3a8a, #1f2937); -fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.15), 12, 0, 0, 2);");
+        topBar.getStyleClass().add("dashboard-topbar");
 
         Label title = new Label("통합 강의실 관제");
         title.setTextFill(Color.WHITE);
@@ -341,7 +341,7 @@ public class DashboardController {
         List<DashboardInfoDto> dashboards = dashboardSelector.getItems();
         DashboardInfoDto selected = dashboardSelector.getValue();
         if (dashboards == null || dashboards.size() <= 1 || selected == null) {
-            showToast("대시보드는 최소 1개 이상 존재해야 합니다.", true);
+            dashboardUIService.showToast("대시보드는 최소 1개 이상 존재해야 합니다.", true);
             return;
         }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
@@ -352,11 +352,11 @@ public class DashboardController {
             if (type == ButtonType.YES) {
                 dashboardService.deleteDashboardAsync(selected.getId())
                         .thenAccept(resp -> Platform.runLater(() -> {
-                            showToast("대시보드가 삭제되었습니다.", false);
+                            dashboardUIService.showToast("대시보드가 삭제되었습니다.", false);
                             loadDashboards();
                         }))
                         .exceptionally(ex -> {
-                            Platform.runLater(() -> showToast("대시보드 삭제 실패: " + ex.getMessage(), true));
+                            Platform.runLater(() -> dashboardUIService.showToast("대시보드 삭제 실패: " + ex.getMessage(), true));
                             return null;
                         });
             }
@@ -376,7 +376,7 @@ public class DashboardController {
                 ApiClient.getInstance().setBearerToken(null);
                 var fxmlUrl = getClass().getResource("/fxml/login.fxml");
                 if (fxmlUrl == null) {
-                    showToast("로그인 화면을 찾을 수 없습니다.", true);
+                    dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
                     return;
                 }
 
@@ -385,7 +385,7 @@ public class DashboardController {
                 LoginController loginController = loader.getController();
 
                 if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
-                    showToast("윈도우 핸들을 찾을 수 없습니다.", true);
+                    dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
                     return;
                 }
 
@@ -419,7 +419,7 @@ public class DashboardController {
                 statusBar.getChildren().addAll(statusSpacer, clockLabel);
                 statusBar.setAlignment(Pos.CENTER_LEFT);
                 statusBar.setPadding(new Insets(8, 18, 8, 18));
-                statusBar.setStyle("-fx-background-color: #f1f5f9; -fx-background-radius: 10; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 6, 0, 0, 1);");
+                statusBar.getStyleClass().add("dashboard-statusbar");
                 rootVBox.getChildren().add(statusBar);
 
                 stage.setMaximized(false);
@@ -427,7 +427,7 @@ public class DashboardController {
                 stage.setHeight(360);
                 stage.centerOnScreen();
             } catch (Exception ex) {
-                showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
+                dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
             }
         });
     }
@@ -435,7 +435,7 @@ public class DashboardController {
     private Node buildTabs() {
         TabPane tabPane = new TabPane();
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabPane.setStyle("-fx-background-insets: 0; -fx-padding: 0 6 6 6; -fx-background-color: #f8fafc;");
+        tabPane.getStyleClass().add("dashboard-tabpane");
 
         // 1. 대시보드
         Tab mainTab = new Tab("대시보드", createMainDashboardView());
@@ -496,7 +496,7 @@ public class DashboardController {
     private Node createMainDashboardView() {
         SplitPane splitPane = new SplitPane();
         this.mainSplitPane = splitPane;
-        splitPane.setStyle("-fx-background-color: transparent;");
+        splitPane.getStyleClass().add("dashboard-splitpane");
         VBox rightPane = buildRightPane();
         this.rightToolPane = rightPane;
 
@@ -561,7 +561,7 @@ public class DashboardController {
                 this::isEditModeActive,
                 this::applySnap,
                 this::currentDashboardId,
-                this::showToast,
+                (msg, err) -> dashboardUIService.showToast(msg, err),
                 this::updateCachedPanelPosition,
                 this::getResponsiveDefaultSize,
                 this::loadDashboardPanels
@@ -574,7 +574,7 @@ public class DashboardController {
                 this::isEditModeActive,
                 this::applySnap,
                 this::currentDashboardId,
-                this::showToast,
+                (msg, err) -> dashboardUIService.showToast(msg, err),
                 this::getResponsiveDefaultSize,
                 this::loadDashboardPanels
             );
@@ -636,7 +636,7 @@ public class DashboardController {
         rightToolbar.setAlignment(Pos.CENTER_RIGHT);
         rightToolbar.setPadding(new Insets(8, 8, 8, 8));
         rightToolbar.setMinHeight(Region.USE_PREF_SIZE);
-        rightToolbar.setStyle("-fx-background-color: #f1f5f9; -fx-background-radius: 12;");
+        rightToolbar.getStyleClass().add("dashboard-right-toolbar");
 
         canvasModule = new DashboardCanvasModule(
                 this::isEditModeActive,
@@ -647,7 +647,7 @@ public class DashboardController {
         );
 
         classroomContainer = canvasModule.getClassroomContainer();
-        classroomContainer.setStyle("-fx-background-color: linear-gradient(to bottom right, #f8fbff, #f0f7ff);");
+        classroomContainer.getStyleClass().add("dashboard-canvas-bg");
         applyZoom(currentZoomScale());
 
         // Group 래퍼: Scale(0,0) 트랜스폼이 적용된 classroomContainer의 실제 시각적 크기를
@@ -658,7 +658,7 @@ public class DashboardController {
         canvasScroll.setFitToWidth(false);
         canvasScroll.setFitToHeight(false);
         canvasScroll.setPannable(true);
-        canvasScroll.setStyle("-fx-background: #f8fbff; -fx-background-color: #f8fbff;");
+        canvasScroll.getStyleClass().add("dashboard-canvas-scroll");
         canvasScroll.viewportBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
             if (pendingInitialViewportAdjust && newBounds != null && newBounds.getWidth() > 1 && newBounds.getHeight() > 1) {
                 logViewportSnapshot("viewport-bounds-changed");
@@ -682,20 +682,18 @@ public class DashboardController {
 
     private ToggleButton createEditModeToggleButton() {
         ToggleButton editModeBtn = new ToggleButton("편집 모드");
-        editModeBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);");
-        editModeBtn.selectedProperty().addListener((obs, ov, nv) -> editModeBtn.setStyle(nv ? "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #1e3a8a; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(30,58,138,0.35), 6, 0, 0, 2);" : "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);"));
+        editModeBtn.getStyleClass().add("dashboard-toolbar-toggle");
         editModeBtn.setOnAction(e -> {
             dashboardViewModel.setEditMode(editModeBtn.isSelected());
             applyEditModeUiState();
-            showToast(isEditModeActive() ? "편집 모드 켜짐" : "편집 모드 꺼짐", false);
+            dashboardUIService.showToast(isEditModeActive() ? "편집 모드 켜짐" : "편집 모드 꺼짐", false);
         });
         return editModeBtn;
     }
 
     private ToggleButton createFocusModeToggleButton() {
         ToggleButton focusModeBtn = new ToggleButton("포커스 모드");
-        focusModeBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);");
-        focusModeBtn.selectedProperty().addListener((obs, ov, nv) -> focusModeBtn.setStyle(nv ? "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #1e3a8a; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(30,58,138,0.35), 6, 0, 0, 2);" : "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);"));
+        focusModeBtn.getStyleClass().add("dashboard-toolbar-toggle");
         focusModeBtn.setOnAction(e -> {
             dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             if (leftToolPane != null) {
@@ -711,8 +709,7 @@ public class DashboardController {
 
     private ToggleButton createDashboardOnlyToggleButton() {
         ToggleButton dashboardOnlyBtn = new ToggleButton("대시보드만");
-        dashboardOnlyBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);");
-        dashboardOnlyBtn.selectedProperty().addListener((obs, ov, nv) -> dashboardOnlyBtn.setStyle(nv ? "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #1e3a8a; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(30,58,138,0.35), 6, 0, 0, 2);" : "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 8 12 8 12; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);"));
+        dashboardOnlyBtn.getStyleClass().add("dashboard-toolbar-toggle");
         dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
             dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
@@ -724,7 +721,7 @@ public class DashboardController {
                 topBarRef.setManaged(!isDashboardOnlyModeActive());
                 topBarRef.setVisible(!isDashboardOnlyModeActive());
             }
-            showToast(isDashboardOnlyModeActive() ? "대시보드만 모드" : "일반 모드", false);
+            dashboardUIService.showToast(isDashboardOnlyModeActive() ? "대시보드만 모드" : "일반 모드", false);
         });
         return dashboardOnlyBtn;
     }
@@ -771,8 +768,7 @@ public class DashboardController {
 
     private ToggleButton createGridToggleButton() {
         ToggleButton gridToggleBtn = new ToggleButton("격자");
-        gridToggleBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);");
-        gridToggleBtn.selectedProperty().addListener((obs, ov, nv) -> gridToggleBtn.setStyle(nv ? "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #64748b; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(100,116,139,0.3), 4, 0, 0, 1);" : "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);"));
+        gridToggleBtn.getStyleClass().add("dashboard-toolbar-mini-toggle");
         gridToggleBtn.setOnAction(e -> {
             if (canvasModule != null) {
                 canvasModule.drawGrid(gridToggleBtn.isSelected());
@@ -783,8 +779,7 @@ public class DashboardController {
 
     private ToggleButton createSnapToggleButton() {
         ToggleButton snapToggleBtn = new ToggleButton("스냅");
-        snapToggleBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);");
-        snapToggleBtn.selectedProperty().addListener((obs, ov, nv) -> snapToggleBtn.setStyle(nv ? "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #64748b; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(100,116,139,0.3), 4, 0, 0, 1);" : "-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 600; -fx-padding: 6 10 6 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.08), 2, 0, 0, 1);"));
+        snapToggleBtn.getStyleClass().add("dashboard-toolbar-mini-toggle");
         snapToggleBtn.setSelected(isSnapToGridEnabled());
         snapToggleBtn.setOnAction(e -> dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected()));
         return snapToggleBtn;
@@ -792,7 +787,7 @@ public class DashboardController {
 
     private MenuButton createAlignMenu() {
         MenuButton alignMenu = new MenuButton("정렬");
-        alignMenu.setStyle("-fx-font-size: 10px; -fx-padding: 5 10 5 10; -fx-background-radius: 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-font-weight: 600;");
+        alignMenu.getStyleClass().add("dashboard-toolbar-menu");
         MenuItem alignLeft = new MenuItem("왼쪽");
         alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
         MenuItem alignRight = new MenuItem("오른쪽");
@@ -807,7 +802,7 @@ public class DashboardController {
 
     private MenuButton createArrangeMenu() {
         MenuButton arrangeMenu = new MenuButton("배열");
-        arrangeMenu.setStyle("-fx-font-size: 10px; -fx-padding: 5 10 5 10; -fx-background-radius: 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155; -fx-font-weight: 600;");
+        arrangeMenu.getStyleClass().add("dashboard-toolbar-menu");
         MenuItem gridArrange = new MenuItem("격자");
         gridArrange.setOnAction(e -> arrangePanels("GRID"));
         MenuItem rowArrange = new MenuItem("행");
@@ -820,14 +815,14 @@ public class DashboardController {
 
     private Button createZoomOutButton() {
         Button zoomOutBtn = new Button("-");
-        zoomOutBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 12px; -fx-font-weight: bold; -fx-padding: 5 8 5 8; -fx-background-color: #e2e8f0; -fx-text-fill: #334155;");
+        zoomOutBtn.getStyleClass().add("dashboard-zoom-btn");
         zoomOutBtn.setOnAction(e -> applyZoom(currentZoomScale() - 0.1));
         return zoomOutBtn;
     }
 
     private Button createZoomResetButton() {
         Button zoomResetBtn = new Button("100%");
-        zoomResetBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 5 10 5 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155;");
+        zoomResetBtn.getStyleClass().add("dashboard-zoom-btn");
         zoomResetBtn.setOnAction(e -> applyZoom(1.0));
         zoomResetButton = zoomResetBtn;
         return zoomResetBtn;
@@ -835,14 +830,14 @@ public class DashboardController {
 
     private Button createZoomInButton() {
         Button zoomInBtn = new Button("+");
-        zoomInBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 12px; -fx-font-weight: bold; -fx-padding: 5 8 5 8; -fx-background-color: #e2e8f0; -fx-text-fill: #334155;");
+        zoomInBtn.getStyleClass().add("dashboard-zoom-btn");
         zoomInBtn.setOnAction(e -> applyZoom(currentZoomScale() + 0.1));
         return zoomInBtn;
     }
 
     private Button createFitAllButton() {
         Button fitAllBtn = new Button("전체 맞춤");
-        fitAllBtn.setStyle("-fx-background-radius: 10; -fx-font-size: 10px; -fx-font-weight: 700; -fx-padding: 5 10 5 10; -fx-background-color: #e2e8f0; -fx-text-fill: #334155;");
+        fitAllBtn.getStyleClass().add("dashboard-zoom-btn");
         fitAllBtn.setOnAction(e -> fitAllPanelsToViewport(true));
         return fitAllBtn;
     }
@@ -876,7 +871,7 @@ public class DashboardController {
         }
         realtimeModule.start(
                 () -> Platform.runLater(this::refreshDashboardSnapshot),
-                alertPayload -> showToast("실시간 알림 수신", false),
+                alertPayload -> dashboardUIService.showToast("실시간 알림 수신", false),
                 () -> handleServerConnectionLost(new RuntimeException("WebSocket disconnected"))
         );
     }
@@ -918,7 +913,7 @@ public class DashboardController {
             ApiClient.getInstance().setBearerToken(null);
             var fxmlUrl = getClass().getResource("/fxml/login.fxml");
             if (fxmlUrl == null) {
-                showToast("로그인 화면을 찾을 수 없습니다.", true);
+                dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
                 return;
             }
 
@@ -927,7 +922,7 @@ public class DashboardController {
             LoginController loginController = loader.getController();
 
             if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
-                showToast("윈도우 핸들을 찾을 수 없습니다.", true);
+                dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
                 return;
             }
 
@@ -953,7 +948,7 @@ public class DashboardController {
             alert.setContentText(message);
             alert.show();
         } catch (Exception ex) {
-            showToast("로그인 화면 이동 실패: " + ex.getMessage(), true);
+            dashboardUIService.showToast("로그인 화면 이동 실패: " + ex.getMessage(), true);
         }
     }
 
@@ -1340,7 +1335,7 @@ public class DashboardController {
                 initialFitApplied = true;
             }
             if (showUserToast) {
-                showToast("전체 맞춤 적용", false);
+                dashboardUIService.showToast("전체 맞춤 적용", false);
             }
             return true;
         }
@@ -1421,7 +1416,7 @@ public class DashboardController {
         }
 
         if (showUserToast) {
-            showToast("전체 맞춤 적용", false);
+            dashboardUIService.showToast("전체 맞춤 적용", false);
         }
         return true;
     }
@@ -1568,7 +1563,7 @@ public class DashboardController {
                 .findFirst()
                 .orElse(null);
         if (selected == null) {
-            showToast("강의실 정보를 찾을 수 없습니다.", true);
+            dashboardUIService.showToast("강의실 정보를 찾을 수 없습니다.", true);
             return;
         }
 
@@ -1610,7 +1605,7 @@ public class DashboardController {
 
     private void arrangePanels(String mode) {
         if (!isEditModeActive()) {
-            showToast("편집 모드에서만 배열 기능을 사용할 수 있습니다.", true);
+            dashboardUIService.showToast("편집 모드에서만 배열 기능을 사용할 수 있습니다.", true);
             return;
         }
 
@@ -1653,7 +1648,7 @@ public class DashboardController {
             }
         }
 
-        showToast("배열 완료: " + mode, false);
+        dashboardUIService.showToast("배열 완료: " + mode, false);
     }
 
     private List<Node> getAllCanvasPanels() {
@@ -1802,28 +1797,6 @@ public class DashboardController {
         statusSummaryLabel.setText("강의실 " + classroomCount + ", 온라인 " + online + "/" + total);
         connectivityLabel.setText("연결됨");
         connectivityLabel.setTextFill(Color.web("#86efac"));
-    }
-
-    private void showToast(String message, boolean error) {
-        if (dashboardUIService != null) {
-            dashboardUIService.showToast(message, error);
-            return;
-        }
-
-        if (toastContainer == null) {
-            return;
-        }
-        Label toast = new Label(message);
-        toast.setStyle("-fx-background-color: " + (error ? "#c81d25" : "#15803d")
-                + "; -fx-text-fill: #fff; -fx-padding: 10 18 10 18; -fx-background-radius: 10; -fx-font-weight: 700;"
-                + " -fx-font-size: 15px; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 6, 0, 0, 2);");
-        toast.setWrapText(true);
-        toastContainer.getChildren().add(0, toast);
-
-        double duration = error ? 3.5 : 2.2;
-        PauseTransition delay = new PauseTransition(Duration.seconds(duration));
-        delay.setOnFinished(e -> toastContainer.getChildren().remove(toast));
-        delay.play();
     }
 
     private Button createActionButton(String text, String bgColor, String textColor) {
