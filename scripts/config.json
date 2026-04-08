@@ -1,7 +1,7 @@
 {
   "serverUrl" : "http://127.0.0.1:8888",
   "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
-  "agentToken" : "agt_16e925f64c1b41769a01b49ae6c36839",
+  "agentToken" : "",
   "tlsPinSha256" : "",
   "heartbeatIntervalSec" : 30,
   "jitterSec" : 5

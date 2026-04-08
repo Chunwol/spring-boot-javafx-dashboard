@@ -541,7 +541,7 @@ public class DashboardController {
     private Object getCurrentLayoutData() {
         Map<String, Object> layout = new HashMap<>();
         layout.put("zoom", dashboardViewModel.getZoomScale());
-        layout.put("snapToGrid", dashboardViewModel.isSnapToGridEnabled());
+        layout.put("snapToGrid", dashboardViewModel.isSnapToGrid());
         layout.put("gridSize", GRID_SIZE);
         layout.put("timestamp", java.time.LocalDateTime.now());
         return layout;
@@ -563,7 +563,7 @@ public class DashboardController {
 
             if (snapObj instanceof Boolean) {
                 boolean snapToGrid = (Boolean) snapObj;
-                if (snapToGrid != dashboardViewModel.isSnapToGridEnabled()) {
+                if (snapToGrid != dashboardViewModel.isSnapToGrid()) {
                     dashboardViewModel.toggleSnapToGrid();
                 }
             }
@@ -576,7 +576,7 @@ public class DashboardController {
     private void handleKeyboardShortcuts(javafx.scene.input.KeyEvent event) {
         // Escape: Toggle edit mode off if active
         if (event.getCode() == KeyCode.ESCAPE) {
-            if (dashboardViewModel.isEditModeActive()) {
+            if (dashboardViewModel.isEditMode()) {
                 dashboardViewModel.toggleEditMode();
             }
             event.consume();

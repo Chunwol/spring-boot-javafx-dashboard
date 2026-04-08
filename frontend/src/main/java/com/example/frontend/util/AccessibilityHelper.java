@@ -6,7 +6,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
-import javafx.scene.control.AccessibleRole;
+import javafx.scene.AccessibleRole;
+import javafx.scene.control.ScrollPane;
 import javafx.geometry.Bounds;
 
 /**
@@ -48,6 +49,14 @@ public class AccessibilityHelper {
     /**
      * Make a ComboBox accessible
      */
+    public static void makeAccessible(ComboBox<?> comboBox, String label, String help) {
+        comboBox.setAccessibleText(label);
+        comboBox.setAccessibleRole(AccessibleRole.COMBO_BOX);
+        if (help != null && !help.isEmpty()) {
+            comboBox.setAccessibleHelp(help);
+        }
+    }
+
     public static void makeAccessible(ComboBox<?> comboBox, String label) {
         comboBox.setAccessibleText(label);
         comboBox.setAccessibleRole(AccessibleRole.COMBO_BOX);
@@ -89,7 +98,7 @@ public class AccessibilityHelper {
     /**
      * Scroll node into view if not visible
      */
-    public static void scrollIntoView(javafx.scene.Node node, javafx.scene.layout.ScrollPane scrollPane) {
+    public static void scrollIntoView(javafx.scene.Node node, ScrollPane scrollPane) {
         if (scrollPane == null) {
             return;
         }

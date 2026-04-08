@@ -56,22 +56,64 @@ spring-boot-javafx-dashboard
 
 ## 설정
 
-### 빠른 시작
+### 빠른 시작 - 개발 환경 (Windows/Mac/Linux)
+
+#### 1️⃣ 환경 설정 파일 생성
 ```bash
-# 1. .env 파일 생성
-cp .env.example .env
-
-# 2. .env 파일을 환경에 맞게 수정
-# (자세한 설정 방법은 ENV_GUIDE.md 참고)
-
-# 3. 백엔드 실행
-./scripts/run-backend.bat
-
-# 4. 프론트엔드 개발 실행 (다른 터미널에서)
-./scripts/run-frontend-dev.bat
+# backend/.env 및 frontend/.env 생성 (자세한 설정은 ENV_GUIDE.md 참고)
 ```
 
-### 상세 설정
+#### 2️⃣ 통합 개발모드 실행 (권장)
+
+**Windows:**
+```batch
+scripts\run-dev.bat
+```
+
+**Mac/Linux/Git Bash:**
+```bash
+scripts/run-dev.sh
+```
+
+이 명령은 자동으로:
+- 전체 프로젝트를 빌드
+- 백엔드를 포트 8888에서 시작
+- 프론트엔드를 시작
+
+#### 3️⃣ 개별 실행 (필요시)
+
+**Windows:**
+```batch
+REM 백엔드만
+scripts\run-backend-only.bat
+
+REM 다시 터미널 열어서 프론트엔드
+scripts\run-frontend-dev.bat
+```
+
+**Mac/Linux/Git Bash:**
+```bash
+# 백엔드만
+scripts/run-backend-only.sh
+
+# 다시 터미널 열어서 프론트엔드
+scripts/run-frontend-only.sh
+```
+
+### ⚠️ Rate Limit 이슈 해결
+
+스타트 시 "IP 대역 목록 조회 실패 (Rate limit exceeded)" 에러가 나는 경우:
+
+**backend/.env** 파일에 다음을 추가:
+```properties
+# 개발 환경용 넉넉한 설정
+RATELIMIT_REQUESTS_PER_MINUTE=10000
+RATELIMIT_REQUESTS_PER_HOUR=300000
+```
+
+참고: `/ip-ranges` 엔드포인트는 개발모드에서 자동 제외되므로 영향 없습니다.
+
+### 전체 설정 가이드
 모든 환경 설정값은 `.env` 파일에서 관리됩니다.
 
 - **`.env` 파일 생성**: `.env.example` 파일을 복사하여 `.env` 파일 생성
@@ -101,20 +143,56 @@ JWT_SECRET=your-secret-key
 
 ## 실행 방법
 
-1. 백엔드 서버를 실행합니다:
-       ```bat
-       scripts\run-backend.bat
-       ```
+### 최신 방식 (권장) - scripts 폴더의 스크립트 사용
 
-2. 프론트엔드 애플리케이션을 실행합니다:
-       ```bat
-       scripts\run-frontend-dev.bat
-       ```
+#### Mac/Linux/Git Bash:
+```bash
+cd /path/to/spring-boot-javafx-dashboard
 
-3. 패키징된 프론트 EXE를 실행하려면:
-       ```bat
-       scripts\run-frontend.bat
-       ```
+# 통합 개발모드 (권장)
+./scripts/run-dev.sh
+
+# 또는 개별 실행
+./scripts/run-backend-only.sh      # 터미널 1
+./scripts/run-frontend-only.sh     # 터미널 2
+```
+
+#### Windows:
+```batch
+cd path\to\spring-boot-javafx-dashboard
+
+REM 통합 개발모드 (권장) - 별도 창에서 자동 실행
+scripts\run-dev.bat
+
+REM 또는 개별 실행
+scripts\run-backend-only.bat        REM 터미널 1
+scripts\run-frontend-dev.bat        REM 터미널 2
+```
+
+### 수동 실행 (서드파티 스크립트)
+
+1. 백엔드 서버를 실행합니다 (터미널 1):
+   ```bash
+   # Mac/Linux/Git Bash
+   ./gradlew :backend:bootRun
+
+   # Windows
+   gradlew.bat :backend:bootRun
+   ```
+
+2. 프론트엔드 애플리케이션을 실행합니다 (터미널 2):
+   ```bash
+   # Mac/Linux/Git Bash
+   ./gradlew :frontend:run
+
+   # Windows
+   gradlew.bat :frontend:run
+   ```
+
+### 접근 정보
+
+- **Backend API**: http://localhost:8888
+- **Frontend**: JavaFX GUI 클라이언트 (독립 창)
 
 ## 운영 스모크 테스트
 

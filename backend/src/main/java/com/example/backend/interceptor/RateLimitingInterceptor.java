@@ -83,7 +83,8 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
         return endpoint.contains("/health") ||
                endpoint.contains("/swagger") ||
                endpoint.contains("/api-docs") ||
-               endpoint.contains("/actuator");
+               endpoint.contains("/actuator") ||
+               endpoint.contains("/ip-ranges");  // Allow frequent IP range lookups
     }
 
     /**
