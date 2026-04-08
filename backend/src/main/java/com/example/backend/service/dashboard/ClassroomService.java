@@ -11,11 +11,11 @@ import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -152,17 +152,9 @@ public class ClassroomService {
     /**
      * Get paginated classroom summaries
      */
-    public Page<ClassroomSummaryDto> getClassroomSummariesPaged(int page, int size) {
+    public Page<ClassroomSummaryDto> getClassroomSummariesPaged(Pageable pageable) {
         List<ClassroomSummaryDto> summaries = getClassroomSummaries();
-        int safePage = Math.max(0, page);
-        int safeSize = Math.max(1, size);
-        int total = summaries.size();
-        int fromIndex = safePage * safeSize;
-        if (fromIndex >= total) {
-            return new PageImpl<>(List.of(), PageRequest.of(safePage, safeSize), total);
-        }
-        int toIndex = Math.min(fromIndex + safeSize, total);
-        return new PageImpl<>(summaries.subList(fromIndex, toIndex), PageRequest.of(safePage, safeSize), total);
+        return PaginationUtil.paginate(summaries, pageable);
     }
 
     /**

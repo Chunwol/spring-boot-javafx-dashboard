@@ -5,10 +5,10 @@ import com.example.backend.service.dashboard.ClassroomService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
  * 레거시 프론트 경로 호환용 alias 컨트롤러.
@@ -24,9 +24,7 @@ public class ApiCompatibilityController {
     }
 
     @GetMapping("/classrooms")
-    public ResponseEntity<Page<ClassroomSummaryDto>> listClassroomsAlias(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(classroomService.getClassroomSummariesPaged(page, size));
+    public ResponseEntity<Page<ClassroomSummaryDto>> listClassroomsAlias(Pageable pageable) {
+        return ResponseEntity.ok(classroomService.getClassroomSummariesPaged(pageable));
     }
 }

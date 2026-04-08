@@ -18,6 +18,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
@@ -71,12 +72,8 @@ public class DashboardApiController {
     @GetMapping("/classrooms")
     @Operation(summary = "모든 강의실 요약 정보 조회", description = "온라인 PC 수, 전체 PC 수, 마지막 하트비트 등 강의실별 요약 정보를 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "강의실 요약 조회 성공")
-    public ResponseEntity<Page<ClassroomSummaryDto>> getClassroomSummaries(
-            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
-            @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "페이지 크기", example = "20")
-            @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(classroomService.getClassroomSummariesPaged(page, size));
+    public ResponseEntity<Page<ClassroomSummaryDto>> getClassroomSummaries(Pageable pageable) {
+        return ResponseEntity.ok(classroomService.getClassroomSummariesPaged(pageable));
     }
 
     /**
@@ -89,11 +86,8 @@ public class DashboardApiController {
     @ApiResponse(responseCode = "200", description = "PC 상태 조회 성공")
     public ResponseEntity<Page<PcStatusDto>> getPcsInClassroom(
             @Parameter(description = "강의실 ID") @PathVariable Long classroomId,
-            @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
-            @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "페이지 크기", example = "20")
-            @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(pcStatusService.getPcStatusesPaged(classroomId, page, size));
+            Pageable pageable) {
+        return ResponseEntity.ok(pcStatusService.getPcStatusesPaged(classroomId, pageable));
     }
 
     @GetMapping("/classrooms/{classroomId}/traffic/pcs")
