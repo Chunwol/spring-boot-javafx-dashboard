@@ -4,6 +4,7 @@ import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardInfoDto;
 import com.example.dto.dashboard.DashboardPanelDto;
 import com.example.dto.dashboard.DashboardRefreshDto;
+import com.example.dto.dashboard.LayoutBackup;
 import com.example.dto.dashboard.NetworkTrafficDto;
 import com.example.frontend.controller.dashboard.DashboardCanvasModule;
 import com.example.frontend.controller.dashboard.DashboardClassroomModule;
@@ -21,8 +22,12 @@ import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.ApiClientException;
+import com.example.frontend.service.DashboardLayoutService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
+import com.example.frontend.util.AccessibilityHelper;
+import com.example.frontend.util.ThemeColorConstants;
+import com.example.frontend.util.ThemeManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import javafx.beans.value.ChangeListener;
@@ -52,6 +57,8 @@ import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
@@ -100,6 +107,7 @@ public class DashboardController {
     private DashboardDisconnectStatusPanelModule disconnectStatusPanelModule;
     private DashboardViewModel dashboardViewModel;
     private DashboardUIService dashboardUIService;
+    private DashboardLayoutService dashboardLayoutService;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
 
     private Pane classroomContainer;
@@ -226,6 +234,12 @@ public class DashboardController {
                 oldScene.heightProperty().removeListener(sceneHeightListener);
             }
             if (newScene != null) {
+                // Setup theme manager with the current scene
+                ThemeManager.setCurrentScene(newScene);
+
+                // Setup keyboard accessibility shortcuts
+                newScene.setOnKeyPressed(event -> handleKeyboardShortcuts(event));
+
                 awaitingInitialWindowShow = true;
                 newScene.widthProperty().addListener(sceneWidthListener);
                 newScene.heightProperty().addListener(sceneHeightListener);
@@ -262,15 +276,18 @@ public class DashboardController {
         Label title = new Label("통합 강의실 관제");
         title.setTextFill(Color.WHITE);
         title.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 20));
+        AccessibilityHelper.makeAccessible(title, "통합 강의실 관제");
 
         Label subtitle = new Label("실시간 모니터링, 원격 제어, 리포팅");
         subtitle.setTextFill(Color.web("#cbd5e0"));
         subtitle.setFont(Font.font("Segoe UI", 12));
+        AccessibilityHelper.makeAccessible(subtitle, "실시간 모니터링, 원격 제어, 리포팅");
         VBox titleBox = new VBox(2, title, subtitle);
 
         dashboardSelector = new ComboBox<>();
         dashboardSelector.setPromptText("대시보드 선택");
         dashboardSelector.setPrefWidth(200);
+        AccessibilityHelper.makeAccessible(dashboardSelector, "대시보드 선택", "사용할 대시보드를 선택합니다");
         dashboardSelector.setCellFactory(param -> new ListCell<>() {
             @Override
             protected void updateItem(DashboardInfoDto item, boolean empty) {
@@ -296,13 +313,16 @@ public class DashboardController {
         Button deleteDashboardBtn = createIconActionButton("삭제", "mdi2d-delete", "#d73a49", "white");
         deleteDashboardBtn.setOnAction(e -> handleDeleteDashboard());
         deleteDashboardBtn.setDisable(true); // 최초엔 비활성화, 목록 로드 후 갱신
+        AccessibilityHelper.makeAccessible(deleteDashboardBtn, "대시보드 삭제", "선택된 대시보드를 삭제합니다");
 
         // 대시보드 추가 버튼
         Button addDashboardBtn = createIconActionButton("+ 대시보드", "mdi2p-plus", "#15803d", "white");
         addDashboardBtn.setOnAction(e -> handleCreateDashboard());
+        AccessibilityHelper.makeAccessible(addDashboardBtn, "새 대시보드 생성", "새로운 대시보드를 생성합니다");
 
         Button logoutBtn = createIconActionButton("로그아웃", "mdi2l-logout", "#b4535f", "white");
         logoutBtn.setOnAction(e -> handleLogout());
+        AccessibilityHelper.makeAccessible(logoutBtn, "로그아웃", "현재 사용자 세션을 종료합니다");
 
         statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
         statusSummaryLabel.setTextFill(Color.web("#cbd5e0"));
@@ -323,10 +343,30 @@ public class DashboardController {
         HBox dashboardBox = new HBox(6, dashboardSelector, deleteDashboardBtn);
         dashboardBox.setAlignment(Pos.CENTER_LEFT);
 
+        // 레이아웃 메뉴 (백업/복원)
+        MenuButton layoutMenu = new MenuButton("레이아웃");
+        MenuItem backupItem = new MenuItem("백업");
+        backupItem.setOnAction(e -> handleLayoutBackup());
+        MenuItem restoreItem = new MenuItem("복원");
+        restoreItem.setOnAction(e -> handleLayoutRestore());
+        layoutMenu.getItems().addAll(backupItem, restoreItem);
+
+        // 테마 메뉴 (Light/Dark/HighContrast)
+        MenuButton themeMenu = new MenuButton("테마");
+        MenuItem lightThemeItem = new MenuItem("라이트");
+        lightThemeItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.LIGHT));
+        MenuItem darkThemeItem = new MenuItem("다크");
+        darkThemeItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.DARK));
+        MenuItem highContrastItem = new MenuItem("고대비");
+        highContrastItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.HIGH_CONTRAST));
+        themeMenu.getItems().addAll(lightThemeItem, darkThemeItem, highContrastItem);
+
         topBar.getChildren().addAll(
             titleBox,
             dashboardBox,
             addDashboardBtn,
+            layoutMenu,
+            themeMenu,
             logoutBtn,
             spacer
         );
@@ -443,6 +483,114 @@ public class DashboardController {
                 dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
             }
         });
+    }
+
+    private void handleLayoutBackup() {
+        Long dashboardId = currentDashboardId();
+        if (dashboardId == null) {
+            dashboardUIService.showToast("대시보드를 선택해주세요.", true);
+            return;
+        }
+
+        TextInputDialog dialog = new TextInputDialog("백업_" + System.currentTimeMillis());
+        dialog.setTitle("백업");
+        dialog.setHeaderText("레이아웃 백업 이름 입력");
+        dialog.setContentText("백업이름:");
+        dialog.showAndWait().ifPresent(name -> {
+            if (name.trim().isEmpty()) {
+                dashboardUIService.showToast("백업 이름을 입력해주세요.", true);
+                return;
+            }
+
+            Object layoutData = getCurrentLayoutData();
+            dashboardLayoutService.backupCurrentLayout(dashboardId, name.trim(), layoutData)
+                .thenAccept(path -> Platform.runLater(() -> {
+                    dashboardUIService.showToast("백업 완료: " + new java.io.File(path).getName(), false);
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> dashboardUIService.showToast("백업 실패: " + ex.getMessage(), true));
+                    return null;
+                });
+        });
+    }
+
+    private void handleLayoutRestore() {
+        Long dashboardId = currentDashboardId();
+        if (dashboardId == null) {
+            dashboardUIService.showToast("대시보드를 선택해주세요.", true);
+            return;
+        }
+
+        Window owner = rootVBox.getScene() != null ? rootVBox.getScene().getWindow() : null;
+        dashboardLayoutService.restoreLayoutFromFile(owner, dashboardId)
+            .thenAccept(backup -> {
+                if (backup == null) {
+                    return;
+                }
+                Platform.runLater(() -> {
+                    applyRestoredLayout(backup);
+                    dashboardUIService.showToast("레이아웃이 복원되었습니다.", false);
+                });
+            })
+            .exceptionally(ex -> {
+                Platform.runLater(() -> dashboardUIService.showToast("복원 실패: " + ex.getMessage(), true));
+                return null;
+            });
+    }
+
+    private Object getCurrentLayoutData() {
+        Map<String, Object> layout = new HashMap<>();
+        layout.put("zoom", dashboardViewModel.getZoomScale());
+        layout.put("snapToGrid", dashboardViewModel.isSnapToGridEnabled());
+        layout.put("gridSize", GRID_SIZE);
+        layout.put("timestamp", java.time.LocalDateTime.now());
+        return layout;
+    }
+
+    private void applyRestoredLayout(LayoutBackup backup) {
+        if (backup == null || backup.getLayoutData() == null) {
+            return;
+        }
+        try {
+            Map<String, ?> layout = (Map<String, ?>) backup.getLayoutData();
+            Object zoomObj = layout.get("zoom");
+            Object snapObj = layout.get("snapToGrid");
+
+            if (zoomObj instanceof Number) {
+                double zoom = ((Number) zoomObj).doubleValue();
+                dashboardViewModel.setZoom(zoom);
+            }
+
+            if (snapObj instanceof Boolean) {
+                boolean snapToGrid = (Boolean) snapObj;
+                if (snapToGrid != dashboardViewModel.isSnapToGridEnabled()) {
+                    dashboardViewModel.toggleSnapToGrid();
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to apply restored layout", ex);
+            dashboardUIService.showToast("레이아웃 적용 실패: " + ex.getMessage(), true);
+        }
+    }
+
+    private void handleKeyboardShortcuts(javafx.scene.input.KeyEvent event) {
+        // Escape: Toggle edit mode off if active
+        if (event.getCode() == KeyCode.ESCAPE) {
+            if (dashboardViewModel.isEditModeActive()) {
+                dashboardViewModel.toggleEditMode();
+            }
+            event.consume();
+        }
+        // Ctrl+S: Save/Backup current layout
+        else if (event.isControlDown() && event.getCode() == KeyCode.S) {
+            handleLayoutBackup();
+            event.consume();
+        }
+        // Ctrl+Z: Undo (restore from last backup)
+        else if (event.isControlDown() && event.getCode() == KeyCode.Z) {
+            handleLayoutRestore();
+            event.consume();
+        }
     }
 
     private Node buildTabs() {
@@ -566,6 +714,8 @@ public class DashboardController {
                 editOnlyToolbar,
                 leftEditControls
             );
+
+            dashboardLayoutService = new DashboardLayoutService(httpClient, objectMapper, ApiClient.getInstance().getBaseUrl());
 
             networkPanelModule = new DashboardNetworkPanelModule(
                 dashboardService,
