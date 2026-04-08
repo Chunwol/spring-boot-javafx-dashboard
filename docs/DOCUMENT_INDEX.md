@@ -85,6 +85,10 @@
 - **프로젝트 계획**
 - 일정, 마일스톤, 주요 목표, 단계별 작업
 
+## 21. [MASSIVE_FILE_DISTRIBUTION_ARCHITECTURE.md](MASSIVE_FILE_DISTRIBUTION_ARCHITECTURE.md)
+- **800대 대량 안정배포 아키텍처 설계서 (무타협)**
+- 30GB급 파일의 단일/다중 배포를 위한 청크·웨이브·릴레이·보안·관측·복구 전략
+
 ---
 
 > 각 문서명 클릭 시 해당 문서로 바로 이동합니다.

@@ -1,5 +1,9 @@
 package com.example.backend.common.error;
 
+import com.example.backend.common.exception.ApplicationException;
+import com.example.backend.common.exception.ResourceNotFoundException;
+import com.example.backend.common.exception.InvalidRequestException;
+import com.example.backend.common.exception.ConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -20,7 +24,59 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-        private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    // ======== APPLICATION EXCEPTIONS ========
+
+    @ExceptionHandler(ApplicationException.class)
+    public ResponseEntity<ApiErrorResponse> handleApplicationException(
+            ApplicationException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                ex.getHttpStatus(),
+                ex.getCode(),
+                ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.status(ex.getHttpStatus()).body(resp);
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleResourceNotFound(
+            ResourceNotFoundException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.NOT_FOUND.value(),
+                "RESOURCE_NOT_FOUND",
+                ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(resp);
+    }
+
+    @ExceptionHandler(InvalidRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidRequest(
+            InvalidRequestException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "INVALID_REQUEST",
+                ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.badRequest().body(resp);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleConflict(
+            ConflictException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.CONFLICT.value(),
+                "CONFLICT",
+                ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(resp);
+    }
+
+    // ======== VALIDATION EXCEPTIONS ========
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleMethodArgumentNotValid(
@@ -28,7 +84,7 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Validation Failed",
+                "VALIDATION_FAILED",
                 "입력값 검증에 실패했습니다.",
                 request.getRequestURI());
 
@@ -44,7 +100,7 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Validation Failed",
+                "VALIDATION_FAILED",
                 "요청 파라미터 검증에 실패했습니다.",
                 request.getRequestURI());
 
@@ -54,13 +110,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(resp);
     }
 
+    // ======== FORMAT/TYPE EXCEPTIONS ========
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiErrorResponse> handleNotReadable(
             HttpMessageNotReadableException ex,
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Malformed JSON",
+                "MALFORMED_REQUEST",
                 "요청 본문(JSON) 형식이 올바르지 않습니다.",
                 request.getRequestURI());
         return ResponseEntity.badRequest().body(resp);
@@ -72,7 +130,7 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Type Mismatch",
+                "TYPE_MISMATCH",
                 "요청 파라미터 타입이 올바르지 않습니다: " + ex.getName(),
                 request.getRequestURI());
         return ResponseEntity.badRequest().body(resp);
@@ -84,35 +142,27 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
+                "INVALID_ARGUMENT",
                 ex.getMessage(),
                 request.getRequestURI());
         return ResponseEntity.badRequest().body(resp);
     }
 
-        @ExceptionHandler(UnauthorizedException.class)
-        public ResponseEntity<ApiErrorResponse> handleUnauthorized(
-                        UnauthorizedException ex,
-                        HttpServletRequest request) {
-                ApiErrorResponse resp = ApiErrorResponse.of(
-                                HttpStatus.UNAUTHORIZED.value(),
-                                "Unauthorized",
-                                ex.getMessage(),
-                                request.getRequestURI());
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(resp);
-        }
+    // ======== AUTHORIZATION EXCEPTIONS ========
 
-        @ExceptionHandler(ConflictException.class)
-        public ResponseEntity<ApiErrorResponse> handleConflict(
-                        ConflictException ex,
-                        HttpServletRequest request) {
-                ApiErrorResponse resp = ApiErrorResponse.of(
-                                HttpStatus.CONFLICT.value(),
-                                "Conflict",
-                                ex.getMessage(),
-                                request.getRequestURI());
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(resp);
-        }
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnauthorized(
+            UnauthorizedException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.UNAUTHORIZED.value(),
+                "UNAUTHORIZED",
+                ex.getMessage(),
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(resp);
+    }
+
+    // ======== NOT FOUND EXCEPTIONS ========
 
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ApiErrorResponse> handleNoSuchElement(
@@ -120,11 +170,13 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.NOT_FOUND.value(),
-                "Not Found",
-                ex.getMessage(),
+                "NOT_FOUND",
+                "요청한 리소스를 찾을 수 없습니다.",
                 request.getRequestURI());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(resp);
     }
+
+    // ======== METHOD EXCEPTIONS ========
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiErrorResponse> handleMethodNotAllowed(
@@ -132,11 +184,13 @@ public class GlobalExceptionHandler {
             HttpServletRequest request) {
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.METHOD_NOT_ALLOWED.value(),
-                "Method Not Allowed",
+                "METHOD_NOT_ALLOWED",
                 "지원하지 않는 HTTP 메서드입니다.",
                 request.getRequestURI());
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(resp);
     }
+
+    // ======== GENERIC EXCEPTION ========
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
@@ -145,7 +199,7 @@ public class GlobalExceptionHandler {
         log.error("Unhandled exception at {} {}", request.getMethod(), request.getRequestURI(), ex);
         ApiErrorResponse resp = ApiErrorResponse.of(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                "Internal Server Error",
+                "INTERNAL_SERVER_ERROR",
                 "서버 내부 오류가 발생했습니다.",
                 request.getRequestURI());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(resp);

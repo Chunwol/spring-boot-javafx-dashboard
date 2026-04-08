@@ -319,12 +319,13 @@ public class DashboardClassroomModule {
 
         Label nameLabel = new Label(summary.getGroupName());
         nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 22));
-        nameLabel.setTextFill(Color.web("#e5e7eb"));
+        nameLabel.setTextFill(Color.WHITE);
         nameLabel.setMaxWidth(Double.MAX_VALUE);
+        nameLabel.setStyle("-fx-text-fill: white; -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.45), 4, 0, 0, 1);");
         StackPane titleBanner = new StackPane(nameLabel);
         titleBanner.setPadding(new Insets(12, 10, 12, 10));
         VBox.setVgrow(titleBanner, Priority.NEVER);
-        titleBanner.setStyle("-fx-background-color: #1f7a42; -fx-background-radius: 10;");
+        titleBanner.setStyle("-fx-background-color: #166534; -fx-background-radius: 10;");
 
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
@@ -357,16 +358,18 @@ public class DashboardClassroomModule {
         header.setAlignment(Pos.CENTER_RIGHT);
 
         Label totalLabel = new Label(summary.getTotalPcs() + " 대");
-        totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        totalLabel.setTextFill(Color.web("#f3f4f6"));
+        totalLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 16));
+        totalLabel.setTextFill(Color.WHITE);
+        totalLabel.setStyle("-fx-text-fill: white;");
         StackPane totalBox = new StackPane(totalLabel);
         totalBox.setPadding(new Insets(9, 8, 9, 8));
-        totalBox.setStyle("-fx-background-color: #64748b; -fx-background-radius: 6;");
+        totalBox.setStyle("-fx-background-color: #334155; -fx-background-radius: 6;");
         HBox.setHgrow(totalBox, Priority.ALWAYS);
 
         Label onlineLabel = new Label(summary.getOnlinePcs() + " 대");
-        onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        onlineLabel.setTextFill(Color.web("#f3f4f6"));
+        onlineLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 16));
+        onlineLabel.setTextFill(Color.WHITE);
+        onlineLabel.setStyle("-fx-text-fill: white;");
         StackPane onlineBox = new StackPane(onlineLabel);
         onlineBox.setPadding(new Insets(9, 8, 9, 8));
         onlineBox.setStyle("-fx-background-color: #15803d; -fx-background-radius: 6;");
@@ -374,11 +377,12 @@ public class DashboardClassroomModule {
 
         int offlineCount = Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs());
         Label offlineLabel = new Label(offlineCount + " 대");
-        offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        offlineLabel.setTextFill(Color.web("#f3f4f6"));
+        offlineLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 16));
+        offlineLabel.setTextFill(Color.WHITE);
+        offlineLabel.setStyle("-fx-text-fill: white;");
         StackPane offlineBox = new StackPane(offlineLabel);
         offlineBox.setPadding(new Insets(9, 8, 9, 8));
-        offlineBox.setStyle("-fx-background-color: #b4535f; -fx-background-radius: 6;");
+        offlineBox.setStyle("-fx-background-color: #9f1239; -fx-background-radius: 6;");
         HBox.setHgrow(offlineBox, Priority.ALWAYS);
 
         HBox countStrip = new HBox(4, totalBox, onlineBox, offlineBox);
@@ -422,9 +426,9 @@ public class DashboardClassroomModule {
             double w = nv.doubleValue();
             nameLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, (int) Math.max(12, Math.min(36, w * 0.09))));
             int cntFs = (int) Math.max(10, Math.min(22, w * 0.05));
-            totalLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
-            onlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
-            offlineLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, cntFs));
+            totalLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, cntFs));
+            onlineLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, cntFs));
+            offlineLabel.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, cntFs));
             List<PcStatusDto> cached = pcCacheByGroupId.get(summary.getGroupId());
             renderPcGrid(summary.getTotalPcs(), cached, pcGrid, panel);
         });
@@ -434,11 +438,12 @@ public class DashboardClassroomModule {
         });
 
         HBox buttonBox = new HBox(5);
+        buttonBox.setAlignment(Pos.CENTER);
         Button shutdownAllBtn = new Button("전체 종료");
         shutdownAllBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
         shutdownAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "SHUTDOWN"));
 
-        Button wolAllBtn = new Button("전체 켜기(WOL)");
+        Button wolAllBtn = new Button("전체 켜기");
         wolAllBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white;");
         wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "WOL"));
 
@@ -449,10 +454,10 @@ public class DashboardClassroomModule {
         String customPanelName = panelDto.getPanelName();
         if (customPanelName != null && !customPanelName.isBlank()) {
             Label panelNameLabel = new Label(customPanelName);
-            panelNameLabel.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 13));
-            panelNameLabel.setTextFill(Color.web("#94a3b8"));
+            panelNameLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+            panelNameLabel.setTextFill(Color.WHITE);
             panelNameLabel.setMaxWidth(Double.MAX_VALUE);
-            panelNameLabel.setStyle("-fx-padding: 2 8 0 8;");
+            panelNameLabel.setStyle("-fx-text-fill: white; -fx-padding: 4 10 4 10; -fx-background-color: #334155; -fx-background-radius: 8;");
             panel.getProperties().put("panelNameLabel", panelNameLabel);
             panel.getChildren().add(panelNameLabel);
         }
@@ -489,14 +494,28 @@ public class DashboardClassroomModule {
         Label nameLabel = (Label) panel.getProperties().get("nameLabel");
         if (nameLabel != null) {
             nameLabel.setText(summary.getGroupName());
+            nameLabel.setTextFill(Color.WHITE);
+            nameLabel.setStyle("-fx-text-fill: white; -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.45), 4, 0, 0, 1);");
         }
 
         Label totalLabel = (Label) panel.getProperties().get("totalLabel");
         Label onlineLabel = (Label) panel.getProperties().get("onlineLabel");
         Label offlineLabel = (Label) panel.getProperties().get("offlineLabel");
-        if (totalLabel != null) totalLabel.setText(summary.getTotalPcs() + " 대");
-        if (onlineLabel != null) onlineLabel.setText(summary.getOnlinePcs() + " 대");
-        if (offlineLabel != null) offlineLabel.setText(Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs()) + " 대");
+        if (totalLabel != null) {
+            totalLabel.setText(summary.getTotalPcs() + " 대");
+            totalLabel.setTextFill(Color.WHITE);
+            totalLabel.setStyle("-fx-text-fill: white;");
+        }
+        if (onlineLabel != null) {
+            onlineLabel.setText(summary.getOnlinePcs() + " 대");
+            onlineLabel.setTextFill(Color.WHITE);
+            onlineLabel.setStyle("-fx-text-fill: white;");
+        }
+        if (offlineLabel != null) {
+            offlineLabel.setText(Math.max(0, summary.getTotalPcs() - summary.getOnlinePcs()) + " 대");
+            offlineLabel.setTextFill(Color.WHITE);
+            offlineLabel.setStyle("-fx-text-fill: white;");
+        }
 
         GridPane pcGrid = (GridPane) panel.getProperties().get("pcGrid");
         if (pcGrid != null) {
@@ -519,13 +538,13 @@ public class DashboardClassroomModule {
     }
 
     private void updatePanelStyle(VBox panel, ClassroomSummaryDto summary) {
-        String baseStyle = "-fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.12), 16, 0, 0, 4); -fx-border-color: #d8dee8; -fx-border-radius: 12;";
-        panel.setStyle(baseStyle + " -fx-background-color: #f8fafc;");
+        String baseStyle = "-fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.10), 12, 0, 0, 3); -fx-border-color: #cbd5e1; -fx-border-radius: 12; -fx-border-width: 1.2;";
+        panel.setStyle(baseStyle + " -fx-background-color: #ffffff;");
 
         Node bannerNode = (Node) panel.getProperties().get("titleBanner");
         if (bannerNode instanceof StackPane banner) {
             boolean teacherOnline = "ONLINE".equalsIgnoreCase(summary.getTeacherPcStatus());
-            banner.setStyle("-fx-background-color: " + (teacherOnline ? "#1f7a42" : "#55657c") + "; -fx-background-radius: 10;");
+            banner.setStyle("-fx-background-color: " + (teacherOnline ? "#166534" : "#334155") + "; -fx-background-radius: 10;");
         }
     }
 
@@ -593,9 +612,9 @@ public class DashboardClassroomModule {
             PcStatusDto pc = i < list.size() ? list.get(i) : null;
             String status = pc != null && pc.getStatus() != null ? pc.getStatus().toUpperCase() : "OFFLINE";
             String bg = switch (status) {
-                case "ONLINE" -> "#2f855a";
-                case "BROKEN", "FAILED" -> "#c95f6a";
-                default -> "#94a3b8";
+                case "ONLINE" -> "#22a06b";
+                case "BROKEN", "FAILED" -> "#d55f74";
+                default -> "#7a8aa0";
             };
 
             Label cell = new Label(String.valueOf(i + 1));
@@ -617,7 +636,6 @@ public class DashboardClassroomModule {
         int curMin = (int) panel.getProperties().getOrDefault("gridMinCell", 16);
         int curMax = (int) panel.getProperties().getOrDefault("gridMaxCell", 56);
         int curCols = (int) panel.getProperties().getOrDefault("gridMaxCols", 20);
-        String curOrderMode = (String) panel.getProperties().getOrDefault("gridOrderMode", ORDER_BY_PC_NAME);
 
         Spinner<Integer> minSpinner = new Spinner<>(8, 80, curMin, 2);
         minSpinner.setEditable(true);
@@ -628,11 +646,6 @@ public class DashboardClassroomModule {
         Spinner<Integer> colsSpinner = new Spinner<>(1, 50, curCols, 1);
         colsSpinner.setEditable(true);
         colsSpinner.setPrefWidth(85);
-        ComboBox<String> orderCombo = new ComboBox<>();
-        orderCombo.getItems().addAll("PC 이름 순", "IP 순");
-        orderCombo.setValue(ORDER_BY_IP.equals(curOrderMode) ? "IP 순" : "PC 이름 순");
-        orderCombo.setPrefWidth(120);
-
         GridPane form = new GridPane();
         form.setHgap(12);
         form.setVgap(8);
@@ -643,8 +656,6 @@ public class DashboardClassroomModule {
         form.add(maxSpinner, 1, 1);
         form.add(new Label("최대 열 수:"), 0, 2);
         form.add(colsSpinner, 1, 2);
-        form.add(new Label("순번 정렬:"), 0, 3);
-        form.add(orderCombo, 1, 3);
 
         dialog.getDialogPane().setContent(form);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -654,30 +665,6 @@ public class DashboardClassroomModule {
                 panel.getProperties().put("gridMinCell", minSpinner.getValue());
                 panel.getProperties().put("gridMaxCell", maxSpinner.getValue());
                 panel.getProperties().put("gridMaxCols", colsSpinner.getValue());
-                String newOrderMode = "IP 순".equals(orderCombo.getValue()) ? ORDER_BY_IP : ORDER_BY_PC_NAME;
-                panel.getProperties().put("gridOrderMode", newOrderMode);
-
-                // gridOrderMode를 dashboard_panels.config_json 에 영속
-                Long panelId = (Long) panel.getProperties().get("dashboardPanelId");
-                long dashId = dashboardIdSupplier.getAsLong();
-                if (panelId != null && dashId > 0) {
-                    try {
-                        String base = (String) panel.getProperties().getOrDefault("configJsonBase", "{}");
-                        Map<String, Object> cfg = new java.util.LinkedHashMap<>();
-                        if (base != null && !base.isBlank()) {
-                            cfg = objectMapper.readValue(base, new TypeReference<Map<String, Object>>() {});
-                        }
-                        cfg.put("gridOrderMode", newOrderMode);
-                        String newJson = objectMapper.writeValueAsString(cfg);
-                        panel.getProperties().put("configJsonBase", newJson);
-                           Map<String, Object> payload = new java.util.LinkedHashMap<>();
-                           payload.put("configJson", newJson);
-                           apiClient.putJson("/dashboards/" + dashId + "/panels/" + panelId, payload)
-                                .exceptionally(ex -> null);
-                    } catch (Exception e) {
-                        log.debug("정렬 설정 저장 실패", e);
-                    }
-                }
 
                 renderPcGrid(totalCount, pcCacheByGroupId.get(groupId), pcGrid, panel);
             }

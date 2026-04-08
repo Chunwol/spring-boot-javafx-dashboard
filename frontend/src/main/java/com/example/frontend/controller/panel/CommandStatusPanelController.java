@@ -198,7 +198,15 @@ public class CommandStatusPanelController {
 
         TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("종류");
         typeCol.setPrefWidth(90);
-        typeCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "commandType", "type")));
+        typeCol.setCellValueFactory(data -> new SimpleStringProperty(extractCommandDisplayType(data.getValue())));
+
+        TableColumn<Map<String, Object>, String> transferCol = new TableColumn<>("전송대상");
+        transferCol.setPrefWidth(180);
+        transferCol.setCellValueFactory(data -> new SimpleStringProperty(extractTransferDisplay(data.getValue())));
+
+        TableColumn<Map<String, Object>, String> destinationCol = new TableColumn<>("대상경로");
+        destinationCol.setPrefWidth(190);
+        destinationCol.setCellValueFactory(data -> new SimpleStringProperty(extractDestinationDisplay(data.getValue())));
 
         TableColumn<Map<String, Object>, String> modeCol = new TableColumn<>("실행옵션");
         modeCol.setPrefWidth(220);
@@ -258,7 +266,7 @@ public class CommandStatusPanelController {
             }
         });
 
-        table.getColumns().addAll(timeCol, roomCol, pcNameCol, ipCol, macCol, typeCol, modeCol, statusCol, exitCol, detailCol);
+        table.getColumns().addAll(timeCol, roomCol, pcNameCol, ipCol, macCol, typeCol, transferCol, destinationCol, modeCol, statusCol, exitCol, detailCol);
         table.setRowFactory(tv -> {
             TableRow<Map<String, Object>> row = new TableRow<>();
             row.setOnMouseClicked(event -> {
@@ -326,9 +334,11 @@ public class CommandStatusPanelController {
                         asText(row, "pcName"),
                         asText(row, "ipAddress"),
                         asText(row, "macAddress"),
-                        asText(row, "commandType", "type"),
+                        extractCommandDisplayType(row),
                         extractDetailedStatus(row),
                         extractRunMode(row),
+                        extractTransferDisplay(row),
+                        extractDestinationDisplay(row),
                         asText(row, "scriptUrl"))
                 .toLowerCase(Locale.ROOT)
                 .contains(query);
@@ -487,20 +497,81 @@ public class CommandStatusPanelController {
         if (!"RUN_PS1".equalsIgnoreCase(type)) {
             return "-";
         }
+        JsonNode payload = parsePayload(row);
+        if (payload == null) {
+            return "대기 실행 · 창 숨김";
+        }
+
+        boolean transferMode = payload.has("transferMode") && payload.get("transferMode").asBoolean(false);
+        String runMode = payload.has("runMode") ? payload.get("runMode").asText("") : "";
+        String windowMode = payload.has("windowMode") ? payload.get("windowMode").asText("") : "";
+        String runModeLabel = "BACKGROUND".equalsIgnoreCase(runMode) ? "즉시 실행" : "대기 실행";
+        String windowModeLabel = "VISIBLE".equalsIgnoreCase(windowMode) ? "창 표시" : "창 숨김";
+        if (transferMode) {
+            String runAfter = payload.has("runAfterTransfer") && payload.get("runAfterTransfer").asBoolean(false)
+                    ? "전송후 실행"
+                    : "전송만";
+            return runAfter + " · " + runModeLabel + " · " + windowModeLabel;
+        }
+        return runModeLabel + " · " + windowModeLabel;
+    }
+
+    private JsonNode parsePayload(Map<String, Object> row) {
         try {
             String payloadJson = asText(row, "payloadJson");
             if (payloadJson.isBlank()) {
-                return "대기 실행 · 창 숨김";
+                return null;
             }
-            JsonNode payload = objectMapper.readTree(payloadJson);
-            String runMode = payload.has("runMode") ? payload.get("runMode").asText("") : "";
-            String windowMode = payload.has("windowMode") ? payload.get("windowMode").asText("") : "";
-            String runModeLabel = "BACKGROUND".equalsIgnoreCase(runMode) ? "즉시 실행" : "대기 실행";
-            String windowModeLabel = "VISIBLE".equalsIgnoreCase(windowMode) ? "창 표시" : "창 숨김";
-            return runModeLabel + " · " + windowModeLabel;
-        } catch (Exception e) {
-            return "대기 실행 · 창 숨김";
+            return objectMapper.readTree(payloadJson);
+        } catch (Exception ignored) {
+            return null;
         }
+    }
+
+    private String extractCommandDisplayType(Map<String, Object> row) {
+        String type = asText(row, "commandType", "type");
+        if (!"RUN_PS1".equalsIgnoreCase(type)) {
+            return type;
+        }
+        JsonNode payload = parsePayload(row);
+        if (payload != null && payload.has("transferMode") && payload.get("transferMode").asBoolean(false)) {
+            return "FILE_TX";
+        }
+        return "RUN_PS1";
+    }
+
+    private String extractTransferDisplay(Map<String, Object> row) {
+        String type = asText(row, "commandType", "type");
+        if (!"RUN_PS1".equalsIgnoreCase(type)) {
+            return "-";
+        }
+        JsonNode payload = parsePayload(row);
+        if (payload == null || !payload.has("transferMode") || !payload.get("transferMode").asBoolean(false)) {
+            return "-";
+        }
+        String sourceType = payload.has("sourceType") ? payload.get("sourceType").asText("file") : "file";
+        String displayName = payload.has("displayName") ? payload.get("displayName").asText("-") : "-";
+        return ("folder".equalsIgnoreCase(sourceType) ? "폴더" : "파일") + " · " + displayName;
+    }
+
+    private String extractDestinationDisplay(Map<String, Object> row) {
+        String type = asText(row, "commandType", "type");
+        if (!"RUN_PS1".equalsIgnoreCase(type)) {
+            return "-";
+        }
+        JsonNode payload = parsePayload(row);
+        if (payload == null || !payload.has("transferMode") || !payload.get("transferMode").asBoolean(false)) {
+            return "-";
+        }
+        String mode = payload.has("destinationMode") ? payload.get("destinationMode").asText("DOWNLOADS") : "DOWNLOADS";
+        if ("DESKTOP".equalsIgnoreCase(mode)) {
+            return "바탕화면";
+        }
+        if ("CUSTOM".equalsIgnoreCase(mode)) {
+            String custom = payload.has("destinationPath") ? payload.get("destinationPath").asText("") : "";
+            return custom.isBlank() ? "사용자 지정(미입력)" : custom;
+        }
+        return "다운로드 폴더";
     }
 
     private void showCommandDetail(Map<String, Object> row) {
@@ -517,6 +588,8 @@ public class CommandStatusPanelController {
         content.getChildren().addAll(
             buildMetaRow("상태", extractDetailedStatus(row)),
             buildMetaRow("실행방식", extractRunMode(row)),
+            buildMetaRow("전송대상", extractTransferDisplay(row)),
+            buildMetaRow("대상경로", extractDestinationDisplay(row)),
             buildMetaRow("종료코드", asText(row, "exitCode")),
             buildMetaRow("검증상태", verificationLabel(row)),
             buildMetaRow("강의실", extractGroupName(row)),

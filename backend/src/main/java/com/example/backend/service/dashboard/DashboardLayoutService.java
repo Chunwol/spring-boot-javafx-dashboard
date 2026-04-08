@@ -1,5 +1,8 @@
 package com.example.backend.service.dashboard;
 
+import com.example.backend.common.exception.ConflictException;
+import com.example.backend.common.exception.InvalidRequestException;
+import com.example.backend.common.exception.ResourceNotFoundException;
 import com.example.backend.dto.dashboard.DashboardPanelUpsertRequest;
 import com.example.backend.model.dashboard.DashboardLayout;
 import com.example.backend.model.dashboard.DashboardLayoutBackup;
@@ -59,7 +62,7 @@ public class DashboardLayoutService {
     @Transactional
     public DashboardLayout updateDashboard(Long id, DashboardLayout request) {
         DashboardLayout dashboard = dashboardLayoutRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("대시보드를 찾을 수 없습니다: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Dashboard", id));
 
         if (request.getName() != null && !request.getName().isBlank()) {
             dashboard.setName(request.getName());
@@ -98,10 +101,10 @@ public class DashboardLayoutService {
     @Transactional
     public DashboardPanel updatePanel(Long dashboardId, Long panelId, DashboardPanelUpsertRequest request) {
         DashboardPanel panel = dashboardPanelRepository.findById(panelId)
-                .orElseThrow(() -> new IllegalArgumentException("패널을 찾을 수 없습니다: " + panelId));
+                .orElseThrow(() -> new ResourceNotFoundException("Panel", panelId));
 
         if (!dashboardId.equals(panel.getDashboardId())) {
-            throw new IllegalArgumentException("대시보드와 패널이 일치하지 않습니다.");
+            throw new ConflictException("Panel", "Dashboard ID mismatch");
         }
 
         applyPanelRequest(panel, request, false);
@@ -112,9 +115,9 @@ public class DashboardLayoutService {
     @Transactional
     public void deletePanel(Long dashboardId, Long panelId) {
         DashboardPanel panel = dashboardPanelRepository.findById(panelId)
-                .orElseThrow(() -> new IllegalArgumentException("패널을 찾을 수 없습니다: " + panelId));
+                .orElseThrow(() -> new ResourceNotFoundException("Panel", panelId));
         if (!dashboardId.equals(panel.getDashboardId())) {
-            throw new IllegalArgumentException("대시보드와 패널이 일치하지 않습니다.");
+            throw new ConflictException("Panel", "Dashboard ID mismatch");
         }
         dashboardPanelRepository.delete(panel);
     }
@@ -122,7 +125,7 @@ public class DashboardLayoutService {
     private void applyPanelRequest(DashboardPanel panel, DashboardPanelUpsertRequest request, boolean createMode) {
         if (createMode) {
             if (request.getPanelType() == null || request.getPanelType().isBlank()) {
-                throw new IllegalArgumentException("panelType은 필수입니다.");
+                throw new InvalidRequestException("panelType", "required field");
             }
             panel.setPanelType(request.getPanelType());
         } else if (request.getPanelType() != null && !request.getPanelType().isBlank()) {
@@ -152,7 +155,7 @@ public class DashboardLayoutService {
                                                String layoutDataJson, String createdBy) {
         // Verify dashboard exists
         dashboardLayoutRepository.findById(dashboardId)
-                .orElseThrow(() -> new IllegalArgumentException("대시보드를 찾을 수 없습니다: " + dashboardId));
+                .orElseThrow(() -> new ResourceNotFoundException("Dashboard", dashboardId));
 
         DashboardLayoutBackup backup = new DashboardLayoutBackup(
                 dashboardId,
@@ -176,7 +179,7 @@ public class DashboardLayoutService {
      */
     public Page<DashboardLayoutBackup> listBackups(Long dashboardId, int page, int size) {
         dashboardLayoutRepository.findById(dashboardId)
-                .orElseThrow(() -> new IllegalArgumentException("대시보드를 찾을 수 없습니다: " + dashboardId));
+                .orElseThrow(() -> new ResourceNotFoundException("Dashboard", dashboardId));
 
         Pageable pageable = PageRequest.of(page, size);
         return backupRepository.findByDashboardId(dashboardId, pageable);
@@ -187,7 +190,7 @@ public class DashboardLayoutService {
      */
     public DashboardLayoutBackup getBackup(Long backupId) {
         return backupRepository.findById(backupId)
-                .orElseThrow(() -> new IllegalArgumentException("백업을 찾을 수 없습니다: " + backupId));
+                .orElseThrow(() -> new ResourceNotFoundException("DashboardLayoutBackup", backupId));
     }
 
     /**
@@ -196,13 +199,13 @@ public class DashboardLayoutService {
     @Transactional
     public DashboardLayoutBackup restoreFromBackup(Long dashboardId, Long backupId, String restoredBy) {
         DashboardLayout dashboard = dashboardLayoutRepository.findById(dashboardId)
-                .orElseThrow(() -> new IllegalArgumentException("대시보드를 찾을 수 없습니다: " + dashboardId));
+                .orElseThrow(() -> new ResourceNotFoundException("Dashboard", dashboardId));
 
         DashboardLayoutBackup sourceBackup = backupRepository.findById(backupId)
-                .orElseThrow(() -> new IllegalArgumentException("백업을 찾을 수 없습니다: " + backupId));
+                .orElseThrow(() -> new ResourceNotFoundException("DashboardLayoutBackup", backupId));
 
         if (!dashboardId.equals(sourceBackup.getDashboardId())) {
-            throw new IllegalArgumentException("백업이 해당 대시보드에 속하지 않습니다.");
+            throw new ConflictException("DashboardLayoutBackup", "Backup does not belong to this dashboard");
         }
 
         // Create a new backup from restored state
@@ -227,7 +230,7 @@ public class DashboardLayoutService {
     @Transactional
     public void deleteBackup(Long backupId) {
         DashboardLayoutBackup backup = backupRepository.findById(backupId)
-                .orElseThrow(() -> new IllegalArgumentException("백업을 찾을 수 없습니다: " + backupId));
+                .orElseThrow(() -> new ResourceNotFoundException("DashboardLayoutBackup", backupId));
         backupRepository.delete(backup);
         log.info("Layout backup deleted: backupId={}", backupId);
     }
@@ -265,7 +268,7 @@ public class DashboardLayoutService {
     @Transactional
     public DashboardLayoutBackup createAutomaticBackup(Long dashboardId, String layoutDataJson) {
         DashboardLayout dashboard = dashboardLayoutRepository.findById(dashboardId)
-                .orElseThrow(() -> new IllegalArgumentException("대시보드를 찾을 수 없습니다: " + dashboardId));
+                .orElseThrow(() -> new ResourceNotFoundException("Dashboard", dashboardId));
 
         DashboardLayoutBackup backup = new DashboardLayoutBackup(
                 dashboardId,

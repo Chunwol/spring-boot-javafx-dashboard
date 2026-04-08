@@ -46,7 +46,7 @@ public class DashboardCanvasModule {
         this.imageDropHandler = imageDropHandler;
 
         this.classroomContainer = new Pane();
-        this.classroomContainer.setStyle("-fx-background-color: #f8fbff;");
+        this.classroomContainer.getStyleClass().add("dashboard-canvas-bg");
         this.classroomContainer.setPrefSize(1, 1);
 
         this.gridCanvas = new Canvas(1, 1);
@@ -78,9 +78,11 @@ public class DashboardCanvasModule {
 
     public void applyEditMode(boolean enabled) {
         if (enabled) {
-            classroomContainer.setStyle("-fx-background-color: #eff6ff; -fx-border-color: #3182ce; -fx-border-style: dashed;");
+            if (!classroomContainer.getStyleClass().contains("dashboard-canvas-edit")) {
+                classroomContainer.getStyleClass().add("dashboard-canvas-edit");
+            }
         } else {
-            classroomContainer.setStyle("-fx-background-color: #f8fbff;");
+            classroomContainer.getStyleClass().remove("dashboard-canvas-edit");
             clearSelection();
             selectionRect.setVisible(false);
         }

@@ -18,13 +18,21 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.layout.Region;
 import javafx.stage.FileChooser;
+import javafx.stage.DirectoryChooser;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * PC 관리 및 명령 전송 모듈
@@ -76,7 +84,7 @@ public class DashboardPcManagementModule {
         root.setPadding(new Insets(15));
         root.setFillWidth(true);
         root.setMaxWidth(Double.MAX_VALUE);
-        root.setStyle("-fx-background-color: #ffffff;");
+        root.getStyleClass().add("pcmgmt-root");
 
         root.getChildren().add(buildViewControls());
         root.getChildren().add(buildPcTable());
@@ -100,10 +108,10 @@ public class DashboardPcManagementModule {
     private Node buildViewControls() {
         HBox row = new HBox(10);
         row.setAlignment(Pos.CENTER_LEFT);
-        row.setStyle("-fx-border-color: #e2e8f0; -fx-border-width: 0 0 1 0; -fx-padding: 0 0 12 0;");
+        row.getStyleClass().add("pcmgmt-section-divider");
 
         Label viewLabel = new Label("보기:");
-        viewLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12;");
+        viewLabel.getStyleClass().add("pcmgmt-label-title");
 
         viewTypeCombo = new ComboBox<>(FXCollections.observableArrayList(
             "전체 PC", "강의실별", "교사 PC만"
@@ -126,11 +134,11 @@ public class DashboardPcManagementModule {
         });
 
         Button refreshBtn = new Button("새로고침");
-        refreshBtn.setStyle("-fx-font-size: 11; -fx-padding: 5 12; -fx-background-color: #e2e8f0; -fx-cursor: hand;");
+        refreshBtn.getStyleClass().add("pcmgmt-refresh-btn");
         refreshBtn.setOnAction(e -> loadAllData());
 
         summaryLabel = new Label();
-        summaryLabel.setStyle("-fx-font-size: 12; -fx-text-fill: #64748b;");
+        summaryLabel.getStyleClass().add("pcmgmt-summary-label");
         HBox.setHgrow(summaryLabel, Priority.ALWAYS);
 
         row.getChildren().addAll(viewLabel, viewTypeCombo, viewClassroomCombo, refreshBtn, summaryLabel);
@@ -185,9 +193,7 @@ public class DashboardPcManagementModule {
                 if (empty || getTableRow() == null || getTableRow().getItem() == null) { setGraphic(null); return; }
                 String role = getTableRow().getItem().getRole();
                 Label lbl = new Label("TEACHER".equals(role) ? "교사" : "학생");
-                lbl.setStyle("TEACHER".equals(role)
-                    ? "-fx-text-fill: #7c3aed; -fx-font-weight: bold;"
-                    : "-fx-text-fill: #374151;");
+                lbl.getStyleClass().add("TEACHER".equals(role) ? "pcmgmt-role-teacher" : "pcmgmt-role-student");
                 setGraphic(lbl);
             }
         });
@@ -202,9 +208,7 @@ public class DashboardPcManagementModule {
                 if (empty || getTableRow() == null || getTableRow().getItem() == null) { setGraphic(null); return; }
                 PcStatusDto pc = getTableRow().getItem();
                 Label lbl = new Label(pc.isOnline() ? "● 온라인" : "○ 오프라인");
-                lbl.setStyle(pc.isOnline()
-                    ? "-fx-text-fill: #10b981; -fx-font-weight: bold;"
-                    : "-fx-text-fill: #9ca3af;");
+                lbl.getStyleClass().add(pc.isOnline() ? "pcmgmt-status-online" : "pcmgmt-status-offline");
                 setGraphic(lbl);
             }
         });
@@ -236,17 +240,17 @@ public class DashboardPcManagementModule {
 
     private Node buildCommandSection() {
         VBox vbox = new VBox(10);
-        vbox.setStyle("-fx-border-color: #e2e8f0; -fx-border-width: 1 0 0 0; -fx-padding: 12 0 0 0;");
+        vbox.getStyleClass().add("pcmgmt-command-divider");
 
         Label titleLabel = new Label("명령 전송");
-        titleLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13;");
+        titleLabel.getStyleClass().add("pcmgmt-command-title");
 
         HBox formRow = new HBox(10);
         formRow.setAlignment(Pos.CENTER_LEFT);
 
         // ── 대상 선택
         Label targetLbl = new Label("대상:");
-        targetLbl.setStyle("-fx-font-size: 12;");
+        targetLbl.getStyleClass().add("pcmgmt-command-label");
 
         targetCombo = new ComboBox<>(FXCollections.observableArrayList(
             "전체 PC", "선택 강의실", "교사 PC만", "선택 PC"
@@ -269,25 +273,24 @@ public class DashboardPcManagementModule {
 
         // ── 명령 선택
         Label cmdLbl = new Label("명령:");
-        cmdLbl.setStyle("-fx-font-size: 12;");
+        cmdLbl.getStyleClass().add("pcmgmt-command-label");
 
         commandCombo = new ComboBox<>(FXCollections.observableArrayList(
-            "PC 켜기(PCON)", "재시작", "종료", "스크립트 실행"
+            "PC 켜기(PCON)", "재시작", "종료", "스크립트 실행", "파일/폴더 전송"
         ));
         commandCombo.setValue("재시작");
         commandCombo.setPrefWidth(140);
 
         // ── 전송 버튼
         Button sendBtn = new Button("▶ 전송");
-        sendBtn.setStyle("-fx-padding: 8 18; -fx-font-size: 12; -fx-font-weight: bold;"
-            + "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-cursor: hand; -fx-background-radius: 6;");
+        sendBtn.getStyleClass().add("pcmgmt-send-btn");
         sendBtn.setOnAction(e -> handleSendCommand());
 
         formRow.getChildren().addAll(targetLbl, targetCombo, targetClassroomCombo, cmdLbl, commandCombo, sendBtn);
 
         // 선택 수 힌트
         selectionHintLabel = new Label();
-        selectionHintLabel.setStyle("-fx-font-size: 11; -fx-text-fill: #6366f1; -fx-font-style: italic;");
+        selectionHintLabel.getStyleClass().add("pcmgmt-selection-hint");
 
         vbox.getChildren().addAll(titleLabel, formRow, selectionHintLabel);
         return vbox;
@@ -421,7 +424,9 @@ public class DashboardPcManagementModule {
             return;
         }
 
-        String scriptPath = null;
+        TransferSource transferSource = null;
+        String commandTypeForQueue = command;
+
         if ("RUN_PS1".equals(command)) {
             FileChooser fileChooser = new FileChooser();
             fileChooser.setTitle("PowerShell 스크립트 선택");
@@ -430,10 +435,16 @@ public class DashboardPcManagementModule {
             if (selected == null) {
                 return;
             }
-            scriptPath = selected.getAbsolutePath();
+            transferSource = TransferSource.simple(selected.toPath(), "file", selected.getName(), false, false);
+        } else if ("RUN_FILE_TRANSFER".equals(command)) {
+            transferSource = chooseTransferSource();
+            if (transferSource == null) {
+                return;
+            }
+            commandTypeForQueue = "RUN_PS1";
         }
 
-        showConfirmationDialog(command, commandLabel, targetPcs, scriptPath);
+        showConfirmationDialog(commandTypeForQueue, commandLabel, targetPcs, transferSource);
     }
 
     private List<PcStatusDto> resolveTargetPcs(String target) {
@@ -457,10 +468,15 @@ public class DashboardPcManagementModule {
     // 전송 전 확인 다이얼로그
     // ─────────────────────────────────────────
 
-    private void showConfirmationDialog(String commandType, String commandLabel, List<PcStatusDto> targetPcs, String scriptPath) {
+    private void showConfirmationDialog(String commandType, String commandLabel, List<PcStatusDto> targetPcs, TransferSource transferSource) {
         long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
         long offlineCount = targetPcs.size() - onlineCount;
-        boolean scriptCommand = "RUN_PS1".equals(commandType) && scriptPath != null;
+        boolean scriptCommand = "RUN_PS1".equals(commandType)
+                && transferSource != null
+                && "file".equals(transferSource.sourceType())
+                && transferSource.displayName().toLowerCase(Locale.ROOT).endsWith(".ps1")
+                && !"파일/폴더 전송".equals(commandLabel);
+        boolean transferCommand = "파일/폴더 전송".equals(commandLabel) && transferSource != null;
 
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("명령 전송 확인");
@@ -472,33 +488,40 @@ public class DashboardPcManagementModule {
         content.setPrefHeight(500);
 
         VBox summaryBox = new VBox(4);
-        summaryBox.setStyle("-fx-background-color: #f8fafc; -fx-padding: 10; -fx-border-color: #e2e8f0; -fx-border-radius: 6; -fx-background-radius: 6;");
+        summaryBox.getStyleClass().add("pcmgmt-dialog-card");
         summaryBox.getChildren().addAll(
             styledLabel("명령: " + commandLabel, "-fx-font-size: 13; -fx-font-weight: bold; -fx-text-fill: #1e3a8a;"),
             styledLabel("총 대상: " + targetPcs.size() + "대", "-fx-font-size: 12; -fx-text-fill: #374151;"),
             styledLabel("미전송: " + offlineCount + "대 (오프라인)", "-fx-font-size: 12; -fx-text-fill: #9ca3af;"),
             styledLabel("전송 예정: " + onlineCount + "대 (온라인)", "-fx-font-size: 12; -fx-text-fill: #10b981; -fx-font-weight: bold;")
         );
-        if (scriptCommand) {
-            summaryBox.getChildren().add(styledLabel("스크립트: " + scriptPath, "-fx-font-size: 11; -fx-text-fill: #475569;"));
+        if (transferSource != null) {
+            String sourceLabel = transferCommand ? "전송원본" : "스크립트";
+            summaryBox.getChildren().add(styledLabel(sourceLabel + ": " + transferSource.displayName(), "-fx-font-size: 11; -fx-text-fill: #475569;"));
         }
         content.getChildren().add(summaryBox);
 
         ComboBox<String> runModeCombo = null;
         ComboBox<String> windowModeCombo = null;
         TextField argsField = null;
-        if (scriptCommand) {
+        ComboBox<String> destinationCombo = null;
+        TextField destinationPathField = null;
+        CheckBox runAfterTransferCheck = null;
+        if (scriptCommand || transferCommand) {
             VBox optionsBox = new VBox(8);
-            optionsBox.setStyle("-fx-background-color: #f8fafc; -fx-padding: 10; -fx-border-color: #e2e8f0; -fx-border-radius: 6; -fx-background-radius: 6;");
+            optionsBox.getStyleClass().add("pcmgmt-dialog-card");
 
-            Label optionTitle = styledLabel("스크립트 실행 옵션", "-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #334155;");
+            Label optionTitle = styledLabel(
+                transferCommand ? "파일 전송 옵션" : "스크립트 실행 옵션",
+                "-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #334155;"
+            );
             HBox modeRow = new HBox(8);
             modeRow.setAlignment(Pos.CENTER_LEFT);
             Label modeLabel = styledLabel("결과 처리", "-fx-font-size: 12; -fx-text-fill: #475569;");
             ComboBox<String> modeComboLocal = new ComboBox<>(FXCollections.observableArrayList(
                 "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"
             ));
-            modeComboLocal.setValue("대기 실행 (완료까지 수집)");
+            modeComboLocal.setValue(transferCommand ? "대기 실행 (완료까지 수집)" : "대기 실행 (완료까지 수집)");
             modeComboLocal.setPrefWidth(220);
             modeRow.getChildren().addAll(modeLabel, modeComboLocal);
 
@@ -516,17 +539,57 @@ public class DashboardPcManagementModule {
             Label argsLabel = styledLabel("추가 인자", "-fx-font-size: 12; -fx-text-fill: #475569;");
             TextField argsFieldLocal = new TextField();
             argsFieldLocal.setPromptText("예: -Mode Test");
+
+            VBox transferDestBox = new VBox(6);
+            Label destinationLabel = styledLabel("대상 PC 저장 위치", "-fx-font-size: 12; -fx-text-fill: #475569;");
+            ComboBox<String> destinationComboLocal = new ComboBox<>(FXCollections.observableArrayList(
+                "다운로드 폴더", "바탕화면", "경로 직접 입력"
+            ));
+            // TransferSource에서 미리 선택한 값이 있으면 기본값으로 사용
+            String preselectedDestMode = transferSource != null ? transferSource.preDestMode() : "DOWNLOADS";
+            String preselectedValue = "DOWNLOADS".equals(preselectedDestMode) ? "다운로드 폴더" 
+                : "DESKTOP".equals(preselectedDestMode) ? "바탕화면" : "경로 직접 입력";
+            destinationComboLocal.setValue(preselectedValue);
+            destinationComboLocal.setPrefWidth(220);
+            TextField destinationPathLocal = new TextField();
+            destinationPathLocal.setPromptText("예: D:/Deploy/packages");
+            String preselectedPath = transferSource != null ? (transferSource.preDestPath() != null ? transferSource.preDestPath() : "") : "";
+            destinationPathLocal.setText(preselectedPath);
+            boolean showPathField = "경로 직접 입력".equals(preselectedValue);
+            destinationPathLocal.setVisible(showPathField);
+            destinationPathLocal.setManaged(showPathField);
+            destinationComboLocal.valueProperty().addListener((obs, oldV, newV) -> {
+                boolean custom = "경로 직접 입력".equals(newV);
+                destinationPathLocal.setVisible(custom);
+                destinationPathLocal.setManaged(custom);
+            });
+            CheckBox runAfterTransferLocal = new CheckBox("전송 후 실행 (파일 전송 시)");
+            boolean preselectedRunAfter = transferSource != null && transferSource.preRunAfter();
+            runAfterTransferLocal.setSelected(preselectedRunAfter);
+            runAfterTransferLocal.setDisable(!transferCommand || transferSource == null || !"file".equals(transferSource.sourceType()));
+
             Label hintLabel = styledLabel(
-                "즉시 실행은 프로세스 시작 성공만 확인합니다. 대기 실행은 종료까지 기다리며 stdout/stderr를 수집합니다. 창 표시는 에이전트 실행 계정/세션 정책에 따라 보이지 않을 수 있습니다.",
+                transferCommand
+                    ? "전송은 RUN_PS1 명령 체계로 처리되며 상태는 명령 탭에서 확인합니다. 폴더 전송은 zip으로 압축 후 대상 경로에 해제됩니다."
+                    : "즉시 실행은 프로세스 시작 성공만 확인합니다. 대기 실행은 종료까지 기다리며 stdout/stderr를 수집합니다. 창 표시는 에이전트 실행 계정/세션 정책에 따라 보이지 않을 수 있습니다.",
                 "-fx-font-size: 11; -fx-text-fill: #64748b;"
             );
-            argsBox.getChildren().addAll(argsLabel, argsFieldLocal, hintLabel);
 
-            optionsBox.getChildren().addAll(optionTitle, modeRow, windowRow, argsBox);
+            argsBox.getChildren().addAll(argsLabel, argsFieldLocal);
+            transferDestBox.getChildren().addAll(destinationLabel, destinationComboLocal, destinationPathLocal, runAfterTransferLocal);
+
+            if (transferCommand) {
+                optionsBox.getChildren().addAll(optionTitle, transferDestBox, modeRow, windowRow, argsBox, hintLabel);
+            } else {
+                optionsBox.getChildren().addAll(optionTitle, modeRow, windowRow, argsBox, hintLabel);
+            }
             content.getChildren().add(optionsBox);
             runModeCombo = modeComboLocal;
             windowModeCombo = windowComboLocal;
             argsField = argsFieldLocal;
+            destinationCombo = destinationComboLocal;
+            destinationPathField = destinationPathLocal;
+            runAfterTransferCheck = runAfterTransferLocal;
         }
 
         Label listTitle = styledLabel("대상 PC 목록", "-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #374151;");
@@ -558,9 +621,7 @@ public class DashboardPcManagementModule {
                 if (empty || getTableRow() == null || getTableRow().getItem() == null) { setGraphic(null); return; }
                 PcStatusDto pc = getTableRow().getItem();
                 Label lbl = new Label(pc.isOnline() ? "✓ 전송" : "✗ 미전송");
-                lbl.setStyle(pc.isOnline()
-                    ? "-fx-text-fill: #10b981; -fx-font-weight: bold;"
-                    : "-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+                lbl.getStyleClass().add(pc.isOnline() ? "pcmgmt-status-online" : "pcmgmt-status-failed");
                 setGraphic(lbl);
             }
         });
@@ -585,19 +646,26 @@ public class DashboardPcManagementModule {
         Button okBtn = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
         if (okBtn != null) {
             okBtn.setText("전송");
-            okBtn.setStyle("-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-font-weight: bold;");
+            okBtn.getStyleClass().add("pcmgmt-dialog-primary-btn");
         }
 
         Optional<ButtonType> result = dialog.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            ScriptExecutionOptions scriptOptions = scriptCommand
+            ScriptExecutionOptions scriptOptions = (scriptCommand || transferCommand)
                 ? new ScriptExecutionOptions(
-                    scriptPath,
+                    transferSource == null ? null : transferSource.path().toString(),
                     runModeCombo != null && runModeCombo.getValue() != null && runModeCombo.getValue().startsWith("즉시 실행")
                         ? "BACKGROUND" : "FOREGROUND",
                     windowModeCombo != null && windowModeCombo.getValue() != null && windowModeCombo.getValue().startsWith("창 표시")
                         ? "VISIBLE" : "HIDDEN",
-                    argsField != null ? argsField.getText() : ""
+                    argsField != null ? argsField.getText() : "",
+                    transferCommand,
+                    transferSource == null ? "file" : transferSource.sourceType(),
+                    transferSource == null ? "" : transferSource.displayName(),
+                    destinationCombo != null && destinationCombo.getValue() != null ? mapDestinationMode(destinationCombo.getValue()) : "DOWNLOADS",
+                    destinationPathField != null ? destinationPathField.getText() : "",
+                    runAfterTransferCheck != null && runAfterTransferCheck.isSelected(),
+                    transferSource != null && transferSource.temporaryArtifact()
                 )
                 : ScriptExecutionOptions.none();
             executeCommand(commandType, targetPcs, scriptOptions);
@@ -635,19 +703,19 @@ public class DashboardPcManagementModule {
                             .build();
                     HttpResponse<String> uploadResp = httpClient.send(uploadRequest, HttpResponse.BodyHandlers.ofString());
                     if (uploadResp.statusCode() < 200 || uploadResp.statusCode() >= 300) {
-                        throw new RuntimeException("스크립트 업로드 실패 HTTP=" + uploadResp.statusCode());
+                        throw new RuntimeException("파일 업로드 실패 HTTP=" + uploadResp.statusCode());
                     }
                     @SuppressWarnings("unchecked")
                     Map<String, Object> uploadBody = objectMapper.readValue(uploadResp.body(), Map.class);
                     uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
                     if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
-                        throw new RuntimeException("스크립트 업로드 응답에 downloadUrl이 없습니다.");
+                        throw new RuntimeException("업로드 응답에 downloadUrl이 없습니다.");
                     }
                 } catch (Exception ex) {
-                    log.warn("스크립트 업로드 실패: {}", ex.getMessage());
+                    log.warn("업로드 실패: {}", ex.getMessage());
                     int skipped = targetPcs.size() - onlinePcs.size();
                     Platform.runLater(() -> showAlert("전송 실패",
-                        "스크립트 업로드 실패로 명령 전송을 중단했습니다.\n" + ex.getMessage() +
+                        "업로드 실패로 명령 전송을 중단했습니다.\n" + ex.getMessage() +
                             "\n오프라인 미전송: " + skipped + "대",
                         Alert.AlertType.ERROR));
                     return;
@@ -691,6 +759,14 @@ public class DashboardPcManagementModule {
                     skipped),
                 Alert.AlertType.INFORMATION
             ));
+
+            if (scriptOptions.temporaryArtifact() && scriptOptions.hasScript()) {
+                try {
+                    Files.deleteIfExists(Path.of(scriptOptions.scriptPath()));
+                } catch (Exception ex) {
+                    log.debug("임시 파일 정리 실패: {}", ex.getMessage());
+                }
+            }
         }, "pcmgmt-cmd-exec");
         t.setDaemon(true);
         t.start();
@@ -714,8 +790,340 @@ public class DashboardPcManagementModule {
             case "재시작" -> "REBOOT";
             case "종료" -> "SHUTDOWN";
             case "스크립트 실행" -> "RUN_PS1";
+            case "파일/폴더 전송" -> "RUN_FILE_TRANSFER";
             default -> label;
         };
+    }
+
+    private String mapDestinationMode(String value) {
+        if ("바탕화면".equals(value)) return "DESKTOP";
+        if ("경로 직접 입력".equals(value)) return "CUSTOM";
+        return "DOWNLOADS";
+    }
+
+    private TransferSource chooseTransferSource() {
+        return chooseMultipleTransferSources();
+    }
+
+    /**
+     * 다중 파일/폴더 선택 UI
+     * 좌측: 목록(파일명/용량/유형/실행), 우측: 버튼, 하단: 목적지 옵션
+     */
+    private TransferSource chooseMultipleTransferSources() {
+        List<SelectableTransferItem> items = new ArrayList<>();
+        Dialog<ButtonType> selectDialog = new Dialog<>();
+        selectDialog.setTitle("파일/폴더 전송");
+        selectDialog.setWidth(850);
+        selectDialog.setHeight(650);
+        
+        VBox mainContent = new VBox(10);
+        mainContent.setPadding(new Insets(15));
+        
+        // ===== 상단: 설명 =====
+        Label instrLabel = new Label("전송할 파일 또는 폴더를 선택하세요. 항목별 또는 전체 실행 여부를 제어할 수 있습니다.");
+        instrLabel.getStyleClass().add("pcmgmt-transfer-info");
+        
+        // ===== 중앙: 좌측(목록) + 우측(버튼) =====
+        HBox centerBox = new HBox(15);
+        centerBox.setPrefHeight(300);
+        HBox.setHgrow(centerBox, Priority.ALWAYS);
+        
+        // 좌측: 선택된 항목 목록
+        VBox itemsPanel = new VBox(8);
+        itemsPanel.getStyleClass().add("pcmgmt-transfer-panel");
+        itemsPanel.setPrefWidth(640);
+        
+        Label itemsLabel = new Label("선택된 항목:");
+        itemsLabel.getStyleClass().add("pcmgmt-transfer-section-title");
+        
+        VBox itemsList = new VBox(5);
+        itemsList.setPadding(new Insets(5));
+        
+        ScrollPane itemsScroll = new ScrollPane(itemsList);
+        itemsScroll.setFitToWidth(true);
+        itemsScroll.setPrefHeight(250);
+        itemsScroll.getStyleClass().add("pcmgmt-transfer-list-scroll");
+        
+        itemsPanel.getChildren().addAll(itemsLabel, itemsScroll);
+        HBox.setHgrow(itemsPanel, Priority.ALWAYS);
+        
+        // 우측: 버튼들
+        VBox buttonsPanel = new VBox(10);
+        buttonsPanel.setAlignment(Pos.TOP_CENTER);
+        buttonsPanel.setPrefWidth(120);
+        
+        Button addFileBtn = new Button("+ 파일");
+        addFileBtn.setPrefWidth(100);
+        addFileBtn.getStyleClass().add("pcmgmt-transfer-btn-file");
+        addFileBtn.setOnAction(e -> {
+            FileChooser fc = new FileChooser();
+            fc.setTitle("파일 선택");
+            File f = fc.showOpenDialog(null);
+            if (f != null) {
+                SelectableTransferItem item = new SelectableTransferItem("file", f.getName(), f.getAbsolutePath(), true, "", f.length(), false);
+                items.add(item);
+                refreshItemsList(itemsList, items);
+            }
+        });
+        
+        Button addFolderBtn = new Button("+ 폴더");
+        addFolderBtn.setPrefWidth(100);
+        addFolderBtn.getStyleClass().add("pcmgmt-transfer-btn-folder");
+        addFolderBtn.setOnAction(e -> {
+            DirectoryChooser dc = new DirectoryChooser();
+            dc.setTitle("폴더 선택");
+            File d = dc.showDialog(null);
+            if (d != null) {
+                long folderSize = calculateFolderSize(d.toPath());
+                SelectableTransferItem item = new SelectableTransferItem("folder", d.getName(), d.getAbsolutePath(), true, "", folderSize, false);
+                items.add(item);
+                refreshItemsList(itemsList, items);
+            }
+        });
+        
+        Button removeBtn = new Button("- 제거");
+        removeBtn.setPrefWidth(100);
+        removeBtn.getStyleClass().add("pcmgmt-transfer-btn-remove");
+        removeBtn.setOnAction(e -> {
+            // 마지막 선택된 항목 제거
+            if (!items.isEmpty()) {
+                items.remove(items.size() - 1);
+                refreshItemsList(itemsList, items);
+            }
+        });
+        
+        Button runAllBtn = new Button("전체\n실행");
+        runAllBtn.setPrefWidth(100);
+        runAllBtn.setWrapText(true);
+        runAllBtn.getStyleClass().add("pcmgmt-transfer-btn-all-run");
+        runAllBtn.setOnAction(e -> {
+            items.forEach(item -> item.setRunAfterTransfer(true));
+            refreshItemsList(itemsList, items);
+        });
+
+        Button runNoneBtn = new Button("전체\n미실행");
+        runNoneBtn.setPrefWidth(100);
+        runNoneBtn.setWrapText(true);
+        runNoneBtn.getStyleClass().add("pcmgmt-transfer-btn-all-stop");
+        runNoneBtn.setOnAction(e -> {
+            items.forEach(item -> item.setRunAfterTransfer(false));
+            refreshItemsList(itemsList, items);
+        });
+
+        buttonsPanel.getChildren().addAll(addFileBtn, addFolderBtn, removeBtn, new Separator(), runAllBtn, runNoneBtn);
+        
+        centerBox.getChildren().addAll(itemsPanel, buttonsPanel);
+        
+        // ===== 하단: 옵션 =====
+        VBox optionsBox = new VBox(8);
+        optionsBox.getStyleClass().add("pcmgmt-transfer-options");
+
+        // 목적지 선택
+        Label destLabel = new Label("목적지 저장 경로:");
+        destLabel.getStyleClass().add("pcmgmt-transfer-section-title");
+
+        VBox destBox = new VBox(6);
+        destBox.setAlignment(Pos.TOP_LEFT);
+        
+        ToggleGroup destGroup = new ToggleGroup();
+        
+        RadioButton downloadRadio = new RadioButton("다운로드 폴더");
+        downloadRadio.setToggleGroup(destGroup);
+        downloadRadio.setSelected(true);
+        downloadRadio.setWrapText(true);
+        
+        RadioButton desktopRadio = new RadioButton("바탕화면");
+        desktopRadio.setToggleGroup(destGroup);
+        desktopRadio.setWrapText(true);
+        
+        RadioButton customRadio = new RadioButton("경로 직접\n입력");
+        customRadio.setToggleGroup(destGroup);
+        customRadio.setWrapText(true);
+        
+        TextField customPathField = new TextField();
+        customPathField.setPromptText("경로 입력...");
+        customPathField.setPrefWidth(420);
+        customPathField.setDisable(true);
+        
+        customRadio.selectedProperty().addListener((obs, old, newVal) -> {
+            customPathField.setDisable(!newVal);
+        });
+        
+        destBox.getChildren().addAll(downloadRadio, desktopRadio, customRadio, customPathField);
+
+        Label runHint = new Label("실행 체크된 항목이 하나 이상이면 전송 후 자동 실행이 활성화됩니다.");
+        runHint.getStyleClass().add("pcmgmt-transfer-run-hint");
+
+        optionsBox.getChildren().addAll(destLabel, destBox, runHint);
+        
+        mainContent.getChildren().addAll(instrLabel, centerBox, optionsBox);
+        
+        selectDialog.getDialogPane().setContent(mainContent);
+        selectDialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
+        
+        Button okBtn = (Button) selectDialog.getDialogPane().lookupButton(ButtonType.OK);
+        if (okBtn != null) {
+            okBtn.setText("확인");
+        }
+        
+        Optional<ButtonType> result = selectDialog.showAndWait();
+        if (result.isEmpty() || result.get() != ButtonType.OK) {
+            return null;
+        }
+        
+        if (items.isEmpty()) {
+            showAlert("선택 오류", "전송할 파일 또는 폴더를 최소 1개 이상 선택하세요.", Alert.AlertType.WARNING);
+            return null;
+        }
+        
+        // zip 생성 및 반환 (사용자가 선택한 목적지 옵션 포함)
+        try {
+            Path zipPath = createMultiTransferZip(items);
+            String destMode = downloadRadio.isSelected() ? "DOWNLOADS" : (desktopRadio.isSelected() ? "DESKTOP" : "CUSTOM");
+            String destPath = customRadio.isSelected() ? customPathField.getText() : "";
+            boolean runAfter = items.stream().anyMatch(SelectableTransferItem::runAfterTransfer);
+            
+            TransferSource source = new TransferSource(zipPath, "multi-transfer", "MultiTransfer.zip", true, true, destMode, destPath, runAfter);
+            return source;
+        } catch (IOException ex) {
+            showAlert("압축 실패", "다중 파일 압축 중 오류가 발생했습니다.\n" + ex.getMessage(), Alert.AlertType.ERROR);
+            return null;
+        }
+    }
+    
+    /** 항목 목록 UI 갱신 */
+    private void refreshItemsList(VBox itemsList, List<SelectableTransferItem> items) {
+        itemsList.getChildren().clear();
+        for (int i = 0; i < items.size(); i++) {
+            SelectableTransferItem item = items.get(i);
+            HBox itemRow = new HBox(10);
+            itemRow.getStyleClass().add("pcmgmt-transfer-item-row");
+            itemRow.setAlignment(Pos.CENTER_LEFT);
+            
+            String typeIcon = item.type().equals("file") ? "📄" : "📁";
+            Label nameLabel = new Label(typeIcon + " " + item.displayName());
+            nameLabel.setPrefWidth(260);
+            nameLabel.getStyleClass().add("pcmgmt-transfer-item-name");
+
+            Label sizeLabel = new Label(formatFileSize(item.fileSize()));
+            sizeLabel.setPrefWidth(90);
+            sizeLabel.getStyleClass().add("pcmgmt-transfer-item-size");
+
+            Label typeLabel = new Label(item.type().equals("file") ? "파일" : "폴더");
+            typeLabel.setPrefWidth(50);
+            typeLabel.getStyleClass().add("pcmgmt-transfer-item-type");
+
+            CheckBox runCheck = new CheckBox("실행");
+            runCheck.setSelected(item.runAfterTransfer());
+            final int index = i;
+            runCheck.selectedProperty().addListener((obs, old, newVal) -> items.get(index).setRunAfterTransfer(newVal));
+
+            itemRow.getChildren().addAll(nameLabel, sizeLabel, typeLabel, runCheck);
+            itemsList.getChildren().add(itemRow);
+        }
+    }
+
+    private long calculateFolderSize(Path folder) {
+        try {
+            return Files.walk(folder)
+                .filter(Files::isRegularFile)
+                .mapToLong(path -> {
+                    try {
+                        return Files.size(path);
+                    } catch (IOException e) {
+                        return 0L;
+                    }
+                })
+                .sum();
+        } catch (IOException e) {
+            return 0L;
+        }
+    }
+
+    private String formatFileSize(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        double kb = bytes / 1024.0;
+        if (kb < 1024) {
+            return String.format(Locale.ROOT, "%.1f KB", kb);
+        }
+        double mb = kb / 1024.0;
+        if (mb < 1024) {
+            return String.format(Locale.ROOT, "%.1f MB", mb);
+        }
+        double gb = mb / 1024.0;
+        return String.format(Locale.ROOT, "%.1f GB", gb);
+    }
+
+    /**
+     * 선택된 파일/폴더들을 경로 구조대로 zip으로 압축
+     */
+    private Path createMultiTransferZip(List<SelectableTransferItem> items) throws IOException {
+        Path tmpZip = Files.createTempFile("pcmgmt-multi-transfer-", ".zip");
+
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(tmpZip))) {
+            for (SelectableTransferItem item : items) {
+                Path sourcePath = Path.of(item.sourcePath());
+                if ("file".equals(item.type())) {
+                    String entryName = item.displayName();
+                    ZipEntry entry = new ZipEntry(entryName);
+                    zos.putNextEntry(entry);
+                    Files.copy(sourcePath, zos);
+                    zos.closeEntry();
+                } else if ("folder".equals(item.type())) {
+                    Path base = sourcePath.toAbsolutePath().normalize();
+                    String folderRoot = item.displayName();
+                    Files.walk(base)
+                        .filter(Files::isRegularFile)
+                        .forEach(path -> {
+                            Path rel = base.relativize(path);
+                            String entryName = folderRoot + "/" + rel.toString().replace('\\', '/');
+                            ZipEntry entry = new ZipEntry(entryName);
+                            try {
+                                zos.putNextEntry(entry);
+                                Files.copy(path, zos);
+                                zos.closeEntry();
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                }
+            }
+        } catch (UncheckedIOException ex) {
+            Files.deleteIfExists(tmpZip);
+            throw ex.getCause();
+        }
+
+        return tmpZip;
+    }
+
+    private Path zipDirectoryToTemp(Path sourceDir) throws IOException {
+        String safeName = sourceDir.getFileName() == null ? "folder" : sourceDir.getFileName().toString();
+        Path tmpZip = Files.createTempFile("pcmgmt-transfer-" + safeName + "-", ".zip");
+        Path base = sourceDir.toAbsolutePath().normalize();
+
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(tmpZip))) {
+            Files.walk(base)
+                .filter(Files::isRegularFile)
+                .forEach(path -> {
+                    Path rel = base.relativize(path);
+                    String entryName = rel.toString().replace('\\', '/');
+                    ZipEntry entry = new ZipEntry(entryName);
+                    try {
+                        zos.putNextEntry(entry);
+                        Files.copy(path, zos);
+                        zos.closeEntry();
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
+        } catch (UncheckedIOException ex) {
+            Files.deleteIfExists(tmpZip);
+            throw ex.getCause();
+        }
+
+        return tmpZip;
     }
 
     private String apiPath(String path) {
@@ -747,9 +1155,34 @@ public class DashboardPcManagementModule {
         loadAllData();
     }
 
-    private record ScriptExecutionOptions(String scriptPath, String runMode, String windowMode, String args) {
+    private record TransferSource(Path path,
+                                  String sourceType,
+                                  String displayName,
+                                  boolean zipped,
+                                  boolean temporaryArtifact,
+                                  String preDestMode,
+                                  String preDestPath,
+                                  boolean preRunAfter) {
+        // Compact constructor for backward compatibility
+        public static TransferSource simple(Path path, String sourceType, String displayName, boolean zipped, boolean temporaryArtifact) {
+            return new TransferSource(path, sourceType, displayName, zipped, temporaryArtifact, "DOWNLOADS", "", false);
+        }
+    }
+
+    private record ScriptExecutionOptions(String scriptPath,
+                                          String runMode,
+                                          String windowMode,
+                                          String args,
+                                          boolean transferCommand,
+                                          String sourceType,
+                                          String displayName,
+                                          String destinationMode,
+                                          String destinationPath,
+                                          boolean runAfterTransfer,
+                                          boolean temporaryArtifact) {
         private static ScriptExecutionOptions none() {
-            return new ScriptExecutionOptions(null, "FOREGROUND", "HIDDEN", "");
+            return new ScriptExecutionOptions(null, "FOREGROUND", "HIDDEN", "", false,
+                    "file", "", "DOWNLOADS", "", false, false);
         }
 
         private boolean hasScript() {
@@ -763,8 +1196,59 @@ public class DashboardPcManagementModule {
             if (args != null && !args.isBlank()) {
                 payload.put("args", args);
             }
+            if (transferCommand) {
+                payload.put("transferMode", true);
+                payload.put("sourceType", sourceType == null || sourceType.isBlank() ? "file" : sourceType);
+                payload.put("displayName", displayName == null ? "" : displayName);
+                payload.put("destinationMode", destinationMode == null || destinationMode.isBlank() ? "DOWNLOADS" : destinationMode);
+                if (destinationPath != null && !destinationPath.isBlank()) {
+                    payload.put("destinationPath", destinationPath);
+                }
+                payload.put("runAfterTransfer", runAfterTransfer);
+            }
             return payload;
         }
+    }
+
+    /**
+     * 다중 파일/폴더 선택을 위한 선택 가능한 항목
+     */
+    private static class SelectableTransferItem {
+        private final String type; // "file" or "folder"
+        private final javafx.beans.property.SimpleStringProperty displayName;
+        private final javafx.beans.property.SimpleStringProperty sourcePath;
+        private final javafx.beans.property.SimpleBooleanProperty included;
+        private final javafx.beans.property.SimpleStringProperty destinationPath;
+        private final long fileSize;
+        private final javafx.beans.property.SimpleBooleanProperty runAfterTransfer;
+
+        public SelectableTransferItem(String type, String displayName, String sourcePath, boolean included, String destinationPath, long fileSize, boolean runAfterTransfer) {
+            this.type = type;
+            this.displayName = new javafx.beans.property.SimpleStringProperty(displayName);
+            this.sourcePath = new javafx.beans.property.SimpleStringProperty(sourcePath);
+            this.included = new javafx.beans.property.SimpleBooleanProperty(included);
+            this.destinationPath = new javafx.beans.property.SimpleStringProperty(destinationPath);
+            this.fileSize = fileSize;
+            this.runAfterTransfer = new javafx.beans.property.SimpleBooleanProperty(runAfterTransfer);
+        }
+
+        public String type() { return type; }
+        public String displayName() { return displayName.get(); }
+        public String sourcePath() { return sourcePath.get(); }
+        public boolean isIncluded() { return included.get(); }
+        public String destinationPath() { return destinationPath.get(); }
+        public long fileSize() { return fileSize; }
+        public boolean runAfterTransfer() { return runAfterTransfer.get(); }
+
+        public javafx.beans.property.StringProperty displayNameProperty() { return displayName; }
+        public javafx.beans.property.StringProperty sourcePathProperty() { return sourcePath; }
+        public javafx.beans.property.BooleanProperty includedProperty() { return included; }
+        public javafx.beans.property.StringProperty destinationPathProperty() { return destinationPath; }
+        public javafx.beans.property.BooleanProperty runAfterTransferProperty() { return runAfterTransfer; }
+
+        public void setIncluded(boolean value) { included.set(value); }
+        public void setDestinationPath(String value) { destinationPath.set(value); }
+        public void setRunAfterTransfer(boolean value) { runAfterTransfer.set(value); }
     }
 }
 

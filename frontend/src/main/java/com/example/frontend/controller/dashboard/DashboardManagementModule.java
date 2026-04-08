@@ -44,6 +44,9 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.util.StringConverter;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.util.Duration;
 
 import java.io.File;
 import java.io.IOException;
@@ -85,6 +88,13 @@ public class DashboardManagementModule {
     private TableView<TeacherDeviceItem> teacherDeviceTable;
     private TableView<PcStatusDto> brokenPcTable;
     private TableView<Map<String, Object>> agentTable;
+    private TextField fileDistJobIdField;
+    private Label fileDistAlertLabel;
+    private Label fileDistStatusLabel;
+    private Label fileDistProgressLabel;
+    private TableView<Map<String, Object>> fileDistJobsTable;
+    private TableView<Map<String, Object>> fileDistEventsTable;
+    private Timeline fileDistAutoRefresh;
     private Label installKeyLabel;
     private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
     private List<PcStatusDto> cachedBrokenPcs = List.of();
@@ -125,6 +135,11 @@ public class DashboardManagementModule {
         scrollPane.setFitToWidth(true);
         scrollPane.setFitToHeight(false);
         scrollPane.setPannable(true);
+        scrollPane.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene == null && fileDistAutoRefresh != null) {
+                fileDistAutoRefresh.stop();
+            }
+        });
         return scrollPane;
     }
 
@@ -669,6 +684,276 @@ public class DashboardManagementModule {
         reportBox.setAlignment(Pos.TOP_LEFT);
         reportBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return reportBox;
+    }
+
+    private VBox buildFileDistributionBox() {
+        Label title = new Label("파일 배포 모니터링");
+        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+
+        fileDistAlertLabel = new Label("알림: -");
+        fileDistAlertLabel.setStyle("-fx-background-color: #eff6ff; -fx-text-fill: #1e3a8a; -fx-padding: 6 10; -fx-background-radius: 4;");
+
+        fileDistJobIdField = new TextField();
+        fileDistJobIdField.setPromptText("Job ID 입력");
+        fileDistJobIdField.setPrefWidth(140);
+
+        Button refreshBtn = new Button("상태 조회");
+        refreshBtn.setOnAction(e -> {
+            loadRecentFileDistributionJobs();
+            loadFileDistributionIfSelected();
+        });
+
+        Button cancelBtn = new Button("Job 취소");
+        cancelBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
+        cancelBtn.setOnAction(e -> cancelSelectedFileDistributionJob());
+
+        Button retryFailedBtn = new Button("실패 재전송");
+        retryFailedBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white;");
+        retryFailedBtn.setOnAction(e -> retryFailedForSelectedJob());
+
+        Button rollbackBtn = new Button("롤백 실행");
+        rollbackBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white;");
+        rollbackBtn.setOnAction(e -> rollbackSelectedJob());
+
+        HBox topRow = new HBox(8, new Label("Job ID:"), fileDistJobIdField, refreshBtn, retryFailedBtn, rollbackBtn, cancelBtn);
+        topRow.setAlignment(Pos.CENTER_LEFT);
+
+        fileDistStatusLabel = new Label("상태: -");
+        fileDistProgressLabel = new Label("진행률: -");
+        HBox statusRow = new HBox(20, fileDistStatusLabel, fileDistProgressLabel);
+        statusRow.setAlignment(Pos.CENTER_LEFT);
+
+        fileDistJobsTable = new TableView<>();
+        fileDistJobsTable.setPrefHeight(160);
+        fileDistJobsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        fileDistJobsTable.setPlaceholder(new Label("최근 배포 Job 없음"));
+
+        TableColumn<Map<String, Object>, String> jobIdCol = new TableColumn<>("Job ID");
+        jobIdCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("jobId", "-"))));
+        jobIdCol.setPrefWidth(90);
+        TableColumn<Map<String, Object>, String> fileCol = new TableColumn<>("파일명");
+        fileCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("originalFilename", "-"))));
+        fileCol.setPrefWidth(220);
+        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("상태");
+        statusCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("status", "-"))));
+        statusCol.setPrefWidth(100);
+        statusCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                    return;
+                }
+                setText(item);
+                String c = switch (item) {
+                    case "COMPLETED" -> "#15803d";
+                    case "FAILED" -> "#b91c1c";
+                    case "CANCELLED" -> "#9a3412";
+                    case "IN_PROGRESS" -> "#1d4ed8";
+                    default -> "#334155";
+                };
+                setStyle("-fx-text-fill: " + c + "; -fx-font-weight: bold;");
+            }
+        });
+        TableColumn<Map<String, Object>, String> createdCol = new TableColumn<>("생성시각");
+        createdCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("createdAt", "-"))));
+        createdCol.setPrefWidth(180);
+        fileDistJobsTable.getColumns().setAll(jobIdCol, fileCol, statusCol, createdCol);
+        fileDistJobsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, row) -> {
+            if (row == null) return;
+            String jobId = String.valueOf(row.getOrDefault("jobId", "")).trim();
+            if (!jobId.isBlank()) {
+                fileDistJobIdField.setText(jobId);
+                loadFileDistributionIfSelected();
+            }
+        });
+
+        fileDistEventsTable = new TableView<>();
+        fileDistEventsTable.setPrefHeight(220);
+        fileDistEventsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+
+        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("이벤트");
+        typeCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("eventType", "-"))));
+        typeCol.setPrefWidth(140);
+        TableColumn<Map<String, Object>, String> detailCol = new TableColumn<>("상세");
+        detailCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("detailJson", "-"))));
+        detailCol.setPrefWidth(360);
+        TableColumn<Map<String, Object>, String> eventCreatedCol = new TableColumn<>("시각");
+        eventCreatedCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("createdAt", "-"))));
+        eventCreatedCol.setPrefWidth(160);
+        fileDistEventsTable.getColumns().setAll(typeCol, detailCol, eventCreatedCol);
+
+        VBox box = new VBox(10, title, fileDistAlertLabel, topRow, statusRow, new Label("최근 배포 Job"), fileDistJobsTable, new Label("선택 Job 이벤트"), fileDistEventsTable);
+        box.setAlignment(Pos.TOP_LEFT);
+        box.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
+        return box;
+    }
+
+    private void startFileDistAutoRefresh() {
+        if (fileDistAutoRefresh != null) {
+            fileDistAutoRefresh.stop();
+        }
+        fileDistAutoRefresh = new Timeline(new KeyFrame(Duration.seconds(5), e -> {
+            loadRecentFileDistributionJobs();
+            loadFileDistributionIfSelected();
+        }));
+        fileDistAutoRefresh.setCycleCount(Timeline.INDEFINITE);
+        fileDistAutoRefresh.play();
+    }
+
+    private void loadRecentFileDistributionJobs() {
+        if (fileDistJobsTable == null) return;
+        apiClient.getPagedList("/file-distribution/jobs", new TypeReference<List<Map<String, Object>>>() {})
+                .thenAccept(rows -> Platform.runLater(() -> {
+                    List<Map<String, Object>> safeRows = rows == null ? List.of() : rows;
+                    fileDistJobsTable.getItems().setAll(safeRows);
+                    updateFileDistAlert(safeRows);
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        fileDistJobsTable.getItems().clear();
+                        if (fileDistAlertLabel != null) {
+                            fileDistAlertLabel.setText("알림: 최근 Job 조회 실패");
+                            fileDistAlertLabel.setStyle("-fx-background-color: #fef2f2; -fx-text-fill: #991b1b; -fx-padding: 6 10; -fx-background-radius: 4;");
+                        }
+                    });
+                    return null;
+                });
+    }
+
+    private void updateFileDistAlert(List<Map<String, Object>> rows) {
+        if (fileDistAlertLabel == null) return;
+        List<Map<String, Object>> safeRows = rows == null ? List.of() : rows;
+        long inProgress = safeRows.stream().filter(r -> "IN_PROGRESS".equals(String.valueOf(r.get("status")))).count();
+        long failed = safeRows.stream().filter(r -> "FAILED".equals(String.valueOf(r.get("status")))).count();
+        long cancelled = safeRows.stream().filter(r -> "CANCELLED".equals(String.valueOf(r.get("status")))).count();
+
+        if (failed > 0) {
+            fileDistAlertLabel.setText("알림: 실패 Job " + failed + "건");
+            fileDistAlertLabel.setStyle("-fx-background-color: #fef2f2; -fx-text-fill: #991b1b; -fx-padding: 6 10; -fx-background-radius: 4;");
+            return;
+        }
+        if (cancelled > 0) {
+            fileDistAlertLabel.setText("알림: 취소 Job " + cancelled + "건");
+            fileDistAlertLabel.setStyle("-fx-background-color: #fff7ed; -fx-text-fill: #9a3412; -fx-padding: 6 10; -fx-background-radius: 4;");
+            return;
+        }
+        if (inProgress > 0) {
+            fileDistAlertLabel.setText("알림: 진행중 Job " + inProgress + "건");
+            fileDistAlertLabel.setStyle("-fx-background-color: #eff6ff; -fx-text-fill: #1e3a8a; -fx-padding: 6 10; -fx-background-radius: 4;");
+            return;
+        }
+        fileDistAlertLabel.setText("알림: 현재 이상 없음");
+        fileDistAlertLabel.setStyle("-fx-background-color: #ecfdf5; -fx-text-fill: #065f46; -fx-padding: 6 10; -fx-background-radius: 4;");
+    }
+
+    private void loadFileDistributionIfSelected() {
+        if (fileDistJobIdField == null) return;
+        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
+        if (jobId.isBlank()) return;
+
+        apiClient.getJson("/file-distribution/jobs/" + jobId, new TypeReference<Map<String, Object>>() {})
+                .thenAccept(status -> Platform.runLater(() -> {
+                    String s = String.valueOf(status.getOrDefault("status", "-"));
+                    String p = String.valueOf(status.getOrDefault("progress", "-"));
+                    fileDistStatusLabel.setText("상태: " + s);
+                    fileDistProgressLabel.setText("진행률: " + p);
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        fileDistStatusLabel.setText("상태: 조회 실패");
+                        fileDistProgressLabel.setText("진행률: -");
+                    });
+                    return null;
+                });
+
+        apiClient.getPagedList("/file-distribution/jobs/" + jobId + "/events", new TypeReference<List<Map<String, Object>>>() {})
+                .thenAccept(events -> Platform.runLater(() -> fileDistEventsTable.getItems().setAll(events == null ? List.of() : events)))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> fileDistEventsTable.getItems().clear());
+                    return null;
+                });
+    }
+
+    private void cancelSelectedFileDistributionJob() {
+        if (fileDistJobIdField == null) return;
+        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
+        if (jobId.isBlank()) {
+            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
+            return;
+        }
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "배포 Job을 취소하시겠습니까?", ButtonType.YES, ButtonType.NO);
+        confirm.showAndWait().ifPresent(type -> {
+            if (type != ButtonType.YES) return;
+            apiClient.postJson("/file-distribution/jobs/" + jobId + "/cancel", Map.of())
+                    .thenAccept(resp -> Platform.runLater(() -> {
+                        new Alert(Alert.AlertType.INFORMATION, "배포 Job이 취소되었습니다.").show();
+                        loadFileDistributionIfSelected();
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                "취소 실패: " + errorMessage(ex)).show());
+                        return null;
+                    });
+        });
+    }
+
+    private void retryFailedForSelectedJob() {
+        if (fileDistJobIdField == null) return;
+        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
+        if (jobId.isBlank()) {
+            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
+            return;
+        }
+        apiClient.postJson("/file-distribution/jobs/" + jobId + "/retry-failed", Map.of())
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    new Alert(Alert.AlertType.INFORMATION, "실패 대상 재전송을 시작했습니다.").show();
+                    loadRecentFileDistributionJobs();
+                    loadFileDistributionIfSelected();
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "실패 재전송 실패: " + errorMessage(ex)).show());
+                    return null;
+                });
+    }
+
+    private void rollbackSelectedJob() {
+        if (fileDistJobIdField == null) return;
+        String sourceJobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
+        if (sourceJobId.isBlank()) {
+            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
+            return;
+        }
+
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("롤백 실행");
+        dialog.setHeaderText("복구 기준(안정) Job ID를 입력하세요");
+        dialog.setContentText("rollbackFromJobId:");
+        dialog.showAndWait().ifPresent(rollbackFrom -> {
+            String rollbackFromId = rollbackFrom == null ? "" : rollbackFrom.trim();
+            if (rollbackFromId.isBlank()) {
+                new Alert(Alert.AlertType.WARNING, "rollbackFromJobId를 입력하세요.").show();
+                return;
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("rollbackFromJobId", rollbackFromId);
+            body.put("waveSize", 20);
+            body.put("canaryOnly", false);
+            apiClient.postJson("/file-distribution/jobs/" + sourceJobId + "/rollback", body)
+                    .thenAccept(resp -> Platform.runLater(() -> {
+                        new Alert(Alert.AlertType.INFORMATION, "롤백 배포 Job이 생성되었습니다.").show();
+                        loadRecentFileDistributionJobs();
+                        loadFileDistributionIfSelected();
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                "롤백 실행 실패: " + errorMessage(ex)).show());
+                        return null;
+                    });
+        });
     }
 
     private ComboBox<ClassroomSummaryDto> buildClassroomComboBox() {

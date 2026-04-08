@@ -37,6 +37,8 @@ public class ScriptController {
 
     private final ScriptArtifactRepository scriptArtifactRepository;
 
+    // TODO: 청크 메타데이터/매니페스트용 Repository 주입 (예: FileChunkRepository, FileManifestRepository)
+
     @Value("${app.scripts.dir:storage/scripts}")
     private String scriptsDir;
 
@@ -105,6 +107,59 @@ public class ScriptController {
                 "id", saved.getId(),
                 "sha256", saved.getSha256(),
                 "downloadUrl", "/api/v1/scripts/" + saved.getId() + "/download"
+        ));
+    }
+
+
+    /**
+     * 대용량 파일 청크 업로드 (1단계)
+     * - 각 청크는 별도 요청으로 업로드
+     * - 모든 청크 업로드 후 assemble 호출 시 파일 조립 및 해시/매니페스트 생성
+     * - (실제 구현 시 FileChunkRepository, FileManifestRepository 등 필요)
+     */
+    @PostMapping(value = "/file-chunks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(
+        summary = "대용량 파일 청크 업로드",
+        description = "파일을 여러 청크로 나누어 업로드합니다. 각 청크는 순번(chunkIndex)과 전체 청크 수(totalChunks), 파일 식별자(uploadId)와 함께 전송되어야 합니다."
+    )
+    public ResponseEntity<?> uploadChunk(
+            @RequestParam("uploadId") String uploadId,
+            @RequestParam("chunkIndex") int chunkIndex,
+            @RequestParam("totalChunks") int totalChunks,
+            @RequestParam("chunkHash") String chunkHash,
+            @RequestPart("file") MultipartFile chunkFile) throws Exception {
+        // TODO: 청크 파일 저장, 해시 검증, 메타데이터 기록
+        // 예: /storage/scripts/chunks/{uploadId}/{chunkIndex}
+        // chunkHash(SHA-256) 검증
+        // DB: uploadId, chunkIndex, chunkHash, size, uploadedAt 등 기록
+        return ResponseEntity.ok(Map.of(
+            "uploadId", uploadId,
+            "chunkIndex", chunkIndex,
+            "status", "uploaded"
+        ));
+    }
+
+    /**
+     * 업로드 완료 후 파일 조립 및 매니페스트/최종 해시 생성 (1단계)
+     * - 모든 청크 업로드 후 호출
+     * - 청크 순서대로 병합, 전체 파일 해시 계산, 매니페스트 생성
+     * - DB/스토리지에 최종 파일 및 매니페스트 기록
+     */
+    @PostMapping("/file-chunks/assemble")
+    @Operation(
+        summary = "청크 조립 및 매니페스트 생성",
+        description = "모든 청크 업로드 후 호출. 서버가 청크를 병합하여 최종 파일을 생성하고, 전체 해시 및 매니페스트를 기록합니다."
+    )
+    public ResponseEntity<?> assembleChunks(
+            @RequestParam("uploadId") String uploadId,
+            @RequestParam("originalFilename") String originalFilename,
+            @RequestParam("totalChunks") int totalChunks) throws Exception {
+        // TODO: 청크 병합, 전체 해시 계산, 매니페스트(json: 청크 해시/순서/크기 등) 생성 및 저장
+        // 병합 후 ScriptArtifact/매니페스트 DB 기록
+        // 반환: 최종 파일 id, 전체 해시, 매니페스트 경로 등
+        return ResponseEntity.ok(Map.of(
+            "uploadId", uploadId,
+            "status", "assembled"
         ));
     }
 

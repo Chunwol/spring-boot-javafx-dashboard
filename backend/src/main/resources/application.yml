@@ -42,8 +42,19 @@ scheduler:
   initial-delay: 5000
 
 app:
+  security:
+    admin-users: ${ADMIN_USERS:admin}
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
+  file-distribution:
+    default-wave-size: ${FD_DEFAULT_WAVE_SIZE:20}
+    max-wave-size: ${FD_MAX_WAVE_SIZE:100}
+    fail-threshold: ${FD_FAIL_THRESHOLD:0.20}
+    security:
+      enabled: ${FD_SECURITY_ENABLED:false}
+      shared-secret: ${FD_SHARED_SECRET:change-me-file-distribution-secret}
+      max-skew-seconds: ${FD_SIGNATURE_MAX_SKEW_SECONDS:60}
+      require-https: ${FD_REQUIRE_HTTPS:true}
   cache:
     ip-range:
       maximum-size: ${IP_RANGE_CACHE_MAX_SIZE:10000}

@@ -6,11 +6,13 @@ import com.example.agent.hardware.HardwareCollector;
 import com.example.agent.heartbeat.HeartbeatSender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import okhttp3.CertificatePinner;
 import okhttp3.OkHttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
+import java.net.URI;
 import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,10 +47,28 @@ public class AgentMain {
         log.info("서버: {}", config.getServerUrl());
         log.info("config 경로: {}", configLoader.getConfigPath());
 
-        OkHttpClient httpClient = new OkHttpClient.Builder()
+        OkHttpClient.Builder httpBuilder = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build();
+                .readTimeout(30, TimeUnit.SECONDS);
+
+        // TLS 고정(pin): AGENT_TLS_PIN_SHA256=sha256/xxxxxxxx... 형식
+        if (config.getTlsPinSha256() != null && !config.getTlsPinSha256().isBlank()) {
+            try {
+                URI uri = URI.create(config.getServerUrl());
+                String host = uri.getHost();
+                if (host != null && !host.isBlank()) {
+                    CertificatePinner pinner = new CertificatePinner.Builder()
+                            .add(host, config.getTlsPinSha256().trim())
+                            .build();
+                    httpBuilder.certificatePinner(pinner);
+                    log.info("TLS pinning enabled for host={}", host);
+                }
+            } catch (Exception e) {
+                log.warn("TLS pinning 설정 무시: {}", e.getMessage());
+            }
+        }
+
+        OkHttpClient httpClient = httpBuilder.build();
 
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         HardwareCollector hardware = new HardwareCollector();

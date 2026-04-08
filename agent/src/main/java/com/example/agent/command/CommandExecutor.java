@@ -8,6 +8,10 @@ import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.example.agent.util.ZipUtil;
+
+import com.example.agent.ui.FileTransferProgressDialog;
+
 import java.io.*;
 import java.net.*;
 import java.nio.file.*;
@@ -198,18 +202,20 @@ public class CommandExecutor {
         boolean background = RUN_MODE_BACKGROUND.equalsIgnoreCase(runMode);
         String windowMode = p.has("windowMode") ? p.get("windowMode").asText("HIDDEN") : "HIDDEN";
         boolean visibleWindow = WINDOW_MODE_VISIBLE.equalsIgnoreCase(windowMode);
+        boolean runAfterTransfer = p.has("runAfterTransfer") && p.get("runAfterTransfer").asBoolean(false);
 
+        String source = scriptUrl.trim();
+        String ext = source.toLowerCase().endsWith(".zip") ? ".zip" : ".ps1";
         Path tmpDir = background
-            ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
-            : Files.createTempDirectory("pcagent-ps1-");
+                ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
+                : Files.createTempDirectory("pcagent-ps1-");
         Path tmpFile = background
-            ? tmpDir.resolve("script-" + taskId + "-" + System.currentTimeMillis() + ".ps1")
-            : tmpDir.resolve("script-" + taskId + ".ps1");
+                ? tmpDir.resolve("script-" + taskId + "-" + System.currentTimeMillis() + ext)
+                : tmpDir.resolve("script-" + taskId + ext);
 
         try {
             // 다운로드
             byte[] scriptBytes;
-            String source = scriptUrl.trim();
             Path localPath = resolveLocalScriptPath(source);
             if (localPath != null) {
                 if (!Files.exists(localPath)) {
@@ -218,6 +224,16 @@ public class CommandExecutor {
                 scriptBytes = Files.readAllBytes(localPath);
             } else {
                 String url = resolveRemoteScriptUrl(source);
+                boolean[] cancelled = {false};
+                FileTransferProgressDialog dialog = new FileTransferProgressDialog(
+                        tmpFile.getFileName().toString(),
+                        -1L,
+                        () -> cancelled[0] = true
+                );
+                dialog.show();
+                long[] downloaded = {0};
+                long contentLength = -1;
+
                 Request dlReq = new Request.Builder()
                         .url(url)
                         .header("X-Agent-Token", config.getAgentToken())
@@ -225,22 +241,108 @@ public class CommandExecutor {
                         .build();
                 try (Response resp = httpClient.newCall(dlReq).execute()) {
                     if (!resp.isSuccessful() || resp.body() == null) {
+                        dialog.close();
                         return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
                     }
-                    scriptBytes = resp.body().bytes();
+                    contentLength = resp.body().contentLength();
+                    dialog.setStatus("전송중입니다...");
+                    dialog.setEta("계산중...");
+
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int r;
+                    long start = System.currentTimeMillis();
+                    try (InputStream in = resp.body().byteStream()) {
+                        while ((r = in.read(buf)) > 0) {
+                            if (cancelled[0]) {
+                                dialog.close();
+                                return new CommandResult(2, "", "사용자 취소");
+                            }
+                            baos.write(buf, 0, r);
+                            downloaded[0] += r;
+                            double progress = contentLength > 0 ? (double) downloaded[0] / contentLength : -1;
+                            long elapsed = System.currentTimeMillis() - start;
+                            double speed = elapsed > 0 ? (downloaded[0] * 1000.0 / elapsed) : 0;
+                            long remain = (speed > 0 && contentLength > 0)
+                                    ? (long) ((contentLength - downloaded[0]) / speed)
+                                    : -1;
+                            dialog.setProgress(progress);
+                            dialog.setEta(remain > 0 ? remain + "초" : "-");
+                        }
+                    }
+                    scriptBytes = baos.toByteArray();
+
                     // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
                     String serverHash = resp.header("X-Script-SHA256");
                     if (serverHash != null && !serverHash.isBlank()) {
                         String localHash = sha256(scriptBytes);
                         if (!localHash.equalsIgnoreCase(serverHash)) {
+                            dialog.close();
                             return new CommandResult(1, "", "스크립트 무결성 검증 실패");
                         }
                     }
+                    dialog.close();
                 }
             }
+
             Files.write(tmpFile, scriptBytes);
 
-            String args = p.has("args") ? p.get("args").asText() : "";
+            boolean transferMode = p.has("transferMode") && p.get("transferMode").asBoolean(false);
+            String sourceType = p.has("sourceType") ? p.get("sourceType").asText("file") : "file";
+            String displayName = p.has("displayName") ? p.get("displayName").asText(tmpFile.getFileName().toString()) : tmpFile.getFileName().toString();
+            String destinationMode = p.has("destinationMode") ? p.get("destinationMode").asText("DOWNLOADS") : "DOWNLOADS";
+            String destinationPath = p.has("destinationPath") ? p.get("destinationPath").asText("") : "";
+
+            if (transferMode) {
+                Path targetBaseDir = resolveTransferDestination(destinationMode, destinationPath);
+                Files.createDirectories(targetBaseDir);
+
+                if ("folder".equalsIgnoreCase(sourceType) || tmpFile.toString().toLowerCase().endsWith(".zip")) {
+                    String folderName = sanitizeName(displayName == null || displayName.isBlank() ? "transfer-folder" : displayName);
+                    Path targetFolder = targetBaseDir.resolve(folderName);
+                    Files.createDirectories(targetFolder);
+                    ZipUtil.unzip(tmpFile, targetFolder);
+
+                    if (runAfterTransfer) {
+                        Path toRun = findFirstRunnableFile(targetFolder);
+                        if (toRun != null) {
+                            return executeShellOrPs1(toRun);
+                        }
+                    }
+                    return new CommandResult(0, "폴더 전송 완료: " + targetFolder, "");
+                }
+
+                String targetName = sanitizeName(displayName == null || displayName.isBlank() ? tmpFile.getFileName().toString() : displayName);
+                Path targetFile = targetBaseDir.resolve(targetName);
+                Files.copy(tmpFile, targetFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+                if (runAfterTransfer) {
+                    return executeShellOrPs1(targetFile);
+                }
+                return new CommandResult(0, "파일 전송 완료: " + targetFile, "");
+            }
+
+            // 기존 스크립트 실행 경로
+            if (tmpFile.toString().toLowerCase().endsWith(".zip")) {
+                Path unzipDir = tmpFile.getParent().resolve("unzipped-" + taskId);
+                ZipUtil.unzip(tmpFile, unzipDir);
+                if (runAfterTransfer) {
+                    try {
+                        Path toRun = findFirstRunnableFile(unzipDir);
+                        if (toRun != null) {
+                            return executeShellOrPs1(toRun);
+                        } else {
+                            return new CommandResult(0, "압축 해제 완료(실행파일 없음)", "");
+                        }
+                    } catch (Exception e) {
+                        return new CommandResult(1, "", "압축 해제 후 실행 실패: " + e.getMessage());
+                    }
+                } else {
+                    return new CommandResult(0, "압축 해제 완료", "");
+                }
+            }
+
+            List<String> args = parseScriptArgs(p.get("args"));
 
             java.util.List<String> command = new java.util.ArrayList<>();
             command.add("powershell.exe");
@@ -251,8 +353,8 @@ public class CommandExecutor {
             command.add("Bypass");
             command.add("-File");
             command.add(tmpFile.toAbsolutePath().toString());
-            if (args != null && !args.isBlank()) {
-                command.add(args);
+            if (!args.isEmpty()) {
+                command.addAll(args);
             }
 
             Process proc = new ProcessBuilder(command)
@@ -282,6 +384,56 @@ public class CommandExecutor {
                 try { Files.deleteIfExists(tmpDir); } catch (IOException ignored) {}
             }
         }
+    }
+
+    // zip 해제 후 실행 분기용
+    private CommandResult executeShellOrPs1(Path file) throws Exception {
+        String name = file.getFileName().toString().toLowerCase();
+        if (name.endsWith(".ps1")) {
+            java.util.List<String> command = new java.util.ArrayList<>();
+            command.add("powershell.exe");
+            command.add("-NoProfile");
+            command.add("-ExecutionPolicy");
+            command.add("Bypass");
+            command.add("-File");
+            command.add(file.toAbsolutePath().toString());
+            Process proc = new ProcessBuilder(command).redirectErrorStream(false).start();
+            boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
+            if (!finished) {
+                proc.destroyForcibly();
+                return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
+            }
+            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
+            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
+            return new CommandResult(proc.exitValue(), stdout, stderr);
+        }
+        if (name.endsWith(".bat") || name.endsWith(".cmd")) {
+            Process proc = new ProcessBuilder("cmd.exe", "/c", file.toAbsolutePath().toString())
+                    .redirectErrorStream(false)
+                    .start();
+            boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
+            if (!finished) {
+                proc.destroyForcibly();
+                return new CommandResult(124, "", "BAT/CMD 실행 타임아웃 (5분)");
+            }
+            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
+            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
+            return new CommandResult(proc.exitValue(), stdout, stderr);
+        }
+        if (name.endsWith(".exe")) {
+            Process proc = new ProcessBuilder(file.toAbsolutePath().toString())
+                    .redirectErrorStream(false)
+                    .start();
+            boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
+            if (!finished) {
+                proc.destroyForcibly();
+                return new CommandResult(124, "", "EXE 실행 타임아웃 (5분)");
+            }
+            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
+            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
+            return new CommandResult(proc.exitValue(), stdout, stderr);
+        }
+        return new CommandResult(0, "실행파일 아님: " + file, "");
     }
 
     // ─── WOL RELAY ───────────────────────────────────────────────────────
@@ -326,6 +478,43 @@ public class CommandExecutor {
     }
 
     // ─── 유틸 ────────────────────────────────────────────────────────────
+
+    private static Path resolveTransferDestination(String destinationMode, String destinationPath) {
+        String userHome = System.getProperty("user.home", ".");
+        String mode = destinationMode == null ? "DOWNLOADS" : destinationMode.toUpperCase();
+        return switch (mode) {
+            case "DESKTOP" -> Path.of(userHome, "Desktop");
+            case "CUSTOM" -> {
+                if (destinationPath == null || destinationPath.isBlank()) {
+                    yield Path.of(userHome, "Downloads");
+                }
+                yield Path.of(destinationPath);
+            }
+            default -> Path.of(userHome, "Downloads");
+        };
+    }
+
+    private static String sanitizeName(String name) {
+        if (name == null || name.isBlank()) {
+            return "transfer";
+        }
+        return name.replaceAll("[\\\\/:*?\"<>|]", "_");
+    }
+
+    private static Path findFirstRunnableFile(Path root) {
+        try {
+            return Files.walk(root)
+                    .filter(Files::isRegularFile)
+                    .filter(f -> {
+                        String n = f.getFileName().toString().toLowerCase();
+                        return n.endsWith(".ps1") || n.endsWith(".bat") || n.endsWith(".cmd") || n.endsWith(".exe");
+                    })
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
 
     private static String sha256(byte[] data) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -376,6 +565,49 @@ public class CommandExecutor {
             }
         }
         return null;
+    }
+
+    private static List<String> parseScriptArgs(JsonNode argsNode) {
+        if (argsNode == null || argsNode.isNull()) {
+            return List.of();
+        }
+        if (argsNode.isArray()) {
+            java.util.ArrayList<String> out = new java.util.ArrayList<>();
+            for (JsonNode n : argsNode) {
+                if (n != null && !n.isNull()) {
+                    out.add(n.asText());
+                }
+            }
+            return out;
+        }
+
+        String raw = argsNode.asText("").trim();
+        if (raw.isBlank()) {
+            return List.of();
+        }
+
+        java.util.ArrayList<String> out = new java.util.ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '"') {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (Character.isWhitespace(c) && !inQuotes) {
+                if (current.length() > 0) {
+                    out.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(c);
+            }
+        }
+        if (current.length() > 0) {
+            out.add(current.toString());
+        }
+        return out;
     }
 
     /** 명령 실행 결과 레코드 */

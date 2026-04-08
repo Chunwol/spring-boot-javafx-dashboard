@@ -5,6 +5,9 @@ import com.example.backend.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.dto.dashboard.PcStatusDto;
 import com.example.backend.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.service.dashboard.DashboardService;
+import com.example.backend.service.dashboard.ClassroomService;
+import com.example.backend.service.dashboard.PcStatusService;
+import com.example.backend.service.dashboard.IpRangeService;
 import com.example.backend.service.classroom.ClassroomValidationService;
 import com.example.backend.config.TrafficThresholdConfig;
 import io.swagger.v3.oas.annotations.Operation;
@@ -40,14 +43,23 @@ import java.util.Map;
 public class DashboardApiController {
 
     private final DashboardService dashboardService;
+    private final ClassroomService classroomService;
+    private final PcStatusService pcStatusService;
+    private final IpRangeService ipRangeService;
     private final ClassroomValidationService classroomValidationService;
     private final TrafficThresholdConfig trafficThresholdConfig;
 
     @Autowired
     public DashboardApiController(DashboardService dashboardService,
+                                  ClassroomService classroomService,
+                                  PcStatusService pcStatusService,
+                                  IpRangeService ipRangeService,
                                   ClassroomValidationService classroomValidationService,
                                   TrafficThresholdConfig trafficThresholdConfig) {
         this.dashboardService = dashboardService;
+        this.classroomService = classroomService;
+        this.pcStatusService = pcStatusService;
+        this.ipRangeService = ipRangeService;
         this.classroomValidationService = classroomValidationService;
         this.trafficThresholdConfig = trafficThresholdConfig;
     }
@@ -64,7 +76,7 @@ public class DashboardApiController {
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "20")
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(dashboardService.getClassroomSummariesPaged(page, size));
+        return ResponseEntity.ok(classroomService.getClassroomSummariesPaged(page, size));
     }
 
     /**
@@ -81,14 +93,14 @@ public class DashboardApiController {
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "20")
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(dashboardService.getPcStatusesPaged(classroomId, page, size));
+        return ResponseEntity.ok(pcStatusService.getPcStatusesPaged(classroomId, page, size));
     }
 
     @GetMapping("/classrooms/{classroomId}/traffic/pcs")
     @Operation(summary = "강의실별 PC 트래픽 조회", description = "지정된 강의실의 PC별 최신 인바운드/아웃바운드 트래픽을 조회합니다.")
     public ResponseEntity<List<Map<String, Object>>> getPcTrafficInClassroom(
             @Parameter(description = "강의실 ID") @PathVariable Long classroomId) {
-        return ResponseEntity.ok(dashboardService.getClassroomPcTraffic(classroomId));
+        return ResponseEntity.ok(classroomService.getClassroomPcTraffic(classroomId));
     }
 
     /**
@@ -131,7 +143,7 @@ public class DashboardApiController {
 
     @GetMapping("/classrooms/{groupId}/ip-ranges")
     public ResponseEntity<List<ClassroomIpRange>> getIpRanges(@PathVariable Long groupId) {
-        return ResponseEntity.ok(dashboardService.getClassroomIpRanges(groupId));
+        return ResponseEntity.ok(ipRangeService.getClassroomIpRanges(groupId));
     }
 
     @PostMapping("/classrooms/{groupId}/ip-ranges")
@@ -139,30 +151,30 @@ public class DashboardApiController {
                                                        @RequestBody ClassroomIpRange ipRange) {
         ipRange.setGroupId(groupId);
         classroomValidationService.validateIpRangeForCreate(ipRange);
-        return ResponseEntity.ok(dashboardService.saveClassroomIpRange(ipRange));
+        return ResponseEntity.ok(ipRangeService.saveClassroomIpRange(ipRange));
     }
 
     @DeleteMapping("/classrooms/ip-ranges/{id}")
     public ResponseEntity<Void> deleteIpRange(@PathVariable Long id) {
-        dashboardService.deleteClassroomIpRange(id);
+        ipRangeService.deleteClassroomIpRange(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/classrooms/{groupId}/teacher-devices")
     public ResponseEntity<List<ClassroomTeacherDevice>> getTeacherDevices(@PathVariable Long groupId) {
-        return ResponseEntity.ok(dashboardService.getTeacherDevices(groupId));
+        return ResponseEntity.ok(ipRangeService.getTeacherDevices(groupId));
     }
 
     @PostMapping("/classrooms/{groupId}/teacher-devices")
     public ResponseEntity<ClassroomTeacherDevice> addTeacherDevice(@PathVariable Long groupId,
                                                                    @RequestBody ClassroomTeacherDevice device) {
         device.setGroupId(groupId);
-        return ResponseEntity.ok(dashboardService.saveTeacherDevice(device));
+        return ResponseEntity.ok(ipRangeService.saveTeacherDevice(device));
     }
 
     @DeleteMapping("/classrooms/teacher-devices/{id}")
     public ResponseEntity<Void> deleteTeacherDevice(@PathVariable Long id) {
-        dashboardService.deleteTeacherDevice(id);
+        ipRangeService.deleteTeacherDevice(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -174,22 +186,22 @@ public class DashboardApiController {
             return ResponseEntity.badRequest().build();
         }
         String note = payload.getOrDefault("note", "broken");
-        return ResponseEntity.ok(dashboardService.markPcAsBroken(macAddress, ipAddress, note));
+        return ResponseEntity.ok(pcStatusService.markPcAsBroken(macAddress, ipAddress, note));
     }
 
     @GetMapping("/pcs/broken")
     public ResponseEntity<List<PcStatusDto>> getBrokenPcs() {
-        return ResponseEntity.ok(dashboardService.getBrokenPcStatuses());
+        return ResponseEntity.ok(pcStatusService.getBrokenPcStatuses());
     }
 
     @DeleteMapping("/pcs/broken/{macAddress}")
     public ResponseEntity<PcStatusDto> clearBrokenPc(@PathVariable String macAddress) {
-        return ResponseEntity.ok(dashboardService.clearBrokenPc(macAddress));
+        return ResponseEntity.ok(pcStatusService.clearBrokenPc(macAddress));
     }
 
     @PutMapping("/pcs/broken/{macAddress}")
     public ResponseEntity<PcStatusDto> updateBrokenPcNote(@PathVariable String macAddress,
                                                           @RequestBody Map<String, String> payload) {
-        return ResponseEntity.ok(dashboardService.updateBrokenPcNote(macAddress, payload.get("note")));
+        return ResponseEntity.ok(pcStatusService.updateBrokenPcNote(macAddress, payload.get("note")));
     }
 }

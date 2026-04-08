@@ -5,7 +5,8 @@ import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.dto.dashboard.PcStatusDto;
-import com.example.backend.service.dashboard.DashboardService;
+import com.example.backend.service.dashboard.PcStatusService;
+import com.example.backend.service.dashboard.IpRangeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -40,15 +41,18 @@ public class ClassroomDevicesApiController {
 
     private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
     private final PcMasterRepository pcMasterRepository;
-    private final DashboardService dashboardService;
+    private final IpRangeService ipRangeService;
+    private final PcStatusService pcStatusService;
 
     @Autowired
     public ClassroomDevicesApiController(ClassroomTeacherDeviceRepository teacherDeviceRepository,
                                          PcMasterRepository pcMasterRepository,
-                                         DashboardService dashboardService) {
+                                         IpRangeService ipRangeService,
+                                         PcStatusService pcStatusService) {
         this.teacherDeviceRepository = teacherDeviceRepository;
         this.pcMasterRepository = pcMasterRepository;
-        this.dashboardService = dashboardService;
+        this.ipRangeService = ipRangeService;
+        this.pcStatusService = pcStatusService;
     }
 
     @Hidden // 숨김 처리 (Swagger에서 제거)
@@ -57,7 +61,7 @@ public class ClassroomDevicesApiController {
     @Operation(summary = "강의실 교사 PC 목록 조회 (DEPRECATED)", description = "Use GET /api/v1/dashboard/classrooms/{groupId}/teacher-devices instead")
     public ResponseEntity<List<ClassroomTeacherDevice>> getTeacherDevices(@PathVariable Long groupId) {
         log.warn("DEPRECATED endpoint called: GET /{}/teacher-devices. Use GET /api/v1/dashboard/classrooms/{}/teacher-devices instead", groupId, groupId);
-        return ResponseEntity.ok(dashboardService.getTeacherDevices(groupId));
+        return ResponseEntity.ok(ipRangeService.getTeacherDevices(groupId));
     }
 
     @Hidden
@@ -68,7 +72,7 @@ public class ClassroomDevicesApiController {
                                                                    @RequestBody ClassroomTeacherDevice device) {
         log.warn("DEPRECATED endpoint called: POST /{}/teacher-devices. Use POST /api/v1/dashboard/classrooms/{}/teacher-devices instead", groupId, groupId);
         device.setGroupId(groupId);
-        return ResponseEntity.ok(dashboardService.saveTeacherDevice(device));
+        return ResponseEntity.ok(ipRangeService.saveTeacherDevice(device));
     }
 
     @Hidden
@@ -77,7 +81,7 @@ public class ClassroomDevicesApiController {
     @Operation(summary = "강의실 교사 PC 삭제 (DEPRECATED)", description = "Use DELETE /api/v1/dashboard/classrooms/teacher-devices/{id} instead")
     public ResponseEntity<Void> deleteTeacherDevice(@PathVariable Long id) {
         log.warn("DEPRECATED endpoint called: DELETE /teacher-devices/{}. Use DELETE /api/v1/dashboard/classrooms/teacher-devices/{} instead", id, id);
-        dashboardService.deleteTeacherDevice(id);
+        ipRangeService.deleteTeacherDevice(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -90,12 +94,12 @@ public class ClassroomDevicesApiController {
         String macAddress = payload.get("macAddress");
         String ipAddress = payload.get("ipAddress");
 
-        // Fallback to DashboardService for better handling
+        // Fallback to service for better handling
         if ((macAddress == null || macAddress.isBlank()) && (ipAddress == null || ipAddress.isBlank())) {
             return ResponseEntity.badRequest().build();
         }
         String note = payload.getOrDefault("note", "broken");
-        return ResponseEntity.ok(dashboardService.markPcAsBroken(macAddress, ipAddress, note));
+        return ResponseEntity.ok(pcStatusService.markPcAsBroken(macAddress, ipAddress, note));
     }
 }
 

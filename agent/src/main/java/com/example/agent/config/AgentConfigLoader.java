@@ -80,6 +80,7 @@ public class AgentConfigLoader {
         config.setServerUrl(readEnv("AGENT_SERVER_URL", readEnv("BACKEND_URL", config.getServerUrl())));
         config.setInstallKey(readEnv("AGENT_INSTALL_KEY", config.getInstallKey()));
         config.setAgentToken(readEnv("AGENT_TOKEN", config.getAgentToken()));
+        config.setTlsPinSha256(readEnv("AGENT_TLS_PIN_SHA256", config.getTlsPinSha256()));
         config.setHeartbeatIntervalSec(parseInt(readEnv("AGENT_HEARTBEAT_INTERVAL_SEC", null), config.getHeartbeatIntervalSec()));
         config.setJitterSec(parseInt(readEnv("AGENT_JITTER_SEC", null), config.getJitterSec()));
     }
