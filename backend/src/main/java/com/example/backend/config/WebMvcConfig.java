@@ -1,5 +1,6 @@
 package com.example.backend.config;
 
+import com.example.backend.interceptor.RateLimitingInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -10,6 +11,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AgentTokenInterceptor agentTokenInterceptor;
+    private final RateLimitingInterceptor rateLimitingInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -21,5 +23,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/v1/agent/commands/**",
                         "/api/v1/scripts/*/download"
                 );
+
+        // Rate limiting: Apply to all API endpoints
+        registry.addInterceptor(rateLimitingInterceptor)
+                .addPathPatterns("/api/**")
+                .order(1); // Execute before other interceptors
     }
 }
