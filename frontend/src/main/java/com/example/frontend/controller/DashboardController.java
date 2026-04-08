@@ -343,30 +343,13 @@ public class DashboardController {
         HBox dashboardBox = new HBox(6, dashboardSelector, deleteDashboardBtn);
         dashboardBox.setAlignment(Pos.CENTER_LEFT);
 
-        // 레이아웃 메뉴 (백업/복원)
-        MenuButton layoutMenu = new MenuButton("레이아웃");
-        MenuItem backupItem = new MenuItem("백업");
-        backupItem.setOnAction(e -> handleLayoutBackup());
-        MenuItem restoreItem = new MenuItem("복원");
-        restoreItem.setOnAction(e -> handleLayoutRestore());
-        layoutMenu.getItems().addAll(backupItem, restoreItem);
-
-        // 테마 메뉴 (Light/Dark/HighContrast)
-        MenuButton themeMenu = new MenuButton("테마");
-        MenuItem lightThemeItem = new MenuItem("라이트");
-        lightThemeItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.LIGHT));
-        MenuItem darkThemeItem = new MenuItem("다크");
-        darkThemeItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.DARK));
-        MenuItem highContrastItem = new MenuItem("고대비");
-        highContrastItem.setOnAction(e -> ThemeManager.setTheme(ThemeColorConstants.Theme.HIGH_CONTRAST));
-        themeMenu.getItems().addAll(lightThemeItem, darkThemeItem, highContrastItem);
+        // 레이아웃 메뉴 제거됨 - 수정모드에서 관리
+        // 테마 메뉴 제거됨 - 시스템 설정에서 관리
 
         topBar.getChildren().addAll(
             titleBox,
             dashboardBox,
             addDashboardBtn,
-            layoutMenu,
-            themeMenu,
             logoutBtn,
             spacer
         );
