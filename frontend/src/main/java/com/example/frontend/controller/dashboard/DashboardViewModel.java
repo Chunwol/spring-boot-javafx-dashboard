@@ -149,6 +149,10 @@ public class DashboardViewModel {
         return snapToGrid.get();
     }
 
+    public boolean isSnapToGridEnabled() {
+        return isSnapToGrid();
+    }
+
     public void setSnapToGrid(boolean value) {
         snapToGrid.set(value);
         savePreferences();
@@ -185,6 +189,10 @@ public class DashboardViewModel {
 
     public boolean isEditMode() {
         return isEditMode.get();
+    }
+
+    public boolean isEditModeActive() {
+        return isEditMode();
     }
 
     public void setEditMode(boolean value) {
