@@ -113,8 +113,21 @@ public class AgentMain {
 
         // 종료 훅
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            log.info("에이전트 종료.");
-            scheduler.shutdownNow();
+            log.info("에이전트 종료 시작...");
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+                    log.warn("스케줄러 10초 내 종료 불가. 강제 종료 중...");
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                log.warn("스케줄러 종료 중 중단됨");
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            // MEDIUM FIX: Graceful shutdown of command executor
+            heartbeat.gracefulShutdown();
+            log.info("에이전트 종료 완료.");
         }));
 
         log.info("하트비트 스케줄러 시작 (간격: {}s ±{}s)",

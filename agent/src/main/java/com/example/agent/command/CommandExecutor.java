@@ -11,10 +11,12 @@ import org.slf4j.LoggerFactory;
 import com.example.agent.util.ZipUtil;
 
 import com.example.agent.ui.FileTransferProgressDialog;
+import com.example.agent.util.ProcessOutputReader;
 
 import java.io.*;
 import java.net.*;
 import java.nio.file.*;
+import java.nio.file.attribute.*;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
@@ -176,14 +178,25 @@ public class CommandExecutor {
     private CommandResult executeShell(String command) throws IOException, InterruptedException {
         Process proc = Runtime.getRuntime().exec(new String[]{"cmd.exe", "/c", command});
         try {
+            // Process output streams in separate threads to prevent deadlock
+            ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT);
+            ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT);
+            stdoutReader.start();
+            stderrReader.start();
+
             boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
             if (!finished) {
                 proc.destroyForcibly();
                 return new CommandResult(124, "", "명령 실행 타임아웃 (30초)");
             }
-            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-            return new CommandResult(proc.exitValue(), stdout, stderr);
+
+            // Wait for stream readers to complete
+            try {
+                stdoutReader.waitForCompletion(1000);
+                stderrReader.waitForCompletion(1000);
+            } catch (InterruptedException ignored) {}
+
+            return new CommandResult(proc.exitValue(), stdoutReader.getOutput(), stderrReader.getOutput());
         } finally {
             proc.destroyForcibly();
         }
@@ -209,6 +222,10 @@ public class CommandExecutor {
         Path tmpDir = background
                 ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
                 : Files.createTempDirectory("pcagent-ps1-");
+
+        // MEDIUM FIX: Restrict temporary directory permissions on Unix systems
+        restrictTempDirPermissions(tmpDir);
+
         Path tmpFile = background
                 ? tmpDir.resolve("script-" + taskId + "-" + System.currentTimeMillis() + ext)
                 : tmpDir.resolve("script-" + taskId + ext);
@@ -256,6 +273,7 @@ public class CommandExecutor {
                         while ((r = in.read(buf)) > 0) {
                             if (cancelled[0]) {
                                 dialog.close();
+                                baos.close();  // CRITICAL FIX: Explicitly close stream on cancel
                                 return new CommandResult(2, "", "사용자 취소");
                             }
                             baos.write(buf, 0, r);
@@ -271,6 +289,7 @@ public class CommandExecutor {
                         }
                     }
                     scriptBytes = baos.toByteArray();
+                    baos.close();  // Ensure close on normal completion
 
                     // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
                     String serverHash = resp.header("X-Script-SHA256");
@@ -362,18 +381,32 @@ public class CommandExecutor {
                     .start();
 
             if (background) {
+                // Background process - don't wait for completion
+                // Process will continue running independently
+                log.info("PS1 백그라운드 실행 시작: {}", tmpFile.getFileName());
                 return new CommandResult(0, "백그라운드 실행 시작", "");
             }
 
             try {
+                // Foreground: read output streams asynchronously
+                ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT);
+                ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT);
+                stdoutReader.start();
+                stderrReader.start();
+
                 boolean finished = proc.waitFor(5, TimeUnit.MINUTES);
                 if (!finished) {
                     proc.destroyForcibly();
                     return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
                 }
-                String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-                String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-                return new CommandResult(proc.exitValue(), stdout, stderr);
+
+                // Wait for stream readers
+                try {
+                    stdoutReader.waitForCompletion(1000);
+                    stderrReader.waitForCompletion(1000);
+                } catch (InterruptedException ignored) {}
+
+                return new CommandResult(proc.exitValue(), stdoutReader.getOutput(), stderrReader.getOutput());
             } finally {
                 proc.destroyForcibly();
             }
@@ -389,51 +422,48 @@ public class CommandExecutor {
     // zip 해제 후 실행 분기용
     private CommandResult executeShellOrPs1(Path file) throws Exception {
         String name = file.getFileName().toString().toLowerCase();
+
+        java.util.List<String> command = new java.util.ArrayList<>();
         if (name.endsWith(".ps1")) {
-            java.util.List<String> command = new java.util.ArrayList<>();
-            command.add("powershell.exe");
-            command.add("-NoProfile");
-            command.add("-ExecutionPolicy");
-            command.add("Bypass");
-            command.add("-File");
+            command.addAll(java.util.Arrays.asList(
+                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                    file.toAbsolutePath().toString()
+            ));
+        } else if (name.endsWith(".bat") || name.endsWith(".cmd")) {
+            command.addAll(java.util.Arrays.asList("cmd.exe", "/c", file.toAbsolutePath().toString()));
+        } else if (name.endsWith(".exe")) {
             command.add(file.toAbsolutePath().toString());
-            Process proc = new ProcessBuilder(command).redirectErrorStream(false).start();
+        } else {
+            return new CommandResult(0, "실행파일 아님: " + file, "");
+        }
+
+        Process proc = new ProcessBuilder(command)
+                .redirectErrorStream(false)
+                .start();
+
+        try {
+            // Read output streams asynchronously
+            ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT);
+            ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT);
+            stdoutReader.start();
+            stderrReader.start();
+
             boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
             if (!finished) {
                 proc.destroyForcibly();
-                return new CommandResult(124, "", "PS1 실행 타임아웃 (5분)");
+                return new CommandResult(124, "", "실행 타임아웃 (5분)");
             }
-            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-            return new CommandResult(proc.exitValue(), stdout, stderr);
+
+            // Wait for stream readers
+            try {
+                stdoutReader.waitForCompletion(1000);
+                stderrReader.waitForCompletion(1000);
+            } catch (InterruptedException ignored) {}
+
+            return new CommandResult(proc.exitValue(), stdoutReader.getOutput(), stderrReader.getOutput());
+        } finally {
+            proc.destroyForcibly();
         }
-        if (name.endsWith(".bat") || name.endsWith(".cmd")) {
-            Process proc = new ProcessBuilder("cmd.exe", "/c", file.toAbsolutePath().toString())
-                    .redirectErrorStream(false)
-                    .start();
-            boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
-            if (!finished) {
-                proc.destroyForcibly();
-                return new CommandResult(124, "", "BAT/CMD 실행 타임아웃 (5분)");
-            }
-            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-            return new CommandResult(proc.exitValue(), stdout, stderr);
-        }
-        if (name.endsWith(".exe")) {
-            Process proc = new ProcessBuilder(file.toAbsolutePath().toString())
-                    .redirectErrorStream(false)
-                    .start();
-            boolean finished = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES);
-            if (!finished) {
-                proc.destroyForcibly();
-                return new CommandResult(124, "", "EXE 실행 타임아웃 (5분)");
-            }
-            String stdout = new String(proc.getInputStream().readNBytes(OUTPUT_LIMIT));
-            String stderr = new String(proc.getErrorStream().readNBytes(OUTPUT_LIMIT));
-            return new CommandResult(proc.exitValue(), stdout, stderr);
-        }
-        return new CommandResult(0, "실행파일 아님: " + file, "");
     }
 
     // ─── WOL RELAY ───────────────────────────────────────────────────────
@@ -608,6 +638,28 @@ public class CommandExecutor {
             out.add(current.toString());
         }
         return out;
+    }
+
+    /**
+     * Restrict temporary directory permissions to owner only on Unix systems.
+     * On Windows, Files.createTempDirectory() already creates with restricted attributes.
+     */
+    private static void restrictTempDirPermissions(Path dir) {
+        try {
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            if (!osName.contains("win")) {
+                // Unix/Linux: Set permissions to rwx------ (0700)
+                java.util.Set<PosixFilePermission> perms = java.util.Set.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.OWNER_EXECUTE
+                );
+                Files.setPosixFilePermissions(dir, perms);
+                log.debug("임시 디렉토리 권한 설정: {} -> rwx------", dir);
+            }
+        } catch (IOException e) {
+            log.warn("임시 디렉토리 권한 설정 실패: {} - {}", dir, e.getMessage());
+        }
     }
 
     /** 명령 실행 결과 레코드 */

@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.concurrent.TimeUnit;
 
 /**
  * GitHub Releases API 기반 OTA 자가 업데이트.
@@ -112,8 +113,28 @@ public class OtaUpdater {
                 };
             }
 
-            Runtime.getRuntime().exec(cmd);
-            log.info("OTA: 교체 명령 실행 완료. 에이전트 재시작 중...");
+            // HIGH FIX#10: Wait for update process to complete before exiting
+            Process updateProcess = Runtime.getRuntime().exec(cmd);
+            try {
+                boolean completed = updateProcess.waitFor(10, TimeUnit.SECONDS);
+                if (!completed) {
+                    log.warn("OTA: 업데이트 프로세스가 10초 내에 완료되지 않음. 강제 종료 중...");
+                    updateProcess.destroyForcibly();
+                }
+            } catch (InterruptedException e) {
+                log.error("OTA: 업데이트 프로세스 대기 중 중단됨");
+                updateProcess.destroyForcibly();
+                Thread.currentThread().interrupt();
+            }
+
+            // Allow file replacement to complete before exiting
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            log.info("OTA: 업데이트 프로세스 완료. 현재 에이전트 종료 중...");
             System.exit(0); // 새 프로세스가 시작되면 현재 프로세스 종료
 
         } catch (Exception e) {

@@ -21,6 +21,10 @@ public class AgentConfigLoader {
 
     private final Path configPath;
 
+    // CRITICAL FIX#4: Synchronize config file access to prevent race conditions
+    private final Object configLock = new Object();
+    private final AgentConfigValidator validator = new AgentConfigValidator();
+
     public AgentConfigLoader() {
         // -Dpcagent.config.dir=<path> 시스템 속성으로 경로 재정의 가능
         // (Task Scheduler로 SYSTEM 계정 실행 시 %APPDATA% 경로 문제 방지)
@@ -56,21 +60,29 @@ public class AgentConfigLoader {
             }
         }
         applyEnvOverrides(config);
+
+        // Validate configuration
+        validator.validateAndLog(config);
+
         return config;
     }
 
     /** agentToken 갱신 후 저장 */
     public void saveToken(AgentConfig config, String token) {
-        config.setAgentToken(token);
-        save(config);
+        synchronized (configLock) {
+            config.setAgentToken(token);
+            save(config);
+        }
     }
 
     public void save(AgentConfig config) {
-        try {
-            Files.createDirectories(configPath.getParent());
-            MAPPER.writeValue(configPath.toFile(), config);
-        } catch (IOException e) {
-            log.error("config.json 저장 실패: {}", e.getMessage());
+        synchronized (configLock) {
+            try {
+                Files.createDirectories(configPath.getParent());
+                MAPPER.writeValue(configPath.toFile(), config);
+            } catch (IOException e) {
+                log.error("config.json 저장 실패: {}", e.getMessage());
+            }
         }
     }
 

@@ -14,6 +14,9 @@ import org.slf4j.LoggerFactory;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 서버에 하트비트를 전송하고 응답으로 받은 명령을 처리한다.
@@ -31,6 +34,7 @@ public class HeartbeatSender {
     private final ObjectMapper mapper;
     private final CommandExecutor commandExecutor;
     private final String agentSessionId;
+    private final ExecutorService commandExecutorService;
 
     public HeartbeatSender(AgentConfig config, AgentConfigLoader configLoader,
                            HardwareCollector hardware, OkHttpClient httpClient,
@@ -44,6 +48,13 @@ public class HeartbeatSender {
         PendingCommandResultStore pendingResultStore = new PendingCommandResultStore(
             configLoader.getConfigPath().getParent(), mapper);
         this.commandExecutor = new CommandExecutor(config, configLoader, httpClient, mapper, pendingResultStore);
+
+        // CRITICAL FIX#2: Use bounded thread pool instead of creating new threads on demand
+        this.commandExecutorService = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "agent-command-executor");
+            t.setDaemon(false);  // Allow graceful shutdown
+            return t;
+        });
     }
 
     /**
@@ -147,18 +158,12 @@ public class HeartbeatSender {
                     JsonNode cmd = node.get("command");
                     if (cmd != null && !cmd.isNull()) {
                         long taskId = cmd.has("taskId") ? cmd.get("taskId").asLong() : 0;
-                        // 비동기로 명령 실행 (하트비트 스레드 블로킹 방지)
-                        Thread cmdThread = new Thread(() -> {
+                        // CRITICAL FIX#2-2: Use executor service instead of creating new threads
+                        // Note: Recursive send() call removed to prevent unbounded recursion and thread accumulation
+                        commandExecutorService.submit(() -> {
                             commandExecutor.execute(cmd);
-                            // 명령 처리 직후 한 번 더 하트비트를 보내 후속 대기 명령을 빠르게 가져온다.
-                            try {
-                                send();
-                            } catch (Exception e) {
-                                log.debug("추가 하트비트 전송 실패 taskId={}: {}", taskId, e.getMessage());
-                            }
-                        }, "cmd-exec-" + taskId);
-                        cmdThread.setDaemon(true);
-                        cmdThread.start();
+                            log.debug("명령 실행 완료 taskId={}", taskId);
+                        });
                     }
                     log.debug("하트비트 전송 완료. 명령 수령: {}", cmd != null && !cmd.isNull());
                 } else {
@@ -167,6 +172,26 @@ public class HeartbeatSender {
             }
         } catch (Exception e) {
             log.error("하트비트 예외: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Gracefully shutdown the command executor service.
+     * Waits for ongoing tasks to complete before forcing shutdown.
+     */
+    public void gracefulShutdown() {
+        log.info("하트비트 송신자 종료 시작...");
+        commandExecutorService.shutdown();
+        try {
+            if (!commandExecutorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                log.warn("명령 실행자 30초 내 종료 불가. 강제 종료 중...");
+                commandExecutorService.shutdownNow();
+            }
+            log.info("하트비트 송신자 종료 완료.");
+        } catch (InterruptedException e) {
+            log.error("하트비트 송신자 종료 중 중단됨. 강제 종료 중...");
+            commandExecutorService.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 }

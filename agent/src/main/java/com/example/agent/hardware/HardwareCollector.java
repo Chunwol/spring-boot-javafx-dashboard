@@ -23,6 +23,8 @@ public class HardwareCollector {
     private final HardwareAbstractionLayer hal = systemInfo.getHardware();
     private final OperatingSystem os = systemInfo.getOperatingSystem();
 
+    // MEDIUM FIX: Synchronize access to network measurement state
+    private final Object networkLock = new Object();
     private long lastBytesRecv = -1;
     private long lastBytesSent = -1;
     private long lastMeasureTime = -1;
@@ -88,26 +90,28 @@ public class HardwareCollector {
      * 최초 호출 시에는 [0.0, 0.0]을 반환하고 기준값을 설정한다.
      */
     public double[] getDeltaKbps() {
-        NetworkIF nic = getPrimaryNic();
-        if (nic == null) return new double[]{0.0, 0.0};
+        synchronized (networkLock) {
+            NetworkIF nic = getPrimaryNic();
+            if (nic == null) return new double[]{0.0, 0.0};
 
-        long now = System.currentTimeMillis();
-        long bytesRecv = nic.getBytesRecv();
-        long bytesSent = nic.getBytesSent();
+            long now = System.currentTimeMillis();
+            long bytesRecv = nic.getBytesRecv();
+            long bytesSent = nic.getBytesSent();
 
-        double inKbps = 0.0, outKbps = 0.0;
-        if (lastMeasureTime > 0) {
-            double elapsed = (now - lastMeasureTime) / 1000.0;
-            if (elapsed > 0) {
-                inKbps = ((bytesRecv - lastBytesRecv) * 8.0 / 1000.0) / elapsed;
-                outKbps = ((bytesSent - lastBytesSent) * 8.0 / 1000.0) / elapsed;
-                if (inKbps < 0) inKbps = 0;
-                if (outKbps < 0) outKbps = 0;
+            double inKbps = 0.0, outKbps = 0.0;
+            if (lastMeasureTime > 0) {
+                double elapsed = (now - lastMeasureTime) / 1000.0;
+                if (elapsed > 0) {
+                    inKbps = ((bytesRecv - lastBytesRecv) * 8.0 / 1000.0) / elapsed;
+                    outKbps = ((bytesSent - lastBytesSent) * 8.0 / 1000.0) / elapsed;
+                    if (inKbps < 0) inKbps = 0;
+                    if (outKbps < 0) outKbps = 0;
+                }
             }
+            lastBytesRecv = bytesRecv;
+            lastBytesSent = bytesSent;
+            lastMeasureTime = now;
+            return new double[]{inKbps, outKbps};
         }
-        lastBytesRecv = bytesRecv;
-        lastBytesSent = bytesSent;
-        lastMeasureTime = now;
-        return new double[]{inKbps, outKbps};
     }
 }
