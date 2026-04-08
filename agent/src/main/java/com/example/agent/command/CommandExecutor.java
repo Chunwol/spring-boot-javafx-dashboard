@@ -12,6 +12,8 @@ import com.example.agent.util.ZipUtil;
 
 import com.example.agent.ui.FileTransferProgressDialog;
 import com.example.agent.util.ProcessOutputReader;
+import com.example.agent.util.SensitiveDataMasker;
+import com.example.agent.util.UiThreadUtils;
 
 import java.io.*;
 import java.net.*;
@@ -75,16 +77,24 @@ public class CommandExecutor {
                 case "RUN_CMD"    -> {
                     JsonNode p = mapper.readTree(payload);
                     String cmd = p.has("cmd") ? p.get("cmd").asText() : payload;
+                    // MEDIUM FIX#9: Mask sensitive command details in logs
+                    log.debug("명령 실행 taskId={} cmd={}", taskId, SensitiveDataMasker.maskCommand(cmd));
                     yield executeShell(cmd);
                 }
-                case "RUN_PS1"    -> executePs1(taskId, scriptUrl, payload);
+                case "RUN_PS1"    -> {
+                    // Log masked URL to prevent path/token disclosure
+                    log.debug("PS1 실행 taskId={} scriptUrl={}", taskId, SensitiveDataMasker.maskPath(scriptUrl));
+                    yield executePs1(taskId, scriptUrl, payload);
+                }
                 case "WOL_RELAY"  -> executeWolRelay(payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
             persistAndSendResult(taskId, result);
         } catch (Exception e) {
-            log.error("명령 실행 실패 taskId={}: {}", taskId, e.getMessage());
-            persistAndSendResult(taskId, new CommandResult(1, "", e.getMessage()));
+            // MEDIUM FIX#9: Mask sensitive data in error messages
+            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(e.getMessage());
+            log.error("명령 실행 실패 taskId={}: {}", taskId, maskedMsg);
+            persistAndSendResult(taskId, new CommandResult(1, "", maskedMsg));
         }
     }
 
@@ -236,18 +246,22 @@ public class CommandExecutor {
             Path localPath = resolveLocalScriptPath(source);
             if (localPath != null) {
                 if (!Files.exists(localPath)) {
-                    return new CommandResult(1, "", "로컬 스크립트 파일 없음: " + localPath);
+                    // MEDIUM FIX#9: Mask file path to hide directory structure
+                    return new CommandResult(1, "", "로컬 스크립트 파일 없음: " + SensitiveDataMasker.maskPath(localPath.toString()));
                 }
                 scriptBytes = Files.readAllBytes(localPath);
             } else {
                 String url = resolveRemoteScriptUrl(source);
+                // MEDIUM FIX#9: Log masked URL path (without revealing full URL)
+                log.debug("PS1 다운로드 taskId={} url={}", taskId, SensitiveDataMasker.maskPath(url));
                 boolean[] cancelled = {false};
                 FileTransferProgressDialog dialog = new FileTransferProgressDialog(
                         tmpFile.getFileName().toString(),
                         -1L,
                         () -> cancelled[0] = true
                 );
-                dialog.show();
+                // MEDIUM FIX#8: Ensure UI operation on proper thread
+                UiThreadUtils.runOnSwingThread(dialog::show);
                 long[] downloaded = {0};
                 long contentLength = -1;
 

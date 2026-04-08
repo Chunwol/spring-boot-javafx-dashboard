@@ -5,6 +5,7 @@ import com.example.agent.command.PendingCommandResultStore;
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
 import com.example.agent.hardware.HardwareCollector;
+import com.example.agent.util.SensitiveDataMasker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
@@ -108,7 +109,8 @@ public class HeartbeatSender {
                     JsonNode node = mapper.readTree(resp.body().string());
                     String token = node.get("agentToken").asText();
                     configLoader.saveToken(config, token);
-                    log.info("에이전트 등록 완료. 토큰 저장됨.");
+                    // MEDIUM FIX#9: Mask token in logs
+                    log.info("에이전트 등록 완료. 토큰 저장됨. (토큰: {})", SensitiveDataMasker.maskToken(token));
                     return true;
                 } else {
                     log.error("에이전트 등록 실패: HTTP {}", resp.code());
@@ -116,7 +118,9 @@ public class HeartbeatSender {
                 }
             }
         } catch (Exception e) {
-            log.error("에이전트 등록 예외: {}", e.getMessage());
+            // MEDIUM FIX#9: Mask sensitive data in exception messages
+            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(e.getMessage());
+            log.error("에이전트 등록 예외: {}", maskedMsg);
             return false;
         }
     }
