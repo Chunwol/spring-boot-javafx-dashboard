@@ -189,6 +189,11 @@ public class DashboardController {
             updateZoomButtonLabel(newV.doubleValue());
         });
 
+        // Bind edit mode property to UI updates
+        dashboardViewModel.isEditModeProperty().addListener((obs, oldV, newV) -> {
+            applyEditModeUiState();
+        });
+
         viewportAdjustDebounce.setOnFinished(e -> {
             if (dashboardScrollPane == null || classroomContainer == null) {
                 return;
@@ -241,7 +246,7 @@ public class DashboardController {
             }
         }), 0, 1, TimeUnit.SECONDS);
 
-        scheduler.scheduleAtFixedRate(this::refreshDashboardSnapshot, 0, 15, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(this::refreshDashboardSnapshot, 0, 30, TimeUnit.SECONDS);
 
         connectWebSocket();
         loadDashboards();
