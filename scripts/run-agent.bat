@@ -1,36 +1,25 @@
 @echo off
-REM .env를 읽어 에이전트 실행 환경을 구성합니다.
+REM Run Agent Only - Windows
+REM Usage: scripts\run-agent.bat
 
-setlocal EnableDelayedExpansion
-
+setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
-if exist ".env" (
-    for /f "usebackq tokens=1* delims==" %%A in (".env") do (
-        set "KEY=%%A"
-        set "VAL=%%B"
-        if not "!KEY!"=="" (
-            if /i not "!KEY:~0,1!"=="#" (
-                set "!KEY!=!VAL!"
-            )
-        )
-    )
+echo.
+echo ============================================================
+echo === Agent Monitor Service
+echo ============================================================
+echo.
+
+if not exist "agent\build\libs\agent-1.0.0.jar" (
+    echo Building Agent JAR first...
+    call gradlew.bat :agent:build -x test
 )
 
-if defined AGENT_SERVER_URL set "AGENT_SERVER_URL=%AGENT_SERVER_URL%"
-if defined AGENT_INSTALL_KEY set "AGENT_INSTALL_KEY=%AGENT_INSTALL_KEY%"
-if defined AGENT_TOKEN set "AGENT_TOKEN=%AGENT_TOKEN%"
-if defined AGENT_HEARTBEAT_INTERVAL_SEC set "AGENT_HEARTBEAT_INTERVAL_SEC=%AGENT_HEARTBEAT_INTERVAL_SEC%"
-if defined AGENT_JITTER_SEC set "AGENT_JITTER_SEC=%AGENT_JITTER_SEC%"
+echo.
+echo Starting Agent service...
+echo Press Ctrl+C to stop
+echo.
 
-set "AGENT_JAR=agent\build\libs\agent-1.0.0.jar"
-
-if not exist "%AGENT_JAR%" (
-    echo Agent JAR가 없습니다: %AGENT_JAR%
-    echo 먼저 gradlew.bat :agent:build -x test 를 실행하세요.
-    exit /b 1
-)
-
-REM scripts 폴더의 config.json을 인식하도록 -D 옵션 추가
-java -Dpcagent.config.dir=%~dp0 -jar "%AGENT_JAR%"
-exit /b 0
+java -jar agent\build\libs\agent-1.0.0.jar
+endlocal

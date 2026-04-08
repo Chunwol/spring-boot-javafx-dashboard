@@ -1,22 +1,28 @@
 @echo off
-REM 프론트엔드 EXE 패키지 빌드
+REM Build Frontend Only - Windows (ShadowJAR)
+REM Usage: scripts\build-frontend.bat
 
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
-echo ==================================
-echo   BUILD FRONTEND
-echo ==================================
+echo.
+echo ============================================================
+echo === Build Frontend Only (ShadowJAR)
+echo ============================================================
 echo.
 
-call gradlew.bat :frontend:packageExe -x test
-if errorlevel 1 (
-    echo [ERROR] Frontend build failed.
+echo Building Frontend ShadowJAR...
+call gradlew.bat :frontend:shadowJar -x test
+if !errorlevel! neq 0 (
+    echo [ERROR] Frontend build failed
     exit /b 1
 )
 
 echo.
-echo [OK] Frontend build completed.
-echo Output: frontend\build\package\ClassroomDashboard
+echo [OK] Frontend JAR created:
+echo   frontend\build\libs\dashboard-0.0.1-all.jar
+echo.
+echo Run with: java -jar frontend\build\libs\dashboard-0.0.1-all.jar
+echo.
+
 endlocal
-exit /b 0

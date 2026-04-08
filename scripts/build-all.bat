@@ -1,68 +1,72 @@
 @echo off
-REM 모든 모듈 빌드 배치 파일
-REM 공통, 백엔드, 에이전트, 프론트엔드 순서로 빌드
+REM Build All Modules - Windows
+REM Usage: scripts\build-all.bat
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
-echo ================================
-echo Building Dashboard Multi-Module
-echo ================================
+echo.
+echo ============================================================
+echo === Build All Modules (Windows)
+echo ============================================================
 echo.
 
-REM 1. Common 모듈 빌드
+REM 1. Common module
 echo [1/4] Building Common Module...
 call gradlew.bat :common:build -x test
 if !errorlevel! equ 0 (
-    echo. ^& echo ✓ Common module built successfully ^& echo.
+    echo [OK] Common module built successfully
 ) else (
-    echo. ^& echo *** Common module build failed *** ^& echo.
+    echo [ERROR] Common module build failed
     exit /b 1
 )
+echo.
 
-REM 2. Backend 모듈 빌드
+REM 2. Backend module
 echo [2/4] Building Backend Module...
-call scripts\build-backend.bat
+call gradlew.bat :backend:bootJar -x test
 if !errorlevel! equ 0 (
-    echo. ^& echo ✓ Backend JAR created: backend\build\libs\backend-0.0.1-SNAPSHOT.jar ^& echo.
+    echo [OK] Backend JAR: backend\build\libs\backend-0.0.1-SNAPSHOT.jar
 ) else (
-    echo. ^& echo *** Backend build failed *** ^& echo.
+    echo [ERROR] Backend build failed
     exit /b 1
 )
+echo.
 
-REM 3. Agent 모듈 빌드
+REM 3. Agent module
 echo [3/4] Building Agent Module...
-call scripts\build-agent.bat
+call gradlew.bat :agent:build -x test
 if !errorlevel! equ 0 (
-    echo. ^& echo ✓ Agent JAR created: agent\build\libs\agent-1.0.0.jar ^& echo.
+    echo [OK] Agent JAR: agent\build\libs\agent-1.0.0.jar
 ) else (
-    echo. ^& echo *** Agent build failed *** ^& echo.
+    echo [ERROR] Agent build failed
     exit /b 1
 )
+echo.
 
-REM 4. Frontend EXE 빌드
+REM 4. Frontend module
 echo [4/4] Building Frontend Module...
-call scripts\build-frontend.bat
+call gradlew.bat :frontend:shadowJar -x test
 if !errorlevel! equ 0 (
-    echo. ^& echo ✓ Frontend EXE created: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe ^& echo.
+    echo [OK] Frontend JAR: frontend\build\libs\dashboard-0.0.1-all.jar
 ) else (
-    echo. ^& echo *** Frontend build failed *** ^& echo.
+    echo [ERROR] Frontend build failed
     exit /b 1
 )
 
 echo.
-echo ================================
+echo ============================================================
 echo All modules built successfully!
-echo ================================
+echo ============================================================
 echo.
 echo Generated artifacts:
-echo   • Backend:  backend\build\libs\backend-0.0.1-SNAPSHOT.jar
-echo   • Agent:    agent\build\libs\agent-1.0.0.jar
-echo   • Frontend: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe
+echo   - Backend:  backend\build\libs\backend-0.0.1-SNAPSHOT.jar
+echo   - Agent:    agent\build\libs\agent-1.0.0.jar
+echo   - Frontend: frontend\build\libs\dashboard-0.0.1-all.jar
 echo.
 echo Next steps:
 echo   1. Run scripts\run-backend.bat
-echo   2. Run scripts\run-frontend-dev.bat or scripts\run-frontend.bat
+echo   2. Run scripts\run-dev.bat (integrated mode)
 echo   3. Run scripts\run-agent.bat
 echo.
 

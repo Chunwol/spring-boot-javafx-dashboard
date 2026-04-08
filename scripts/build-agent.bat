@@ -1,22 +1,26 @@
 @echo off
-REM 에이전트 JAR 빌드
+REM Build Agent Only - Windows
+REM Usage: scripts\build-agent.bat
 
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
-echo ==================================
-echo   BUILD AGENT
-echo ==================================
+echo.
+echo ============================================================
+echo === Build Agent Module Only
+echo ============================================================
 echo.
 
+echo Building Agent JAR...
 call gradlew.bat :agent:build -x test
-if errorlevel 1 (
-    echo [ERROR] Agent build failed.
+if !errorlevel! neq 0 (
+    echo [ERROR] Agent build failed
     exit /b 1
 )
 
 echo.
-echo [OK] Agent build completed.
-echo Output: agent\build\libs
+echo [OK] Agent JAR created:
+echo   agent\build\libs\agent-1.0.0.jar
+echo.
+
 endlocal
-exit /b 0
