@@ -30,15 +30,17 @@ public class DashboardWidgetApiController {
 
     private final DashboardWidgetItemRepository repository;
     private final FileStorageService fileStorageService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     @Value("${SERVER_BASE_URL:http://localhost:8080}")
     private String serverBaseUrl;
 
     public DashboardWidgetApiController(DashboardWidgetItemRepository repository,
-                                        FileStorageService fileStorageService) {
+                                        FileStorageService fileStorageService,
+                                        ObjectMapper objectMapper) {
         this.repository = repository;
         this.fileStorageService = fileStorageService;
+        this.objectMapper = objectMapper;
     }
 
     // ---- 레거시/신규 공통 ----
@@ -60,7 +62,7 @@ public class DashboardWidgetApiController {
             if (details.getY() != null) item.setY(details.getY());
             if (details.getWidth() != null) item.setWidth(details.getWidth());
             if (details.getHeight() != null) item.setHeight(details.getHeight());
-            item.setVisible(details.isVisible());
+            // visible은 명시적으로 전달된 경우에만 변경 (primitive boolean이므로 항상 false 기본값 주의)
             return ResponseEntity.ok(repository.save(item));
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -105,7 +107,7 @@ public class DashboardWidgetApiController {
             applyCommon(item, req, item.getX(), item.getY(), item.getWidth(), item.getHeight(), item.isVisible());
 
             Map<String, Object> current = readConfig(item.getConfig());
-            current.putAll(req);
+            req.forEach((k, v) -> { if (!NON_CONFIG_KEYS.contains(k)) current.put(k, v); });
             item.setConfig(writeConfig(current));
             DashboardWidgetItem saved = repository.save(item);
             return ResponseEntity.ok(toTextMap(saved));
@@ -165,7 +167,7 @@ public class DashboardWidgetApiController {
             applyCommon(item, req, item.getX(), item.getY(), item.getWidth(), item.getHeight(), item.isVisible());
 
             Map<String, Object> current = readConfig(item.getConfig());
-            current.putAll(req);
+            req.forEach((k, v) -> { if (!NON_CONFIG_KEYS.contains(k)) current.put(k, v); });
             item.setConfig(writeConfig(current));
             DashboardWidgetItem saved = repository.save(item);
             return ResponseEntity.ok(toImageMap(saved));
@@ -192,6 +194,15 @@ public class DashboardWidgetApiController {
             @RequestParam(defaultValue = "240") double height,
             @RequestParam(required = false) Long dashboardId) {
         try {
+            // 파일 크기 제한 (10MB)
+            if (file.getSize() > 10 * 1024 * 1024) {
+                return ResponseEntity.badRequest().body(Map.of("error", "파일 크기가 10MB를 초과합니다."));
+            }
+            // 이미지 타입 검증
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "이미지 파일만 업로드 가능합니다."));
+            }
             String filename = fileStorageService.store(file);
             String imageUrl = serverBaseUrl + "/api/v1/files/" + filename;
             Map<String, Object> req = new LinkedHashMap<>();
@@ -210,7 +221,7 @@ public class DashboardWidgetApiController {
             return ResponseEntity.status(201).body(toImageMap(saved));
         } catch (Exception e) {
             log.error("Image upload failed", e);
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "이미지 업로드에 실패했습니다."));
         }
     }
 
@@ -243,6 +254,9 @@ public class DashboardWidgetApiController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    private static final java.util.Set<String> NON_CONFIG_KEYS = java.util.Set.of(
+            "id", "type", "x", "y", "width", "height", "visible", "groupId", "dashboardId");
 
     // ---- helper ----
 

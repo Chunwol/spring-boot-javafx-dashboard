@@ -5,6 +5,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import com.example.backend.common.exception.ConflictException;
+
 import java.util.NoSuchElementException;
 
 import static org.assertj.core.api.Assertions.*;
@@ -52,7 +54,7 @@ class GlobalExceptionHandlerTest {
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(resp.getBody()).isNotNull();
-        assertThat(resp.getBody().getMessage()).isEqualTo("데이터 없음");
+        assertThat(resp.getBody().getMessage()).isEqualTo("요청한 리소스를 찾을 수 없습니다.");
     }
 
     @Test

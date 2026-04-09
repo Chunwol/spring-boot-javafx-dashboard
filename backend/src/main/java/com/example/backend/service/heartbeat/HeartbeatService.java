@@ -128,8 +128,7 @@ public class HeartbeatService {
                 cmd.setScmateResetStatus("COMPLETED");
                 cmd.setScmateResetCompletedAt(now);
                 commandQueueRepository.save(cmd);
-                org.slf4j.LoggerFactory.getLogger(HeartbeatService.class)
-                    .info("[SCMATE 복구 완료] {} - 명령 ID: {} (대기 시간: {}초)",
+                log.info("[SCMATE 복구 완료] {} - 명령 ID: {} (대기 시간: {}초)",
                         mac, cmd.getTaskId(),
                         java.time.temporal.ChronoUnit.SECONDS.between(cmd.getScmateResetRequestedAt(), now));
             }

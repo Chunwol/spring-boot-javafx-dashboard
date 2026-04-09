@@ -59,7 +59,7 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
 
         // Set rate limit headers
         response.setHeader(X_RATE_LIMIT_LIMIT, String.valueOf(rateLimitConfig.getRequestsPerMinute()));
-        response.setHeader(X_RATE_LIMIT_REMAINING, String.valueOf(data.getRemainingRequests()));
+        response.setHeader(X_RATE_LIMIT_REMAINING, String.valueOf(data.getRemainingRequests(rateLimitConfig.getRequestsPerMinute())));
         response.setHeader(X_RATE_LIMIT_RESET, String.valueOf(data.getResetTime()));
 
         return true;
@@ -93,13 +93,8 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
     private static class ClientRateLimitData {
         private final AtomicInteger requestCount = new AtomicInteger(0);
         private final AtomicLong windowStart = new AtomicLong(System.currentTimeMillis());
-        private final int limit;
 
-        public ClientRateLimitData() {
-            this.limit = 600; // Default limit (will be overridden by config)
-        }
-
-        public boolean tryAcquire(int limit) {
+        public synchronized boolean tryAcquire(int limit) {
             long now = System.currentTimeMillis();
             long windowElapsed = now - windowStart.get();
 
@@ -109,23 +104,21 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
                 requestCount.set(0);
             }
 
-            // Check if limit exceeded
-            int currentCount = requestCount.get();
-            if (currentCount >= limit) {
+            // Atomic check-and-increment
+            if (requestCount.get() >= limit) {
                 return false;
             }
 
-            // Increment request count
             requestCount.incrementAndGet();
             return true;
         }
 
-        public int getRemainingRequests() {
+        public int getRemainingRequests(int limit) {
             long now = System.currentTimeMillis();
             if (now - windowStart.get() > WINDOW_SIZE_MILLIS) {
-                return 600; // Assume default limit
+                return limit;
             }
-            return Math.max(0, 600 - requestCount.get());
+            return Math.max(0, limit - requestCount.get());
         }
 
         public long getResetTime() {

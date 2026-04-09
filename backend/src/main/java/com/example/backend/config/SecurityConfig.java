@@ -37,16 +37,18 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/v1/auth/login",
                     "/api/v1/agent/register",
-                    "/api/v1/agent/commands/**",
                     "/api/v1/heartbeat",
                     "/api/v1/heartbeat/**",
                     "/api/v1/scripts/*/download",
-                    "/api/v1/files/**",
                     "/ws/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/v3/api-docs/**"
                 ).permitAll()
+                // 에이전트 명령 엔드포인트: AgentTokenInterceptor에서 토큰 검증 (인증 불필요 but filter 통과)
+                .requestMatchers("/api/v1/agent/commands/**").permitAll()
+                // 업로드 파일은 인증 필요
+                .requestMatchers("/api/v1/files/**").authenticated()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

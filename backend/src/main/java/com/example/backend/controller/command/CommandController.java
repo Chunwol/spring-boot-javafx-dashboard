@@ -312,8 +312,12 @@ public class CommandController {
 
         String agentMac = (String) request.getAttribute("agentMac");
         String actor = agentMac != null ? agentMac : c.getMacAddress();
-        auditService.log(actor, "CMD_RESULT", "COMMAND", String.valueOf(taskId),
-                "{\"exitCode\":" + exitCode + ",\"status\":\"" + newStatus + "\"}", null);
+        try {
+            String detail = objectMapper.writeValueAsString(Map.of("exitCode", String.valueOf(exitCode), "status", newStatus));
+            auditService.log(actor, "CMD_RESULT", "COMMAND", String.valueOf(taskId), detail, null);
+        } catch (Exception ex) {
+            auditService.log(actor, "CMD_RESULT", "COMMAND", String.valueOf(taskId));
+        }
         return ResponseEntity.ok(Map.of("status", "ok"));
     }
 
@@ -375,8 +379,6 @@ public class CommandController {
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "페이지 크기", example = "20")
             @RequestParam(defaultValue = "20") int size) {
-        schedulerService.reconcileStaleCommandsNow();
-        normalizeCommandQueueTimestamps();
 
         if (taskId != null) {
             return commandQueueRepository.findById(taskId)

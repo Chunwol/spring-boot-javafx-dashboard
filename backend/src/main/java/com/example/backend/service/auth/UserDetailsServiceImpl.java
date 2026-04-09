@@ -12,7 +12,12 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@Service
+/**
+ * @deprecated CustomUserDetailsService를 사용하세요. 이 클래스는 ROLE_USER만 지원하며
+ * findAll() + stream 비효율 패턴을 사용합니다. 향후 삭제 예정.
+ */
+@Deprecated(since = "2026-04-09", forRemoval = true)
+// @Service  -- 비활성화: CustomUserDetailsService와 중복 빈 방지
 public class UserDetailsServiceImpl implements UserDetailsService {
 
     private final UserRepository userRepository;

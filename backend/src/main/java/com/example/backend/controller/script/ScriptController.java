@@ -132,10 +132,9 @@ public class ScriptController {
         // 예: /storage/scripts/chunks/{uploadId}/{chunkIndex}
         // chunkHash(SHA-256) 검증
         // DB: uploadId, chunkIndex, chunkHash, size, uploadedAt 등 기록
-        return ResponseEntity.ok(Map.of(
-            "uploadId", uploadId,
-            "chunkIndex", chunkIndex,
-            "status", "uploaded"
+        return ResponseEntity.status(501).body(Map.of(
+            "error", "not implemented",
+            "message", "Chunk upload is not yet implemented"
         ));
     }
 
@@ -157,9 +156,9 @@ public class ScriptController {
         // TODO: 청크 병합, 전체 해시 계산, 매니페스트(json: 청크 해시/순서/크기 등) 생성 및 저장
         // 병합 후 ScriptArtifact/매니페스트 DB 기록
         // 반환: 최종 파일 id, 전체 해시, 매니페스트 경로 등
-        return ResponseEntity.ok(Map.of(
-            "uploadId", uploadId,
-            "status", "assembled"
+        return ResponseEntity.status(501).body(Map.of(
+            "error", "not implemented",
+            "message", "Chunk assembly is not yet implemented"
         ));
     }
 

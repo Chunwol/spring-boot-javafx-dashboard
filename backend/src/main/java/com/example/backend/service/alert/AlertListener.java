@@ -42,7 +42,7 @@ public class AlertListener implements ApplicationListener<AlertEvent> {
             String subject = "[PC관제] 경고: " + event.getMacAddress();
             mailService.sendEmail(alertEmail, subject, event.getMessage());
         } catch (Exception e) {
-            log.error("알림 이메일 발송 실패: {}", e.getMessage());
+            log.error("알림 이메일 발송 실패: {}", e.getMessage(), e);
         }
     }
 }
