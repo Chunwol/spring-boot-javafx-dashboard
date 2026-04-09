@@ -36,7 +36,7 @@
 ./gradlew :frontend:run
 
 # 또는 JAR 직접 실행
-java -jar frontend/build/libs/dashboard-0.0.1.jar
+java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar
 ```
 
 ---

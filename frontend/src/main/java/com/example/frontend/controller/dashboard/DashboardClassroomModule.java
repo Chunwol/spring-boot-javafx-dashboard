@@ -76,7 +76,6 @@ public class DashboardClassroomModule {
     private final Map<Long, Node> resizeHandleNodes = new HashMap<>();
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean skipGroupCommandConfirm = new java.util.concurrent.atomic.AtomicBoolean(false);
-    private static final double GRID_SIZE = 20.0;
     private static final String ORDER_BY_PC_NAME = "PC_NAME";
     private static final String ORDER_BY_IP = "IP";
 
@@ -116,7 +115,10 @@ public class DashboardClassroomModule {
                             skipGroupCommandConfirm.set(true);
                     }
                 })
-                .exceptionally(ex -> null);
+                .exceptionally(ex -> {
+                    log.warn("Failed to rename classroom", ex);
+                    return null;
+                });
     }
 
     // ─── 패널 갱신 (public) ────────────────────────────────────────────────
@@ -559,7 +561,10 @@ public class DashboardClassroomModule {
                     VBox panel = parent instanceof VBox v ? v : null;
                 renderPcGrid(totalCount, pcs, pcGrid, panel);
                 }))
-                .exceptionally(ex -> null);
+                .exceptionally(ex -> {
+                    log.warn("Failed to rename classroom", ex);
+                    return null;
+                });
     }
 
     private void renderPcGrid(int totalCount, List<PcStatusDto> pcs, GridPane pcGrid, VBox panel) {
@@ -790,7 +795,7 @@ public class DashboardClassroomModule {
         if (snapModeSupplier == null || !snapModeSupplier.getAsBoolean()) {
             return value;
         }
-        return Math.round(value / GRID_SIZE) * GRID_SIZE;
+        return Math.round(value / DashboardViewModel.GRID_SIZE) * DashboardViewModel.GRID_SIZE;
     }
 
     // ─── 컨텍스트 메뉴 ───────────────────────────────────────────────────

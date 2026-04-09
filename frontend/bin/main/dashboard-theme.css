@@ -3,7 +3,152 @@
     -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
     -fx-font-size: 15px;
 }
-.root.font-small {
+
+/* ───────────────── THEME: LIGHT (기본값) ───────────────── */
+.root.light-theme {
+    -fx-font-family: "Segoe UI";
+    -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
+    -fx-text-fill: #2d3748;
+}
+
+.root.light-theme .label {
+    -fx-text-fill: #2d3748;
+}
+
+.root.light-theme .button {
+    -fx-background-color: #e2e8f0;
+    -fx-text-fill: #1a202c;
+}
+
+.root.light-theme .button:hover {
+    -fx-background-color: #cbd5e0;
+}
+
+.root.light-theme .combo-box,
+.root.light-theme .text-field,
+.root.light-theme .password-field,
+.root.light-theme .text-area,
+.root.light-theme .color-picker,
+.root.light-theme .menu-button,
+.root.light-theme .toggle-button {
+    -fx-background-color: white;
+    -fx-text-fill: #2d3748;
+    -fx-border-color: #cbd5e0;
+}
+
+/* ───────────────── THEME: DARK ───────────────── */
+.root.dark-theme {
+    -fx-font-family: "Segoe UI";
+    -fx-background-color: linear-gradient(to bottom, #1a202c, #2d3748 40%);
+    -fx-text-fill: #e2e8f0;
+}
+
+.root.dark-theme .label {
+    -fx-text-fill: #e2e8f0;
+}
+
+.root.dark-theme .button {
+    -fx-background-color: #4a5568;
+    -fx-text-fill: #e2e8f0;
+}
+
+.root.dark-theme .button:hover {
+    -fx-background-color: #5a6b7a;
+}
+
+.root.dark-theme .combo-box,
+.root.dark-theme .text-field,
+.root.dark-theme .password-field,
+.root.dark-theme .text-area,
+.root.dark-theme .color-picker,
+.root.dark-theme .menu-button,
+.root.dark-theme .toggle-button {
+    -fx-background-color: #2d3748;
+    -fx-text-fill: #e2e8f0;
+    -fx-border-color: #4a5568;
+}
+
+.root.dark-theme .combo-box-popup {
+    -fx-background-color: #2d3748;
+}
+
+.root.dark-theme .context-menu {
+    -fx-background-color: #2d3748;
+}
+
+.root.dark-theme .menu-item:focused {
+    -fx-background-color: #4a5568;
+}
+
+.root.dark-theme .dashboard-topbar {
+    -fx-background-color: linear-gradient(to right, #0f172a, #111827);
+}
+
+.root.dark-theme .dashboard-canvas-bg {
+    -fx-background-color: linear-gradient(to bottom right, #1a202c, #0f172a);
+}
+
+/* ───────────────── THEME: HIGH CONTRAST ───────────────── */
+.root.high-contrast-theme {
+    -fx-font-family: "Segoe UI";
+    -fx-background-color: #000000;
+    -fx-text-fill: #ffffff;
+}
+
+.root.high-contrast-theme .label {
+    -fx-text-fill: #ffffff;
+    -fx-font-weight: bold;
+}
+
+.root.high-contrast-theme .button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #000000;
+    -fx-border-color: #000000;
+    -fx-border-width: 2;
+    -fx-font-weight: bold;
+}
+
+.root.high-contrast-theme .button:hover {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+}
+
+.root.high-contrast-theme .combo-box,
+.root.high-contrast-theme .text-field,
+.root.high-contrast-theme .password-field,
+.root.high-contrast-theme .text-area,
+.root.high-contrast-theme .color-picker,
+.root.high-contrast-theme .menu-button,
+.root.high-contrast-theme .toggle-button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #000000;
+    -fx-border-color: #000000;
+    -fx-border-width: 2;
+}
+
+.root.high-contrast-theme .toggle-button:selected {
+    -fx-background-color: #ffff00;
+    -fx-text-fill: #000000;
+    -fx-border-color: #000000;
+}
+
+.root.high-contrast-theme .dashboard-topbar {
+    -fx-background-color: #000000;
+    -fx-border-color: #ffffff;
+    -fx-border-width: 2;
+}
+
+.root.high-contrast-theme .dashboard-canvas-bg {
+    -fx-background-color: #000000;
+}
+
+.root.high-contrast-theme .pcmgmt-status-offline {
+    -fx-text-fill: #ffff00;
+    -fx-font-weight: bold;
+}
+
+/* ───────────────── 공통 스타일 ───────────────── */
+
     -fx-font-size: 13px;
 }
 .root.font-large {

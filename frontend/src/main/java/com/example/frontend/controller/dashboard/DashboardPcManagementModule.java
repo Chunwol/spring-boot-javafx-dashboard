@@ -64,10 +64,10 @@ public class DashboardPcManagementModule {
     private Label selectionHintLabel;
     private ComboBox<String> commandCombo;
 
-    // 데이터
-    private List<PcStatusDto> allPcs = new ArrayList<>();
-    // groupName → groupId
-    private LinkedHashMap<String, Long> classroomMap = new LinkedHashMap<>();
+    // 데이터 (동기화된 컬렉션 - 백그라운드 스레드와 FX 스레드 간 동기화)
+    private final List<PcStatusDto> allPcs = Collections.synchronizedList(new ArrayList<>());
+    // groupName → groupId (ConcurrentHashMap - 스레드 안전)
+    private final Map<String, Long> classroomMap = Collections.synchronizedMap(new LinkedHashMap<>());
 
     public DashboardPcManagementModule(HttpClient httpClient, ObjectMapper objectMapper, String apiBaseUrl) {
         this.httpClient = httpClient;
@@ -149,6 +149,7 @@ public class DashboardPcManagementModule {
     // PC 목록 테이블 (멀티셀렉션)
     // ─────────────────────────────────────────
 
+    @SuppressWarnings("unchecked")
     private Node buildPcTable() {
         pcTable = new TableView<>();
         pcTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
@@ -467,7 +468,10 @@ public class DashboardPcManagementModule {
     // ─────────────────────────────────────────
     // 전송 전 확인 다이얼로그
     // ─────────────────────────────────────────
+    // 전송 전 확인 다이얼로그
+    // ─────────────────────────────────────────
 
+    @SuppressWarnings("unchecked")
     private void showConfirmationDialog(String commandType, String commandLabel, List<PcStatusDto> targetPcs, TransferSource transferSource) {
         long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
         long offlineCount = targetPcs.size() - onlineCount;

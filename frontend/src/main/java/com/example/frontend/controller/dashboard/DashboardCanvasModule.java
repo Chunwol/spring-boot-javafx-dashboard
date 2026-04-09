@@ -97,7 +97,7 @@ public class DashboardCanvasModule {
         GraphicsContext gc = gridCanvas.getGraphicsContext2D();
         gc.clearRect(0, 0, gridCanvas.getWidth(), gridCanvas.getHeight());
 
-        double gridSize = 20.0;
+        double gridSize = DashboardViewModel.GRID_SIZE;
         double majorStep = gridSize * 5;
 
         // 마이너 그리드: 부드러운 배경 가이드

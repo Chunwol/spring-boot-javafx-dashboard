@@ -48,10 +48,48 @@ REM 4. Frontend module
 echo [4/4] Building Frontend Module...
 call gradlew.bat :frontend:shadowJar -x test
 if !errorlevel! equ 0 (
-    echo [OK] Frontend JAR: frontend\build\libs\dashboard-0.0.1-all.jar
+    echo [OK] Frontend JAR: frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
 ) else (
     echo [ERROR] Frontend build failed
     exit /b 1
+)
+
+echo.
+echo [EXTRA] Packaging Frontend EXE (app-image)...
+call gradlew.bat :frontend:packageExe
+if !errorlevel! equ 0 (
+    echo [OK] Frontend EXE: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe
+) else (
+    echo [ERROR] Frontend EXE packaging failed
+    exit /b 1
+)
+
+echo.
+echo [EXTRA] Packaging Frontend MSI installer...
+call gradlew.bat :frontend:packageMsi
+if !errorlevel! equ 0 (
+    echo [OK] Frontend MSI generated in frontend\build\package\
+) else (
+    echo [WARN] Frontend MSI packaging skipped or failed ^(WiX Toolset may be required^)
+)
+
+echo.
+echo [EXTRA] Collecting release artifacts to dist\
+if not exist dist mkdir dist
+if not exist dist\backend mkdir dist\backend
+if not exist dist\agent mkdir dist\agent
+if not exist dist\frontend mkdir dist\frontend
+
+copy /Y backend\build\libs\backend-0.0.1-SNAPSHOT.jar dist\backend\backend.jar >nul
+copy /Y agent\build\libs\agent-1.0.0.jar dist\agent\agent.jar >nul
+copy /Y frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar dist\frontend\frontend-all.jar >nul
+
+if exist frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe (
+    copy /Y frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe dist\frontend\ClassroomDashboard.exe >nul
+)
+
+for %%f in (frontend\build\package\*.msi) do (
+    copy /Y "%%f" dist\frontend\ClassroomDashboard.msi >nul
 )
 
 echo.
@@ -60,14 +98,16 @@ echo All modules built successfully!
 echo ============================================================
 echo.
 echo Generated artifacts:
-echo   - Backend:  backend\build\libs\backend-0.0.1-SNAPSHOT.jar
-echo   - Agent:    agent\build\libs\agent-1.0.0.jar
-echo   - Frontend: frontend\build\libs\dashboard-0.0.1-all.jar
+echo   - Backend:  dist\backend\backend.jar
+echo   - Agent:    dist\agent\agent.jar
+echo   - Frontend fat JAR: dist\frontend\frontend-all.jar
+echo   - Frontend EXE:     dist\frontend\ClassroomDashboard.exe
+echo   - Frontend MSI:     dist\frontend\ClassroomDashboard.msi ^(if generated^)
 echo.
 echo Next steps:
-echo   1. Run scripts\run-backend.bat
-echo   2. Run scripts\run-dev.bat (integrated mode)
-echo   3. Run scripts\run-agent.bat
+echo   1. Distribute dist\ folder
+echo   2. Run dist\frontend\ClassroomDashboard.exe on target PC
+echo   3. Use backend.jar and agent.jar for server/agent deployment
 echo.
 
 endlocal

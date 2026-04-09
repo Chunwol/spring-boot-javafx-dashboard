@@ -20,8 +20,27 @@ public class DashboardDataService {
         this.apiClient = apiClient;
     }
 
+    /**
+     * Fetch classrooms asynchronously to avoid blocking FX thread
+     */
+    public void fetchClassroomsAsync(Consumer<List<ClassroomSummaryDto>> callback) {
+        apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){})
+                .thenAccept(callback)
+                .exceptionally(ex -> {
+                    log.warn("Failed to fetch classrooms", ex);
+                    callback.accept(List.of());
+                    return null;
+                });
+    }
+
+    /**
+     * Synchronous fetch with timeout (for initialization only, not on FX thread)
+     * @deprecated Use fetchClassroomsAsync instead
+     */
+    @Deprecated(since = "2026-04-09", forRemoval = true)
     public List<ClassroomSummaryDto> fetchClassrooms() throws Exception {
-        return apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){}).get();
+        return apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>(){})
+                .get(8, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     public void fetchRefreshSnapshotAsync(Consumer<DashboardRefreshDto> callback) {

@@ -51,6 +51,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
@@ -91,7 +92,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DashboardController {
 
-    private static final double GRID_SIZE = 20.0;
     private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Logger log = LoggerFactory.getLogger(DashboardController.class);
 
@@ -309,16 +309,8 @@ public class DashboardController {
             }
         });
 
-        // 대시보드 삭제 버튼
-        Button deleteDashboardBtn = createIconActionButton("삭제", "mdi2d-delete", "#d73a49", "white");
-        deleteDashboardBtn.setOnAction(e -> handleDeleteDashboard());
-        deleteDashboardBtn.setDisable(true); // 최초엔 비활성화, 목록 로드 후 갱신
-        AccessibilityHelper.makeAccessible(deleteDashboardBtn, "대시보드 삭제", "선택된 대시보드를 삭제합니다");
-
-        // 대시보드 추가 버튼
-        Button addDashboardBtn = createIconActionButton("+ 대시보드", "mdi2p-plus", "#15803d", "white");
-        addDashboardBtn.setOnAction(e -> handleCreateDashboard());
-        AccessibilityHelper.makeAccessible(addDashboardBtn, "새 대시보드 생성", "새로운 대시보드를 생성합니다");
+        // 설정 메뉴 생성
+        MenuButton settingsMenu = createDashboardSettingsMenu();
 
         Button logoutBtn = createIconActionButton("로그아웃", "mdi2l-logout", "#b4535f", "white");
         logoutBtn.setOnAction(e -> handleLogout());
@@ -339,35 +331,66 @@ public class DashboardController {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        // ComboBox + 삭제 버튼 묶기
-        HBox dashboardBox = new HBox(6, dashboardSelector, deleteDashboardBtn);
+        // ComboBox + 설정 메뉴 묶기
+        HBox dashboardBox = new HBox(6, dashboardSelector, settingsMenu);
         dashboardBox.setAlignment(Pos.CENTER_LEFT);
-
-        // 레이아웃 메뉴 제거됨 - 수정모드에서 관리
-        // 테마 메뉴 제거됨 - 시스템 설정에서 관리
 
         topBar.getChildren().addAll(
             titleBox,
             dashboardBox,
-            addDashboardBtn,
             logoutBtn,
             spacer
         );
-        // 대시보드 목록이 바뀔 때마다 삭제 버튼 활성화/비활성화 갱신
-        dashboardSelector.getItems().addListener((javafx.collections.ListChangeListener<DashboardInfoDto>) c -> {
-            updateDeleteDashboardBtnState(deleteDashboardBtn);
-        });
-        dashboardSelector.valueProperty().addListener((obs, ov, nv) -> {
-            updateDeleteDashboardBtnState(deleteDashboardBtn);
-        });
+
+        // 설정 메뉴의 삭제 항목 초기화 및 리스너 등록
+        MenuItem deleteMenuItem = (MenuItem) settingsMenu.getProperties().get("deleteMenuItem");
+        if (deleteMenuItem != null) {
+            updateDashboardMenuState(deleteMenuItem);
+            dashboardSelector.getItems().addListener((javafx.collections.ListChangeListener<DashboardInfoDto>) c -> {
+                updateDashboardMenuState(deleteMenuItem);
+            });
+            dashboardSelector.valueProperty().addListener((obs, ov, nv) -> {
+                updateDashboardMenuState(deleteMenuItem);
+            });
+        }
+
         return topBar;
     }
 
-    // 대시보드 삭제 버튼 활성화/비활성화 로직
-    private void updateDeleteDashboardBtnState(Button deleteDashboardBtn) {
+    // 설정 메뉴 생성
+    private MenuButton createDashboardSettingsMenu() {
+        MenuButton settingsMenu = new MenuButton("⚙ 설정");
+        settingsMenu.getStyleClass().add("dashboard-menu-button");
+
+        // 대시보드 추가
+        MenuItem addItem = new MenuItem("+ 대시보드 추가");
+        addItem.setOnAction(e -> handleCreateDashboard());
+
+        // 대시보드 삭제
+        MenuItem deleteItem = new MenuItem("🗑 대시보드 삭제");
+        deleteItem.setOnAction(e -> handleDeleteDashboard());
+
+        // 레이아웃 백업
+        MenuItem backupItem = new MenuItem("💾 레이아웃 백업");
+        backupItem.setOnAction(e -> handleLayoutBackup());
+
+        // 레이아웃 복원
+        MenuItem restoreItem = new MenuItem("↩ 레이아웃 복원");
+        restoreItem.setOnAction(e -> handleLayoutRestore());
+
+        settingsMenu.getItems().addAll(addItem, deleteItem, new SeparatorMenuItem(), backupItem, restoreItem);
+
+        // 메뉴 참조 저장 (나중에 updateDashboardMenuState 호출용)
+        settingsMenu.getProperties().put("deleteMenuItem", deleteItem);
+
+        return settingsMenu;
+    }
+
+    // 설정 메뉴 삭제 항목 활성화/비활성화 로직
+    private void updateDashboardMenuState(MenuItem deleteItem) {
         List<DashboardInfoDto> dashboards = dashboardSelector.getItems();
         DashboardInfoDto selected = dashboardSelector.getValue();
-        deleteDashboardBtn.setDisable(
+        deleteItem.setDisable(
             dashboards == null || dashboards.size() <= 1 || selected == null
         );
     }
@@ -409,33 +432,8 @@ public class DashboardController {
                 return;
             }
             try {
-                ApiClient.getInstance().setBearerToken(null);
-                var fxmlUrl = getClass().getResource("/fxml/login.fxml");
-                if (fxmlUrl == null) {
-                    dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
-                    return;
-                }
-
-                FXMLLoader loader = new FXMLLoader(fxmlUrl);
-                Parent loginRoot = loader.load();
-                LoginController loginController = loader.getController();
-
-                if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
-                    dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
-                    return;
-                }
-
-                loginController.setPrimaryStage(stage);
-                Scene loginScene = new Scene(loginRoot, 420, 320);
-                var css = getClass().getResource("/dashboard-theme.css");
-                if (css != null) {
-                    loginScene.getStylesheets().add(css.toExternalForm());
-                }
-                stage.setScene(loginScene);
-                stage.setTitle("스마트 강의실 대시보드 - 로그인");
-                stage.setMinWidth(420);
-                stage.setMinHeight(320);
-                // 상태바/요약 정보 하단 고정 HBox 추가
+                moveToLoginScreen(null, false);
+                // 상태바 재생성
                 statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
                 statusSummaryLabel.setTextFill(Color.web("#64748b"));
                 statusSummaryLabel.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
@@ -457,15 +455,67 @@ public class DashboardController {
                 statusBar.setPadding(new Insets(8, 18, 8, 18));
                 statusBar.getStyleClass().add("dashboard-statusbar");
                 rootVBox.getChildren().add(statusBar);
-
-                stage.setMaximized(false);
-                stage.setWidth(460);
-                stage.setHeight(360);
-                stage.centerOnScreen();
             } catch (Exception ex) {
                 dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
             }
         });
+    }
+
+    /**
+     * 로그인 화면으로 이동
+     * @param alertMessage null이면 alert 미표시, 값이 있으면 warning alert 표시
+     * @param shouldShutdown true면 Dashboard 정리 작업 수행
+     */
+    private void moveToLoginScreen(String alertMessage, boolean shouldShutdown) throws Exception {
+        ApiClient.getInstance().setBearerToken(null);
+
+        if (shouldShutdown) {
+            shutdown();
+        }
+
+        var fxmlUrl = getClass().getResource("/fxml/login.fxml");
+        if (fxmlUrl == null) {
+            dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
+            return;
+        }
+
+        FXMLLoader loader = new FXMLLoader(fxmlUrl);
+        Parent loginRoot = loader.load();
+        LoginController loginController = loader.getController();
+
+        Stage stage = (Stage) (rootVBox != null && rootVBox.getScene() != null
+            ? rootVBox.getScene().getWindow()
+            : null);
+
+        if (!(stage instanceof Stage)) {
+            dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
+            return;
+        }
+
+        loginController.setPrimaryStage(stage);
+        Scene loginScene = new Scene(loginRoot, 420, 320);
+        var css = getClass().getResource("/dashboard-theme.css");
+        if (css != null) {
+            loginScene.getStylesheets().add(css.toExternalForm());
+        }
+
+        stage.setScene(loginScene);
+        stage.setTitle("스마트 강의실 대시보드 - 로그인");
+        stage.setMinWidth(420);
+        stage.setMinHeight(320);
+        stage.setMaximized(false);
+        stage.setWidth(460);
+        stage.setHeight(360);
+        stage.centerOnScreen();
+
+        // alertMessage가 있으면 Warning Alert 표시
+        if (alertMessage != null && !alertMessage.isEmpty()) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle("서버 연결 실패");
+            alert.setHeaderText("서버 연결이 끊어졌습니다.");
+            alert.setContentText(alertMessage);
+            alert.show();
+        }
     }
 
     private void handleLayoutBackup() {
@@ -525,11 +575,12 @@ public class DashboardController {
         Map<String, Object> layout = new HashMap<>();
         layout.put("zoom", dashboardViewModel.getZoomScale());
         layout.put("snapToGrid", dashboardViewModel.isSnapToGrid());
-        layout.put("gridSize", GRID_SIZE);
+        layout.put("gridSize", DashboardViewModel.GRID_SIZE);
         layout.put("timestamp", java.time.LocalDateTime.now());
         return layout;
     }
 
+    @SuppressWarnings("unchecked")
     private void applyRestoredLayout(LayoutBackup backup) {
         if (backup == null || backup.getLayoutData() == null) {
             return;
@@ -1056,43 +1107,7 @@ public class DashboardController {
 
     private void forceMoveToLoginWithAlert(String message) {
         try {
-            ApiClient.getInstance().setBearerToken(null);
-            var fxmlUrl = getClass().getResource("/fxml/login.fxml");
-            if (fxmlUrl == null) {
-                dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
-                return;
-            }
-
-            FXMLLoader loader = new FXMLLoader(fxmlUrl);
-            Parent loginRoot = loader.load();
-            LoginController loginController = loader.getController();
-
-            if (rootVBox == null || rootVBox.getScene() == null || !(rootVBox.getScene().getWindow() instanceof Stage stage)) {
-                dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
-                return;
-            }
-
-            shutdown();
-            loginController.setPrimaryStage(stage);
-            Scene loginScene = new Scene(loginRoot, 420, 320);
-            var css = getClass().getResource("/dashboard-theme.css");
-            if (css != null) {
-                loginScene.getStylesheets().add(css.toExternalForm());
-            }
-            stage.setScene(loginScene);
-            stage.setTitle("스마트 강의실 대시보드 - 로그인");
-            stage.setMinWidth(420);
-            stage.setMinHeight(320);
-            stage.setMaximized(false);
-            stage.setWidth(460);
-            stage.setHeight(360);
-            stage.centerOnScreen();
-
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("서버 연결 실패");
-            alert.setHeaderText("서버 연결이 끊어졌습니다.");
-            alert.setContentText(message);
-            alert.show();
+            moveToLoginScreen(message, true);
         } catch (Exception ex) {
             dashboardUIService.showToast("로그인 화면 이동 실패: " + ex.getMessage(), true);
         }
@@ -1685,7 +1700,7 @@ public class DashboardController {
         if (!isSnapToGridEnabled()) {
             return value;
         }
-        return Math.round(value / GRID_SIZE) * GRID_SIZE;
+        return Math.round(value / DashboardViewModel.GRID_SIZE) * DashboardViewModel.GRID_SIZE;
     }
 
     private void handleGroupDrop(Long groupId, double x, double y) {

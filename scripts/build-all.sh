@@ -7,6 +7,9 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Ensure execute permissions (needed when cloned on Mac/Linux without git +x)
+chmod +x ./gradlew scripts/*.sh 2>/dev/null || true
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -52,10 +55,21 @@ echo ""
 # 4. Frontend module
 echo -e "${YELLOW}[4/4] Building Frontend Module...${NC}"
 if ./gradlew :frontend:shadowJar -x test; then
-    echo -e "${GREEN}✓ Frontend JAR: frontend/build/libs/dashboard-0.0.1-all.jar${NC}"
+    echo -e "${GREEN}✓ Frontend JAR: frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar${NC}"
 else
     echo -e "${RED}✗ Frontend build failed${NC}"
     exit 1
+fi
+
+echo ""
+echo -e "${YELLOW}[EXTRA] Collecting release artifacts to dist/${NC}"
+mkdir -p dist/backend dist/agent dist/frontend
+cp -f backend/build/libs/backend-0.0.1-SNAPSHOT.jar dist/backend/backend.jar
+cp -f agent/build/libs/agent-1.0.0.jar dist/agent/agent.jar
+cp -f frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar dist/frontend/frontend-all.jar
+
+if [[ "$(uname -s)" == "Darwin" || "$(uname -s)" == "Linux" ]]; then
+    echo -e "${YELLOW}i EXE/MSI packaging is Windows-only. Run scripts/build-all.bat on Windows for installer output.${NC}"
 fi
 
 echo ""
@@ -64,12 +78,12 @@ echo -e "${GREEN}All modules built successfully!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
 echo "Generated artifacts:"
-echo "  • Backend:  backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
-echo "  • Agent:    agent/build/libs/agent-1.0.0.jar"
-echo "  • Frontend: frontend/build/libs/dashboard-0.0.1-all.jar"
+echo "  • Backend:  dist/backend/backend.jar"
+echo "  • Agent:    dist/agent/agent.jar"
+echo "  • Frontend: dist/frontend/frontend-all.jar"
 echo ""
 echo "Next steps:"
-echo "  1. Run './scripts/run-backend-only.sh' to test backend"
-echo "  2. Run './scripts/run-dev.sh' for integrated dev mode"
-echo "  3. Run './scripts/build-docker.sh' to build Docker images"
+echo "  1. Distribute dist/ folder"
+echo "  2. On Windows, run scripts/build-all.bat for EXE/MSI packaging"
+echo "  3. Use backend.jar and agent.jar for server/agent deployment"
 echo ""

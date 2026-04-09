@@ -1,8 +1,8 @@
 {
-  "serverUrl" : "http://127.0.0.1:8888",
+  "serverUrl" : "http://pelmon.kro.kr:8888",
   "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
-  "agentToken" : "",
+  "agentToken" : "agt_e9c72d1be2fe43c9b493c43814fd080a",
   "tlsPinSha256" : "",
-  "heartbeatIntervalSec" : 30,
-  "jitterSec" : 5
+  "heartbeatIntervalSec" : 120,
+  "jitterSec" : 30
 }

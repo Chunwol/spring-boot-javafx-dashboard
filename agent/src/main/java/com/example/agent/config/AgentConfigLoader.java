@@ -32,11 +32,26 @@ public class AgentConfigLoader {
         Path baseDir;
         if (configDirProp != null && !configDirProp.isBlank()) {
             baseDir = Path.of(configDirProp);
+            log.info("config 경로 재정의 사용: {}", baseDir);
         } else {
-            String appData = System.getenv("APPDATA");
-            baseDir = appData != null
-                    ? Path.of(appData, "PCAgent")
-                    : Path.of(System.getProperty("user.home"), ".pcagent");
+            Path workingDir = Path.of(System.getProperty("user.dir", "."));
+            if (Files.exists(workingDir.resolve("config.json"))) {
+                // 개발/휴대 실행 편의를 위해 실행 위치의 config.json을 우선 사용한다.
+                baseDir = workingDir;
+                log.info("실행 위치 config.json 감지: {}", workingDir.resolve("config.json"));
+            } else {
+                Path launchDir = resolveLaunchDirectory();
+                if (launchDir != null && Files.exists(launchDir.resolve("config.json"))) {
+                    // jar/exe가 있는 설치 폴더에서 직접 실행된 경우를 지원한다.
+                    baseDir = launchDir;
+                    log.info("실행 파일 위치 config.json 감지: {}", launchDir.resolve("config.json"));
+                } else {
+                    String appData = System.getenv("APPDATA");
+                    baseDir = appData != null
+                            ? Path.of(appData, "PCAgent")
+                            : Path.of(System.getProperty("user.home"), ".pcagent");
+                }
+            }
         }
         this.configPath = baseDir.resolve("config.json");
     }
@@ -110,6 +125,21 @@ public class AgentConfigLoader {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException ex) {
             return defaultValue;
+        }
+    }
+
+    private Path resolveLaunchDirectory() {
+        try {
+            Path codeSourcePath = Path.of(
+                    AgentConfigLoader.class.getProtectionDomain()
+                            .getCodeSource()
+                            .getLocation()
+                            .toURI());
+            return Files.isDirectory(codeSourcePath)
+                    ? codeSourcePath
+                    : codeSourcePath.getParent();
+        } catch (Exception ex) {
+            return null;
         }
     }
 }

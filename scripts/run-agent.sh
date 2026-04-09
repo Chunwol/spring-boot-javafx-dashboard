@@ -4,6 +4,7 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
@@ -25,7 +26,8 @@ if [ ! -f "agent/build/libs/agent-1.0.0.jar" ]; then
 fi
 
 echo "Starting Agent service..."
+echo "Config dir: $SCRIPT_DIR"
 echo "Press Ctrl+C to stop"
 echo ""
 
-java -jar agent/build/libs/agent-1.0.0.jar
+java "-Dpcagent.config.dir=$SCRIPT_DIR" -jar agent/build/libs/agent-1.0.0.jar

@@ -62,7 +62,15 @@ public class DashboardDisconnectStatusPanelModule {
     private final Map<Long, VBox> panelMap = new HashMap<>();
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
     private final Map<Long, Label> resizeHandleMap = new HashMap<>();
-    private final Map<String, String> previousStatusByMac = new HashMap<>();
+    // 접속 상태 변화 추적: MAC → 상태 (최대 500개 유지, 초과 시 임의 제거)
+    private final Map<String, String> previousStatusByMac = Collections.synchronizedMap(new LinkedHashMap<String, String>() {
+        private static final int MAX_SIZE = 500;
+
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry eldest) {
+            return size() > MAX_SIZE;
+        }
+    });
     private final ObservableList<ConnectionLogRow> logRows = FXCollections.observableArrayList();
     private final AtomicBoolean pollingInFlight = new AtomicBoolean(false);
 
@@ -171,6 +179,7 @@ public class DashboardDisconnectStatusPanelModule {
         return wrapper;
     }
 
+    @SuppressWarnings("unchecked")
     private TableView<ConnectionLogRow> createLogTable() {
         TableView<ConnectionLogRow> table = new TableView<>();
         table.setPlaceholder(new Label("아직 접속 상태 변경 로그가 없습니다."));
@@ -270,7 +279,10 @@ public class DashboardDisconnectStatusPanelModule {
                         });
                     }
                 })
-                .exceptionally(ex -> null)
+                .exceptionally(ex -> {
+                    log.warn("Failed to poll connection logs", ex);
+                    return null;
+                })
                 .whenComplete((r, t) -> pollingInFlight.set(false));
     }
 

@@ -39,7 +39,7 @@ bash scripts/build-all.sh
 생성되는 아티팩트:
 - `backend/build/libs/backend-0.0.1-SNAPSHOT.jar`
 - `agent/build/libs/agent-1.0.0.jar`
-- `frontend/build/libs/dashboard-0.0.1-all.jar`
+- `frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar`
 
 #### 2.2 Docker 이미지 빌드
 
@@ -226,10 +226,10 @@ scripts/install-agent-linux.sh agent-1.0.0.jar
 ./gradlew :frontend:shadowJar
 
 # 실행 (Linux/Mac)
-java -jar frontend/build/libs/dashboard-0.0.1-all.jar
+java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar
 
 # 실행 (Windows)
-java -jar frontend/build/libs/dashboard-0.0.1-all.jar
+java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar
 
 # 로그인 화면에서:
 #   서버: pelmon.kro.kr

@@ -16,8 +16,8 @@
 
 ### A. 메인 관리 서버 (관리자 PC)
 
-* **Framework:** Spring Boot 3.x + JavaFX 21 (AtlantaFX PrimerLight 테마)
-* **Language:** Java 17
+* **Framework:** Spring Boot 3.x + JavaFX 25 (AtlantaFX PrimerLight 테마)
+* **Language:** Java 25
 * **Database:** SQLite 3 (WAL 모드 활성화, Flyway V1~V19 마이그레이션)
 * **Communication:** REST API (JSON), WebSocket/STOMP (실시간), SMTP (이메일)
 * **Security:** JWT 인증, BCrypt 패스워드, 에이전트 토큰 기반 인증
@@ -25,7 +25,7 @@
 
 ### B. 에이전트 (학생/교사 PC)
 
-* **Language:** Java 17 (순수 Java, SLF4J 로깅)
+* **Language:** Java 25 (순수 Java, SLF4J 로깅)
 * **Library:** OSHI (하드웨어/네트워크 정보), OkHttp (HTTP 클라이언트), Jackson (JSON)
 * **Execution:** Fat JAR 또는 GraalVM Native Image (설정 포함)
 * **Security:** 설치키(Install Key) 기반 자동 등록, 토큰(Agent Token) 기반 하트비트 인증

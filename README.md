@@ -23,7 +23,7 @@ spring-boot-javafx-dashboard
 │       ├── repository/    # JPA 레포지토리
 │       ├── model/         # 엔티티 (PcMaster, ClassroomGroup 등)
 │       └── config/        # Security, JWT, WebSocket 설정
-├── frontend/              # 프론트엔드 모듈 (JavaFX 21)
+├── frontend/              # 프론트엔드 모듈 (JavaFX 25)
 │   └── src/main/java/com/example/frontend/
 │       ├── DashboardApp.java
 │       ├── controller/    # MVVM 뷰 컨트롤러
@@ -47,7 +47,7 @@ spring-boot-javafx-dashboard
 ## 기능
 
 - **백엔드**: Spring Boot 3.x REST API, JWT 인증, WebSocket/STOMP 실시간 통신, SQLite + Flyway 마이그레이션
-- **프론트엔드**: JavaFX 21 Grafana 스타일 대시보드 (AtlantaFX 테마, MVVM 패턴)
+- **프론트엔드**: JavaFX 25 Grafana 스타일 대시보드 (AtlantaFX 테마, MVVM 패턴)
 - **에이전트**: Windows PC 모니터링 서비스 (OSHI 하드웨어 정보, 하트비트, 원격 명령 실행)
 - **강의실 관리**: IP 대역 기반 자동 매핑, 교사PC/학생PC 자동 분류
 - **원격 제어**: 종료/재부팅, WOL, 명령 실행, PS1 스크립트 배포
@@ -221,27 +221,30 @@ Windows PowerShell:
 
 프로젝트는 **3개의 배포 가능한 모듈**로 구성되어 있습니다:
 
-| 모듈 | JAR 파일 | 위치 |
+| 모듈 | 배포 파일 | 위치 |
 |------|----------|------|
-| **Backend** | `backend-0.0.1-SNAPSHOT.jar` | `backend/build/libs/` |
-| **Agent** | `agent-1.0.0.jar` | `agent/build/libs/` |
-| **Frontend** | `ClassroomDashboard.exe` | `frontend/build/package/ClassroomDashboard/` |
+| **Backend** | `backend.jar` | `dist/backend/` |
+| **Agent** | `agent.jar` | `dist/agent/` |
+| **Frontend** | `frontend-all.jar`, `ClassroomDashboard.exe` | `dist/frontend/` |
 
 ### 빠른 배포 (Windows)
 
 ```powershell
 # 모든 모듈 빌드 및 배포 자동화
-.\scripts\deploy.bat
+.\scripts\release-all.bat
 ```
 
 ### 빠른 배포 (Linux/Mac)
 
 ```bash
 # 권한 부여
-chmod +x scripts/deploy.sh
+chmod +x scripts/release-all.sh
+
+# Mac/Linux 사전 점검 (권한/Java/gradlew)
+./scripts/mac-preflight.sh
 
 # 모든 모듈 빌드 및 배포 자동화
-./scripts/deploy.sh
+./scripts/release-all.sh
 ```
 
 ### 수동 배포 단계
@@ -362,8 +365,8 @@ docker-compose ps
 curl https://pelmon.kro.kr/health
 
 # Frontend 실행 (GUI)
-java -jar frontend/build/libs/dashboard-0.0.1.jar
+java -jar dist/frontend/frontend-all.jar
 
 # Agent 실행 (모니터링)
-java -jar agent/build/libs/agent-1.0.0.jar
+java -jar dist/agent/agent.jar
 ```

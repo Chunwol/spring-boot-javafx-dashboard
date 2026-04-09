@@ -21,9 +21,9 @@
 | 구성요소 | 기술 스택 | 역할 |
 |----------|-----------|------|
 | **백엔드 서버** | Spring Boot 3.x, SQLite, JWT, WebSocket/STOMP | REST API, 데이터 처리, 인증, 실시간 통신 |
-| **프론트엔드** | JavaFX 21, AtlantaFX PrimerLight | Grafana 스타일 대시보드 UI |
-| **에이전트** | Java 17, OSHI, OkHttp | 각 PC에 설치, 하트비트 전송, 명령 실행 |
-| **공통 모듈** | Java 17 | 프론트/백엔드 공유 DTO |
+| **프론트엔드** | JavaFX 25, AtlantaFX PrimerLight | Grafana 스타일 대시보드 UI |
+| **에이전트** | Java 25, OSHI, OkHttp | 각 PC에 설치, 하트비트 전송, 명령 실행 |
+| **공통 모듈** | Java 25 | 프론트/백엔드 공유 DTO |
 
 ---
 

@@ -171,6 +171,7 @@ public class CommandStatusPanelController {
                 });
     }
 
+    @SuppressWarnings("unchecked")
     private TableView<Map<String, Object>> createCommandTable() {
         TableView<Map<String, Object>> table = new TableView<>();
         table.setPlaceholder(new Label("명령 로그가 없습니다."));

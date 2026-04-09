@@ -11,7 +11,7 @@ echo === Frontend (Packaged JAR)
 echo ============================================================
 echo.
 
-if not exist "frontend\build\libs\dashboard-0.0.1-all.jar" (
+if not exist "frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar" (
     echo Building Frontend JAR first...
     call gradlew.bat :frontend:shadowJar -x test
 )
@@ -21,5 +21,5 @@ echo Starting Frontend GUI...
 echo Press Ctrl+C to stop
 echo.
 
-java -jar frontend\build\libs\dashboard-0.0.1-all.jar
+java -jar frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
 endlocal

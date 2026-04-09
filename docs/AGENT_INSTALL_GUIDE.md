@@ -224,7 +224,7 @@ ACK 전송 (POST /agent/commands/{taskId}/ack)
 
 | 증상 | 원인 | 해결 |
 |------|------|------|
-| "Java를 찾을 수 없습니다" | Java 미설치 또는 PATH 미등록 | JDK 17+ 설치 후 환경변수 설정 |
+| "Java를 찾을 수 없습니다" | Java 미설치 또는 PATH 미등록 | JDK 25+ 설치 후 환경변수 설정 |
 | "config.json 찾을 수 없음" | 설정 파일 누락 | config.json 생성 (2.2절 참조) |
 | exit code 2 | 등록 3회 실패 | config.json의 serverUrl/installKey 확인 |
 

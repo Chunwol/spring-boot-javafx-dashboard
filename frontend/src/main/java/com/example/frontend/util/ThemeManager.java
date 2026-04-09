@@ -15,9 +15,10 @@ public class ThemeManager {
 
     private static final Logger log = LoggerFactory.getLogger(ThemeManager.class);
     private static final String PREF_KEY_THEME = "theme";
-    private static ThemeColorConstants.Theme currentTheme = ThemeColorConstants.Theme.LIGHT;
-    private static Scene currentScene;
-    private static Runnable themeChangeCallback;
+    // volatile: 스레드 간 변경 가시성 보장
+    private static volatile ThemeColorConstants.Theme currentTheme = ThemeColorConstants.Theme.LIGHT;
+    private static volatile Scene currentScene;
+    private static volatile Runnable themeChangeCallback;
 
     static {
         // Load saved theme preference
@@ -30,43 +31,45 @@ public class ThemeManager {
         }
     }
 
-    public static void setCurrentScene(Scene scene) {
-        currentScene = scene;
-        applyTheme(currentTheme);
-    }
-
-    public static void setTheme(ThemeColorConstants.Theme theme) {
+    public static synchronized void setTheme(ThemeColorConstants.Theme theme) {
         currentTheme = theme;
         savePreference(theme);
         applyTheme(theme);
 
-        if (themeChangeCallback != null) {
-            themeChangeCallback.run();
+        Runnable callback = themeChangeCallback;
+        if (callback != null) {
+            callback.run();
         }
         log.info("Theme changed to: {}", theme);
+    }
+
+    public static synchronized void setCurrentScene(Scene scene) {
+        currentScene = scene;
+        applyTheme(currentTheme);
     }
 
     public static ThemeColorConstants.Theme getCurrentTheme() {
         return currentTheme;
     }
 
-    private static void applyTheme(ThemeColorConstants.Theme theme) {
-        if (currentScene == null || currentScene.getRoot() == null) {
+    private static synchronized void applyTheme(ThemeColorConstants.Theme theme) {
+        Scene scene = currentScene;
+        if (scene == null || scene.getRoot() == null) {
             return;
         }
 
         Platform.runLater(() -> {
-            currentScene.getRoot().getStyleClass().removeAll("dark-theme", "high-contrast-theme", "light-theme");
+            scene.getRoot().getStyleClass().removeAll("dark-theme", "high-contrast-theme", "light-theme");
 
             switch (theme) {
                 case DARK:
-                    currentScene.getRoot().getStyleClass().add("dark-theme");
+                    scene.getRoot().getStyleClass().add("dark-theme");
                     break;
                 case HIGH_CONTRAST:
-                    currentScene.getRoot().getStyleClass().add("high-contrast-theme");
+                    scene.getRoot().getStyleClass().add("high-contrast-theme");
                     break;
                 default:
-                    currentScene.getRoot().getStyleClass().add("light-theme");
+                    scene.getRoot().getStyleClass().add("light-theme");
             }
         });
     }

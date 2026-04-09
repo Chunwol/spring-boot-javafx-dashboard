@@ -5,7 +5,7 @@
 생성된 아티팩트:
 - ✅ `backend/build/libs/backend-0.0.1-SNAPSHOT.jar` (Spring Boot App)
 - ✅ `agent/build/libs/agent-1.0.0.jar` (Fat JAR with dependencies)
-- ✅ `frontend/build/libs/dashboard-0.0.1.jar` (Shadow JAR with all dependencies)
+- ✅ `frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar` (Shadow JAR with all dependencies)
 
 컴파일 상태: **BUILD SUCCESSFUL**
 
@@ -84,7 +84,7 @@ chmod +x scripts/build-docker.sh
 ### ✅ 시스템 요구사항
 - [ ] Docker 설치 (v20.10+)
 - [ ] Docker Compose 설치 (v2.0+)
-- [ ] Java 17 설치 (선택사항, JAR 직접 실행 시)
+- [ ] Java 25 설치 (선택사항, JAR 직접 실행 시)
 - [ ] Git 설치 (선택사항, 소스 관리용)
 
 ### ✅ 환경 설정
@@ -124,7 +124,7 @@ chmod +x scripts/build-docker.sh
 **예상 결과:**
 - ✅ `backend/build/libs/backend-0.0.1-SNAPSHOT.jar` ← 크기 ~50MB
 - ✅ `agent/build/libs/agent-1.0.0.jar` ← 크기 ~30MB
-- ✅ `frontend/build/libs/dashboard-0.0.1.jar` ← 크기 ~80MB
+- ✅ `frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar` ← 크기 ~80MB
 
 ### 2단계: Docker 이미지 빌드
 ```bash
@@ -195,7 +195,7 @@ Response: {"status":"UP","components":{...}}
 ### 1. Frontend 실행
 ```bash
 # JAR로 실행 (그래픽 필요)
-java -jar frontend/build/libs/dashboard-0.0.1.jar
+java -jar dist/frontend/frontend-all.jar
 
 # 또는 Docker로 실행 (X11 필요)
 docker-compose run frontend

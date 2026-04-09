@@ -20,9 +20,9 @@ if !errorlevel! neq 0 (
 
 echo.
 echo [OK] Frontend JAR created:
-echo   frontend\build\libs\dashboard-0.0.1-all.jar
+echo   frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
 echo.
-echo Run with: java -jar frontend\build\libs\dashboard-0.0.1-all.jar
+echo Run with: java -jar frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
 echo.
 
 endlocal

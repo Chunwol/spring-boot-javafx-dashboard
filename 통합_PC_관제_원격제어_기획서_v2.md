@@ -37,10 +37,10 @@
 
 | 구성요소 | 언어/프레임워크 | 버전 | 비고 |
 |---------|--------------|------|------|
-| **백엔드 서버** | Java + Spring Boot | 17 / 3.x | REST API, STOMP WebSocket |
-| **대시보드 UI** | JavaFX + FxWeaver | 17 / 21 | 단일 JVM 통합 실행 |
+| **백엔드 서버** | Java + Spring Boot | 25 / 3.x | REST API, STOMP WebSocket |
+| **대시보드 UI** | JavaFX + FxWeaver | 25 / 25 | 단일 JVM 통합 실행 |
 | **데이터베이스** | SQLite (WAL 모드) | 3.x | Flyway 마이그레이션 |
-| **에이전트** | Java 17 + GraalVM Native Image | CE 21 | agent.exe 단독 실행, JRE 불필요 |
+| **에이전트** | Java 25 + GraalVM Native Image | CE 25 | agent.exe 단독 실행, JRE 불필요 |
 | **에이전트 HW 수집** | OSHI 라이브러리 | 6.x | CPU/RAM/네트워크 수집 |
 | **인증** | JWT (HS256) + Agent-Token | - | 관리자/에이전트 채널 분리 |
 | **PDF 생성** | iText 7 | 7.x | 주간/월간 보고서 |
@@ -434,7 +434,7 @@ audit_logs ───────────────────────
 
 ### 7.1 구성 및 빌드
 
-- **언어**: Java 17
+- **언어**: Java 25
 - **빌드**: Gradle + GraalVM Native Image Plugin
 - **라이브러리**: OSHI 6.x, OkHttp 4.x, Jackson 2.x
 - **배포 형태**: agent.exe (단일 실행 파일, 약 30~60 MB)

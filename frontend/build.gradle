@@ -1,7 +1,8 @@
 plugins {
+    id 'java'
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
-    id 'com.github.johnrengelman.shadow' version '7.1.2'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 import org.gradle.internal.os.OperatingSystem
@@ -9,12 +10,16 @@ import org.gradle.internal.os.OperatingSystem
 group = 'com.example'
 version = '0.0.1-SNAPSHOT'
 
+java {
+    sourceCompatibility = '25'
+}
+
 repositories {
     mavenCentral()
 }
 
 javafx {
-    version = "17.0.6"
+    version = "25.0.2"
     modules = [ 'javafx.controls', 'javafx.fxml', 'javafx.web', 'javafx.swing', 'javafx.graphics' ]
 }
 
@@ -61,7 +66,7 @@ shadowJar {
     archiveBaseName = 'frontend'
     archiveVersion = project.version
     archiveClassifier = 'all'
-    
+
     manifest {
         attributes(
             'Main-Class': 'com.example.frontend.DashboardApp',
@@ -92,6 +97,32 @@ tasks.register('packageExe', Exec) {
     }
 }
 
-// Make shadowJar the default jar task
+tasks.register('packageMsi', Exec) {
+    dependsOn shadowJar
+    onlyIf { OperatingSystem.current().isWindows() }
+
+    doFirst {
+        def outputDir = file("$buildDir/package")
+        outputDir.mkdirs()
+
+        commandLine 'jpackage',
+            '--type', 'msi',
+            '--name', 'ClassroomDashboard',
+            '--input', file("$buildDir/libs").absolutePath,
+            '--main-jar', shadowJar.archiveFileName.get(),
+            '--main-class', application.mainClass.get(),
+            '--dest', outputDir.absolutePath,
+            '--vendor', 'GitHub Copilot',
+            '--description', 'Integrated Classroom Dashboard',
+            '--win-dir-chooser',
+            '--win-menu',
+            '--win-shortcut'
+    }
+}
+
+tasks.register('packageAllWindows') {
+    dependsOn packageExe, packageMsi
+}
+
 jar.dependsOn shadowJar
 build.dependsOn shadowJar

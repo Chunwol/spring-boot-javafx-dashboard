@@ -6,7 +6,7 @@
 
 ### ✅ 1. Gradle 멀티모듈 설정
 - 루트 `settings.gradle`에 `:backend`, `:frontend`, `:common`, `:agent` 모듈 구성
-- Java 17 호환, Gradle 9.x 환경 안정화
+- Java 25 호환, Gradle 8.14.x 환경 안정화
 
 ### ✅ 2. DB 마이그레이션 (Flyway)
 - `V1__init.sql` ~ `V19` 까지 안정적으로 운영 중

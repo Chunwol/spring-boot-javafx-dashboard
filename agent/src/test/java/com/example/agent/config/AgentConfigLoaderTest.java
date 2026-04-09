@@ -114,4 +114,63 @@ class AgentConfigLoaderTest {
         assertThat(config.getServerUrl()).isEqualTo("https://test:8888");
         assertThat(config.getHeartbeatIntervalSec()).isEqualTo(90);
     }
+
+    @Test
+    void defaultLoader_prefersWorkingDirectoryConfig() throws Exception {
+        Path localConfig = tempDir.resolve("config.json");
+        Files.writeString(localConfig, "{}\n");
+
+        String originalUserDir = System.getProperty("user.dir");
+        String originalConfigDir = System.getProperty("pcagent.config.dir");
+        try {
+            System.clearProperty("pcagent.config.dir");
+            System.setProperty("user.dir", tempDir.toString());
+
+            AgentConfigLoader loader = new AgentConfigLoader();
+            assertThat(loader.getConfigPath()).isEqualTo(localConfig);
+        } finally {
+            if (originalUserDir != null) {
+                System.setProperty("user.dir", originalUserDir);
+            } else {
+                System.clearProperty("user.dir");
+            }
+
+            if (originalConfigDir != null) {
+                System.setProperty("pcagent.config.dir", originalConfigDir);
+            } else {
+                System.clearProperty("pcagent.config.dir");
+            }
+        }
+    }
+
+    @Test
+    void defaultLoader_configDirPropertyOverridesWorkingDirectory() throws Exception {
+        Path localConfig = tempDir.resolve("config.json");
+        Files.writeString(localConfig, "{}\n");
+
+        Path overrideDir = tempDir.resolve("override");
+        Files.createDirectories(overrideDir);
+
+        String originalUserDir = System.getProperty("user.dir");
+        String originalConfigDir = System.getProperty("pcagent.config.dir");
+        try {
+            System.setProperty("user.dir", tempDir.toString());
+            System.setProperty("pcagent.config.dir", overrideDir.toString());
+
+            AgentConfigLoader loader = new AgentConfigLoader();
+            assertThat(loader.getConfigPath()).isEqualTo(overrideDir.resolve("config.json"));
+        } finally {
+            if (originalUserDir != null) {
+                System.setProperty("user.dir", originalUserDir);
+            } else {
+                System.clearProperty("user.dir");
+            }
+
+            if (originalConfigDir != null) {
+                System.setProperty("pcagent.config.dir", originalConfigDir);
+            } else {
+                System.clearProperty("pcagent.config.dir");
+            }
+        }
+    }
 }

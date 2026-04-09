@@ -4,11 +4,13 @@ import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.frontend.model.panel.PanelInfo;
 import javafx.scene.layout.VBox;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class DashboardPanelManager {
-    private final List<PanelInfo> panels = new ArrayList<>();
+    // 동기화된 리스트: 멀티 스레드 접근 안전
+    private final List<PanelInfo> panels = Collections.synchronizedList(new ArrayList<>());
     private final AtomicLong idGenerator = new AtomicLong(1);
 
     public List<PanelInfo> getPanels() {

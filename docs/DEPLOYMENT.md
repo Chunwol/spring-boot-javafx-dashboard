@@ -6,13 +6,13 @@
 
 ## 1. 배포 환경
 - OS: Windows Server 2019/2022, Ubuntu 20.04+ 등
-- Java: 17 이상
+- Java: 25 이상
 - Docker, docker-compose 권장
 - Nginx(SSL), SQLite(내장)
 
 ## 2. 사전 준비
 1. 서버 사양 확인 (CPU 2코어+, RAM 4GB+ 권장)
-2. Java 17+ 설치 및 환경변수 등록
+2. Java 25+ 설치 및 환경변수 등록
 3. (선택) Docker, docker-compose 설치
 4. 방화벽: 443(HTTPS), 8888(로컬) 포트 오픈
 

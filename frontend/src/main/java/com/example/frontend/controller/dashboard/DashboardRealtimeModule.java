@@ -41,8 +41,8 @@ public class DashboardRealtimeModule {
             });
 
     private WebSocketStompClient stompClient;
-    private StompSession activeSession;
-    private volatile boolean stopped = false;
+    private volatile StompSession activeSession;  // volatile: 멀티 스레드 접근 안전성
+    private volatile boolean stopped = false;  // volatile: 명시적으로 추가
     private final AtomicBoolean reconnectPending = new AtomicBoolean(false);
     private final AtomicBoolean connecting = new AtomicBoolean(false);
 

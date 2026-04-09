@@ -75,6 +75,23 @@ public class DashboardManagementModule {
         t.setDaemon(true);
         return t;
     });
+
+    // 애플리케이션 종료 시 SCRIPT_EXECUTOR 정리
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (!SCRIPT_EXECUTOR.isShutdown()) {
+                try {
+                    SCRIPT_EXECUTOR.shutdownNow();
+                    if (!SCRIPT_EXECUTOR.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        org.slf4j.LoggerFactory.getLogger(DashboardManagementModule.class)
+                                .warn("SCRIPT_EXECUTOR did not terminate within 5 seconds");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, "script-executor-shutdown"));
+    }
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String apiBaseUrl;
@@ -409,6 +426,7 @@ public class DashboardManagementModule {
                 });
     }
 
+    @SuppressWarnings("unchecked")
     private VBox buildIpRangeBox() {
         Label ipTitle = new Label("강의실 IP 대역 관리");
         ipTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
@@ -560,6 +578,7 @@ public class DashboardManagementModule {
         return teacherBox;
     }
 
+    @SuppressWarnings("unchecked")
     private VBox buildBrokenPcBox() {
         Label brokenTitle = new Label("고장 PC 등록");
         brokenTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
@@ -591,6 +610,7 @@ public class DashboardManagementModule {
         return brokenPcBox;
     }
 
+    @SuppressWarnings("unchecked")
     private TableView<PcStatusDto> buildBrokenPcTable() {
         TableView<PcStatusDto> table = new TableView<>();
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -686,6 +706,7 @@ public class DashboardManagementModule {
         return reportBox;
     }
 
+    @SuppressWarnings("unchecked")
     private VBox buildFileDistributionBox() {
         Label title = new Label("파일 배포 모니터링");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
@@ -1333,6 +1354,7 @@ public class DashboardManagementModule {
     }
 
     /** IP 대역의 개별 PC 제어 팝업을 표시한다. */
+    @SuppressWarnings("unchecked")
     private void showIndividualControlDialog(IpRangeItem item) {
         String title = "개별 PC 제어 — " + item.getGroupName()
                 + " [" + item.getStartIp() + " ~ " + item.getEndIp() + "]";

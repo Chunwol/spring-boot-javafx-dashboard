@@ -14,7 +14,7 @@ echo "============================================================"
 echo ""
 
 # Check if JAR exists
-if [ ! -f "frontend/build/libs/dashboard-0.0.1-all.jar" ]; then
+if [ ! -f "frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar" ]; then
     echo "Building Frontend JAR first..."
     ./gradlew :frontend:shadowJar -x test
 fi
@@ -23,4 +23,4 @@ echo "Starting Frontend GUI..."
 echo "Press Ctrl+C to stop"
 echo ""
 
-java -jar frontend/build/libs/dashboard-0.0.1-all.jar
+java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar

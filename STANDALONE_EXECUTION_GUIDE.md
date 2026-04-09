@@ -204,7 +204,7 @@ scripts/run-frontend-only.sh
 
 ## 📡 필수 요구사항
 
-- **Java 17 이상**
+- **Java 25 이상**
 - **Windows 10+, Mac, Linux** (동일하게 지원)
 - **SQLite** (자동 포함)
 
@@ -275,7 +275,7 @@ kill -9 <PID>
 # Java 버전 확인
 java -version
 
-# Java 17 이상 필요
+# Java 25 이상 필요
 ```
 
 ### UI가 나타나지 않음 (Mac)

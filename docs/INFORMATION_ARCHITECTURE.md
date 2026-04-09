@@ -21,7 +21,7 @@
 │   ├── REST API (/api/v1/*)
 │   ├── WebSocket (/ws)
 │   └── SQLite DB
-├── 🤖 PC 에이전트 (Java 17)
+├── 🤖 PC 에이전트 (Java 25)
 │   ├── 하트비트 전송
 │   ├── 명령 실행
 │   └── WOL 릴레이

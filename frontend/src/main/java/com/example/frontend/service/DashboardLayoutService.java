@@ -74,9 +74,12 @@ public class DashboardLayoutService {
 
     /**
      * Restore dashboard layout from file
+     * FileChooser must be shown on JavaFX Application Thread
      */
     public CompletableFuture<LayoutBackup> restoreLayoutFromFile(Window owner, Long dashboardId) {
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<File> fileChooserFuture = new CompletableFuture<>();
+
+        Platform.runLater(() -> {
             try {
                 FileChooser fileChooser = new FileChooser();
                 fileChooser.setTitle("레이아웃 백업 파일 선택");
@@ -91,18 +94,27 @@ public class DashboardLayoutService {
                 }
 
                 File selectedFile = fileChooser.showOpenDialog(owner);
+                fileChooserFuture.complete(selectedFile);
+            } catch (Exception e) {
+                fileChooserFuture.completeExceptionally(e);
+            }
+        });
+
+        return fileChooserFuture.thenCompose(selectedFile ->
+            CompletableFuture.supplyAsync(() -> {
                 if (selectedFile == null) {
                     return null;
                 }
-
-                LayoutBackup backup = objectMapper.readValue(selectedFile, LayoutBackup.class);
-                log.info("Layout restored from: {}", selectedFile.getAbsolutePath());
-                return backup;
-            } catch (Exception e) {
-                log.error("Failed to restore layout", e);
-                throw new RuntimeException("복원 실패: " + e.getMessage());
-            }
-        });
+                try {
+                    LayoutBackup backup = objectMapper.readValue(selectedFile, LayoutBackup.class);
+                    log.info("Layout restored from: {}", selectedFile.getAbsolutePath());
+                    return backup;
+                } catch (Exception e) {
+                    log.error("Failed to restore layout", e);
+                    throw new RuntimeException("복원 실패: " + e.getMessage());
+                }
+            })
+        );
     }
 
     /**

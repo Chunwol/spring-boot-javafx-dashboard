@@ -102,6 +102,7 @@ public class NetworkPanelController {
         return chart;
     }
 
+    @SuppressWarnings("unchecked")
     private TableView<Map<String, Object>> createPcTrafficTable() {
         TableView<Map<String, Object>> table = new TableView<>();
         table.setPrefHeight(300);
@@ -150,7 +151,7 @@ public class NetworkPanelController {
                     return;
                 }
                 bar.setProgress(Math.max(0.0, Math.min(1.0, value)));
-                
+
                 // PC당 임계값 초과 시 깜빡거림 및 색상 변경
                 double pcLoad = value;
                 if (pcLoad > 1.0) {  // 임계값 초과 (300M 기준)
@@ -160,12 +161,17 @@ public class NetworkPanelController {
                     bar.setStyle("-fx-accent: #0f766e;");  // 기본 색상
                     stopBlinking();
                 }
-                
+
                 setGraphic(bar);
             }
-            
+
             private void startBlinking() {
                 if (blinkingTimeline == null || blinkingTimeline.getStatus() == javafx.animation.Animation.Status.STOPPED) {
+                    // 이전 타임라인 정리 (메모리 누수 방지)
+                    if (blinkingTimeline != null) {
+                        blinkingTimeline.stop();
+                    }
+
                     blinkingTimeline = new Timeline();
                     blinkingTimeline.setCycleCount(Timeline.INDEFINITE);
                     blinkingTimeline.getKeyFrames().addAll(
@@ -177,10 +183,11 @@ public class NetworkPanelController {
                     blinkingTimeline.play();
                 }
             }
-            
+
             private void stopBlinking() {
                 if (blinkingTimeline != null && blinkingTimeline.getStatus() == javafx.animation.Animation.Status.RUNNING) {
                     blinkingTimeline.stop();
+                    blinkingTimeline = null;  // 메모리 정리
                 }
                 bar.setOpacity(1.0);
             }

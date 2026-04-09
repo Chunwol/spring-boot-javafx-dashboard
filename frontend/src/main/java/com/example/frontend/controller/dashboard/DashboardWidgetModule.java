@@ -73,7 +73,6 @@ public class DashboardWidgetModule {
     private final Runnable onRefreshPanelList;
     private LongSupplier dashboardIdSupplier = () -> -1L;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
-    private static final double GRID_SIZE = 20.0;
     private static final double IMAGE_CONTROL_HEIGHT = 34.0;
 
     // 삭제 버튼 추적 (editMode 연동)
@@ -486,7 +485,10 @@ public class DashboardWidgetModule {
             "width", w,
             "height", h,
             "visible", visible
-        )).exceptionally(ex -> null);
+        )).exceptionally(ex -> {
+            log.warn("Failed to update text position", ex);
+            return null;
+        });
     }
 
     private void updateTextItem(Long id, String text, double x, double y, double w, double h) {
@@ -505,7 +507,10 @@ public class DashboardWidgetModule {
             payload.put("fontColor", ta.getProperties().getOrDefault("fontColor", "#111111"));
         }
 
-        apiClient.putJson("/dashboard/texts/" + id, payload).exceptionally(ex -> null);
+        apiClient.putJson("/dashboard/texts/" + id, payload).exceptionally(ex -> {
+            log.warn("Failed to update text widget", ex);
+            return null;
+        });
     }
 
     private void applyTextStyle(TextArea textArea, String fontColor, boolean editMode) {
@@ -559,7 +564,10 @@ public class DashboardWidgetModule {
     }
 
     public void toggleTextVisibility(Long id, Map<String, Object> map, boolean isVisible) {
-        apiClient.putJson("/dashboard/texts/" + id, Map.of("visible", isVisible)).exceptionally(ex -> null);
+        apiClient.putJson("/dashboard/texts/" + id, Map.of("visible", isVisible)).exceptionally(ex -> {
+            log.warn("Failed to toggle text widget visibility", ex);
+            return null;
+        });
     }
 
     // ─────────── 이미지 아이템 ───────────
@@ -689,7 +697,10 @@ public class DashboardWidgetModule {
                                 "height", imageView.getFitHeight(),
                                 "visible", true,
                                 "imageUrl", imageUrlFinal
-                        )).exceptionally(ex -> null)
+                        )).exceptionally(ex -> {
+                    log.warn("Failed to update image widget position", ex);
+                    return null;
+                })
                 );
                 imageItemMap.put(id, newBox);
                 classroomContainer.getChildren().add(newBox);
@@ -717,7 +728,10 @@ public class DashboardWidgetModule {
             "width", w,
             "height", h,
             "visible", visible
-        )).exceptionally(ex -> null);
+        )).exceptionally(ex -> {
+            log.warn("Failed to update text position", ex);
+            return null;
+        });
     }
 
     public void handleDeleteImageItem(Long id) {
@@ -731,7 +745,10 @@ public class DashboardWidgetModule {
     }
 
     public void toggleImageVisibility(Long id, Map<String, Object> map, boolean isVisible) {
-        apiClient.putJson("/dashboard/images/" + id, Map.of("visible", isVisible)).exceptionally(ex -> null);
+        apiClient.putJson("/dashboard/images/" + id, Map.of("visible", isVisible)).exceptionally(ex -> {
+            log.warn("Failed to toggle image visibility", ex);
+            return null;
+        });
     }
 
     // ─────────── 백업 / 복원 ───────────
@@ -840,10 +857,11 @@ public class DashboardWidgetModule {
                 editModeSupplier,
                 this::applySnap,
                 (w, h) -> {
+                    // ImageView 크기만 업데이트 (매 픽셀 이동 시 new Image() 생성 제거 - 성능 개선)
                     if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
                         iv.setFitWidth(w - 8);
                         iv.setFitHeight(Math.max(120, h - 64));
-                        iv.setImage(new Image(imageUrlFinal, iv.getFitWidth(), iv.getFitHeight(), true, true, true));
+                        // 이미지 재로드는 최종 크기 저장 시에만 수행 (아래 로직에서 처리)
                     }
                 },
                 () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
@@ -853,7 +871,10 @@ public class DashboardWidgetModule {
                         "height", getImagePersistHeight(box),
                         "visible", true,
                         "imageUrl", imageUrlFinal
-                )).exceptionally(ex -> null)
+                )).exceptionally(ex -> {
+                    log.warn("Failed to apply resize handler", ex);
+                    return null;
+                })
         );
         return handleWrap;
     }
@@ -879,6 +900,6 @@ public class DashboardWidgetModule {
         if (snapModeSupplier == null || !snapModeSupplier.getAsBoolean()) {
             return value;
         }
-        return Math.round(value / GRID_SIZE) * GRID_SIZE;
+        return Math.round(value / DashboardViewModel.GRID_SIZE) * DashboardViewModel.GRID_SIZE;
     }
 }
