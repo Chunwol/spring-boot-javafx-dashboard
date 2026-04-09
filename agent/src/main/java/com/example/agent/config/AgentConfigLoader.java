@@ -94,7 +94,14 @@ public class AgentConfigLoader {
         synchronized (configLock) {
             try {
                 Files.createDirectories(configPath.getParent());
-                MAPPER.writeValue(configPath.toFile(), config);
+                // 원자적 쓰기: 임시 파일에 먼저 쓴 후 이동 (읽기 중 손상 방지)
+                Path tmp = configPath.resolveSibling(configPath.getFileName() + ".tmp");
+                MAPPER.writeValue(tmp.toFile(), config);
+                try {
+                    Files.move(tmp, configPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tmp, configPath, StandardCopyOption.REPLACE_EXISTING);
+                }
             } catch (IOException e) {
                 log.error("config.json 저장 실패: {}", e.getMessage());
             }

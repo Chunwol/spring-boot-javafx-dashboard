@@ -11,8 +11,12 @@ import okhttp3.OkHttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.InetAddress;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,6 +50,9 @@ public class AgentMain {
 
         log.info("서버: {}", config.getServerUrl());
         log.info("config 경로: {}", configLoader.getConfigPath());
+
+        // 시작 시 24시간 이상 된 백그라운드 스크립트 임시 파일 정리
+        cleanupOldBgScripts();
 
         OkHttpClient.Builder httpBuilder = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -168,12 +175,41 @@ public class AgentMain {
         }
     }
 
+    /**
+     * TCP 소켓으로 1.1.1.1:53 연결을 시도한다.
+     * ICMP ping은 기업 방화벽에서 차단될 수 있으므로 TCP DNS 포트를 사용한다.
+     */
     private static boolean isInternetAvailable() {
-        try {
-            InetAddress address = InetAddress.getByName("one.one.one.one");
-            return address.isReachable(3000);
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress("1.1.1.1", 53), 3000);
+            return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * pcagent-bg-scripts 임시 디렉토리에서 24시간 이상 된 파일을 삭제한다.
+     * 백그라운드 PS1 실행 후 남겨진 파일이 무한히 누적되지 않도록 한다.
+     */
+    private static void cleanupOldBgScripts() {
+        try {
+            Path bgDir = Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts");
+            if (!Files.exists(bgDir)) return;
+            long cutoffMs = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+            try (var stream = Files.list(bgDir)) {
+                stream.forEach(f -> {
+                    try {
+                        if (Files.getLastModifiedTime(f).toMillis() < cutoffMs) {
+                            Files.deleteIfExists(f);
+                        }
+                    } catch (IOException e) {
+                        log.debug("임시 스크립트 파일 삭제 실패: {}", f);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            log.debug("임시 스크립트 정리 실패: {}", e.getMessage());
         }
     }
 

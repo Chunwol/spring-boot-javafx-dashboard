@@ -403,8 +403,8 @@ public class CommandExecutor {
 
             try {
                 // Foreground: read output streams asynchronously
-                ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT);
-                ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT);
+                ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT, "stdout");
+                ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT, "stderr");
                 stdoutReader.start();
                 stderrReader.start();
 
@@ -457,8 +457,8 @@ public class CommandExecutor {
 
         try {
             // Read output streams asynchronously
-            ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT);
-            ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT);
+            ProcessOutputReader stdoutReader = new ProcessOutputReader(proc.getInputStream(), OUTPUT_LIMIT, "stdout");
+            ProcessOutputReader stderrReader = new ProcessOutputReader(proc.getErrorStream(), OUTPUT_LIMIT, "stderr");
             stdoutReader.start();
             stderrReader.start();
 
@@ -501,6 +501,9 @@ public class CommandExecutor {
 
     private static byte[] parseMac(String mac) {
         String[] parts = mac.split(":");
+        if (parts.length != 6) {
+            throw new IllegalArgumentException("유효하지 않은 MAC 주소 형식: " + mac);
+        }
         byte[] bytes = new byte[6];
         for (int i = 0; i < 6; i++) {
             bytes[i] = (byte) Integer.parseInt(parts[i], 16);

@@ -23,8 +23,7 @@ WORKDIR /app
 # 빌드 스테이지에서 생성된 JAR 복사
 COPY --from=builder /build/agent/build/libs/agent-1.0.0.jar /app/agent.jar
 
-# 기본 포트 (백엔드와 통신하는 경우의 포트)
-EXPOSE 8080
+# 에이전트는 아웃바운드 연결만 수행하므로 EXPOSE가 필요 없다.
 
 # JVM 옵션
 ENV JAVA_OPTS="-Xmx256m -Xms128m"

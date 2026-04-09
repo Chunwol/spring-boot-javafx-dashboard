@@ -42,8 +42,10 @@ public class HardwareCollector {
     }
 
     public String getMacAddress() {
-        NetworkIF nic = getPrimaryNic();
-        if (nic != null) return nic.getMacaddr().toUpperCase();
+        synchronized (networkLock) {
+            NetworkIF nic = getPrimaryNic();
+            if (nic != null) return nic.getMacaddr().toUpperCase();
+        }
         // fallback: Java standard library
         try {
             Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
@@ -66,9 +68,11 @@ public class HardwareCollector {
     }
 
     public String getIpAddress() {
-        NetworkIF nic = getPrimaryNic();
-        if (nic != null && nic.getIPv4addr().length > 0) {
-            return nic.getIPv4addr()[0];
+        synchronized (networkLock) {
+            NetworkIF nic = getPrimaryNic();
+            if (nic != null && nic.getIPv4addr().length > 0) {
+                return nic.getIPv4addr()[0];
+            }
         }
         try {
             return InetAddress.getLocalHost().getHostAddress();
