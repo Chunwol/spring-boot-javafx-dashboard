@@ -483,11 +483,11 @@ public class DashboardController {
         Parent loginRoot = loader.load();
         LoginController loginController = loader.getController();
 
-        Stage stage = (Stage) (rootVBox != null && rootVBox.getScene() != null
+        javafx.stage.Window window = rootVBox != null && rootVBox.getScene() != null
             ? rootVBox.getScene().getWindow()
-            : null);
+            : null;
 
-        if (!(stage instanceof Stage)) {
+        if (!(window instanceof Stage stage)) {
             dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
             return;
         }

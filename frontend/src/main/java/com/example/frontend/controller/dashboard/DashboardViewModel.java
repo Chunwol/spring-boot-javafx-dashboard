@@ -28,7 +28,7 @@ public class DashboardViewModel {
 
     private static final double MIN_ZOOM = 0.2;
     private static final double MAX_ZOOM = 2.2;
-    private static final double GRID_SIZE = 20.0;
+    public static final double GRID_SIZE = 20.0;
 
     // UI State Properties
     private final DoubleProperty zoomScale = new SimpleDoubleProperty(1.0);

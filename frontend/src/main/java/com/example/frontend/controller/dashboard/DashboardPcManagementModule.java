@@ -308,16 +308,24 @@ public class DashboardPcManagementModule {
                     .GET().build();
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() == 200) {
-                    allPcs = objectMapper.readValue(resp.body(),
+                    List<PcStatusDto> parsed = objectMapper.readValue(resp.body(),
                         objectMapper.getTypeFactory().constructCollectionType(List.class, PcStatusDto.class));
 
                     // PC 데이터로부터 강의실 목록 구성 (groupName → groupId)
                     LinkedHashMap<String, Long> map = new LinkedHashMap<>();
-                    allPcs.stream()
+                    parsed.stream()
                         .filter(p -> p.getGroupId() != null && p.getGroupName() != null && !"-".equals(p.getGroupName()))
                         .sorted(Comparator.comparing(p -> Objects.requireNonNull(p.getGroupName())))
                         .forEach(p -> map.putIfAbsent(p.getGroupName(), p.getGroupId()));
-                    classroomMap = map;
+
+                    synchronized (allPcs) {
+                        allPcs.clear();
+                        allPcs.addAll(parsed);
+                    }
+                    synchronized (classroomMap) {
+                        classroomMap.clear();
+                        classroomMap.putAll(map);
+                    }
 
                     Platform.runLater(() -> {
                         refreshClassroomCombos();

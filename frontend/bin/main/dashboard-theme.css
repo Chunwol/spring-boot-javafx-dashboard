@@ -149,6 +149,7 @@
 
 /* ───────────────── 공통 스타일 ───────────────── */
 
+.root.font-small {
     -fx-font-size: 13px;
 }
 .root.font-large {

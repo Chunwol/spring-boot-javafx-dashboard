@@ -14,7 +14,7 @@ public class DashboardPanelManager {
     private final AtomicLong idGenerator = new AtomicLong(1);
 
     public List<PanelInfo> getPanels() {
-        return panels;
+        return new ArrayList<>(panels);
     }
 
     public PanelInfo addPanel(PanelInfo.PanelType type, VBox panel) {

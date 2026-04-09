@@ -36,11 +36,14 @@ import java.util.function.LongSupplier;
 
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.Validator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 대시보드 위젯(텍스트/이미지 아이템) CRUD 및 UI 렌더링 모듈.
  */
 public class DashboardWidgetModule {
+    private static final Logger log = LoggerFactory.getLogger(DashboardWidgetModule.class);
     /**
      * 텍스트 위젯 이름 인라인 변경 (id, 새 이름, 완료 콜백)
      */

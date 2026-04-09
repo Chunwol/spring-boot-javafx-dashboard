@@ -25,8 +25,12 @@ import javafx.scene.paint.Color;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +49,7 @@ import java.util.function.Supplier;
  */
 public class DashboardDisconnectStatusPanelModule {
 
+    private static final Logger log = LoggerFactory.getLogger(DashboardDisconnectStatusPanelModule.class);
     private static final DateTimeFormatter LOG_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final double LAYOUT_EPSILON = 0.5;
 
