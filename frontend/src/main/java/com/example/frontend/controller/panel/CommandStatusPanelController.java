@@ -209,14 +209,23 @@ public class CommandStatusPanelController {
                 private final Button button = new Button("보기");
                 {
                     button.getStyleClass().addAll("btn-neutral", "btn-sm");
-                    button.setOnAction(e -> {
-                        Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
-                        if (row != null) showCommandDetail(row);
-                    });
                 }
                 @Override protected void updateItem(Void item, boolean empty) {
                     super.updateItem(item, empty);
-                    setGraphic(empty || getTableRow() == null || getTableRow().getItem() == null ? null : button);
+                    Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
+                    if (empty || row == null) {
+                        setGraphic(null);
+                        return;
+                    }
+                    String downloadUrl = resolveCollectDownloadUrl(row);
+                    if (downloadUrl != null && !downloadUrl.isBlank()) {
+                        button.setText("다운로드");
+                        button.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
+                    } else {
+                        button.setText("보기");
+                        button.setOnAction(e -> showCommandDetail(row));
+                    }
+                    setGraphic(button);
                 }
             });
 
@@ -501,6 +510,17 @@ public class CommandStatusPanelController {
 
     private String extractTransferDisplay(Map<String, Object> row) {
         String type = asText(row, "commandType", "type");
+        if ("COLLECT_FILES".equalsIgnoreCase(type)) {
+            JsonNode payload = parsePayload(row);
+            if (payload == null) {
+                return "수집";
+            }
+            int pathCount = payload.has("paths") && payload.get("paths").isArray()
+                    ? payload.get("paths").size() : (payload.has("path") ? 1 : 0);
+            String outputName = payload.has("outputName") ? payload.get("outputName").asText("") : "";
+            String base = pathCount > 0 ? ("경로 " + pathCount + "개 수집") : "수집";
+            return outputName == null || outputName.isBlank() ? base : (base + " · " + outputName);
+        }
         if (!"RUN_PS1".equalsIgnoreCase(type)) {
             return "-";
         }
@@ -515,6 +535,9 @@ public class CommandStatusPanelController {
 
     private String extractDestinationDisplay(Map<String, Object> row) {
         String type = asText(row, "commandType", "type");
+        if ("COLLECT_FILES".equalsIgnoreCase(type)) {
+            return "백엔드 업로드 -> 프론트 다운로드";
+        }
         if (!"RUN_PS1".equalsIgnoreCase(type)) {
             return "-";
         }
@@ -562,9 +585,10 @@ public class CommandStatusPanelController {
 
             Object dlNode = ns.get("downloadButton");
             if (dlNode instanceof Button downloadButton) {
-                boolean enabled = detailUrl != null && !detailUrl.isBlank() && !"-".equals(detailUrl);
+                String downloadUrl = resolveCollectDownloadUrl(row);
+                boolean enabled = downloadUrl != null && !downloadUrl.isBlank();
                 downloadButton.setDisable(!enabled);
-                downloadButton.setOnAction(e -> handleDownloadFromDetail(detailUrl, suggestDownloadFilename(row)));
+                downloadButton.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
             }
 
             dialog.getDialogPane().setContent(content);
@@ -591,6 +615,33 @@ public class CommandStatusPanelController {
             return matcher.group(1);
         }
         return "-";
+    }
+
+    private String resolveCollectDownloadUrl(Map<String, Object> row) {
+        String direct = asText(row, "scriptUrl");
+        String fromDirect = extractCollectDownloadUrl(direct);
+        if (!fromDirect.isBlank()) {
+            return fromDirect;
+        }
+        String stdout = asText(row, "stdout");
+        String fromStdout = extractCollectDownloadUrl(stdout);
+        if (!fromStdout.isBlank()) {
+            return fromStdout;
+        }
+        return "";
+    }
+
+    private String extractCollectDownloadUrl(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(https?://[^\\s]+/api/v1/agent/uploads/\\d+/download|/api/v1/agent/uploads/\\d+/download)")
+                .matcher(text);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
     }
 
     private String suggestDownloadFilename(Map<String, Object> row) {

@@ -632,7 +632,8 @@ public class DashboardPcManagementModule {
         if (result.isPresent() && result.get() == ButtonType.OK) {
             ScriptExecutionOptions scriptOptions = (scriptCommand || transferCommand)
                 ? new ScriptExecutionOptions(
-                    transferSource == null ? null : transferSource.path().toString(),
+                    transferSource == null || transferSource.path() == null ? null : transferSource.path().toString(),
+                    transferSource == null ? null : transferSource.scriptUrl(),
                     runModeCombo != null && runModeCombo.getValue() != null && runModeCombo.getValue().startsWith("즉시 실행")
                         ? "BACKGROUND" : "FOREGROUND",
                     windowModeCombo != null && windowModeCombo.getValue() != null && windowModeCombo.getValue().startsWith("창 표시")
@@ -673,12 +674,18 @@ public class DashboardPcManagementModule {
 
             if ("RUN_PS1".equals(commandType) && scriptOptions.hasScript()) {
                 try {
-                    String uploadResp = apiClient.uploadFile("/scripts", new File(scriptOptions.scriptPath())).join();
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> uploadBody = objectMapper.readValue(uploadResp, Map.class);
-                    uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
-                    if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
-                        throw new RuntimeException("업로드 응답에 downloadUrl이 없습니다.");
+                    if (scriptOptions.hasLocalScriptPath()) {
+                        String uploadResp = apiClient.uploadFile("/scripts", new File(scriptOptions.scriptPath())).join();
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> uploadBody = objectMapper.readValue(uploadResp, Map.class);
+                        uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
+                        if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
+                            throw new RuntimeException("업로드 응답에 downloadUrl이 없습니다.");
+                        }
+                    } else if (scriptOptions.hasRemoteScriptUrl()) {
+                        uploadedScriptUrl = scriptOptions.scriptUrl();
+                    } else {
+                        throw new RuntimeException("스크립트/전송 소스가 없습니다.");
                     }
                 } catch (Exception ex) {
                     log.warn("업로드 실패: {}", ex.getMessage());
@@ -722,7 +729,7 @@ public class DashboardPcManagementModule {
                 Alert.AlertType.INFORMATION
             ));
 
-            if (scriptOptions.temporaryArtifact() && scriptOptions.hasScript()) {
+            if (scriptOptions.temporaryArtifact() && scriptOptions.hasLocalScriptPath()) {
                 try {
                     Files.deleteIfExists(Path.of(scriptOptions.scriptPath()));
                 } catch (Exception ex) {
@@ -1135,7 +1142,8 @@ public class DashboardPcManagementModule {
             String destPath = customRadio.isSelected() ? customPathField.getText() : "";
             boolean runAfter = items.stream().anyMatch(SelectableTransferItem::runAfterTransfer);
             
-            TransferSource source = new TransferSource(zipPath, "multi-transfer", "MultiTransfer.zip", true, true, destMode, destPath, runAfter);
+            TransferSource source = new TransferSource(zipPath, "multi-transfer", "MultiTransfer.zip",
+                    true, true, destMode, destPath, runAfter, null);
             return source;
         } catch (IOException ex) {
             showAlert("압축 실패", "다중 파일 압축 중 오류가 발생했습니다.\n" + ex.getMessage(), Alert.AlertType.ERROR);
@@ -1274,14 +1282,17 @@ public class DashboardPcManagementModule {
                                   boolean temporaryArtifact,
                                   String preDestMode,
                                   String preDestPath,
-                                  boolean preRunAfter) {
+                                  boolean preRunAfter,
+                                  String scriptUrl) {
         // Compact constructor for backward compatibility
         public static TransferSource simple(Path path, String sourceType, String displayName, boolean zipped, boolean temporaryArtifact) {
-            return new TransferSource(path, sourceType, displayName, zipped, temporaryArtifact, "DOWNLOADS", "", false);
+            return new TransferSource(path, sourceType, displayName, zipped, temporaryArtifact,
+                    "DOWNLOADS", "", false, null);
         }
     }
 
     private record ScriptExecutionOptions(String scriptPath,
+                                          String scriptUrl,
                                           String runMode,
                                           String windowMode,
                                           String args,
@@ -1293,12 +1304,20 @@ public class DashboardPcManagementModule {
                                           boolean runAfterTransfer,
                                           boolean temporaryArtifact) {
         private static ScriptExecutionOptions none() {
-            return new ScriptExecutionOptions(null, "FOREGROUND", "HIDDEN", "", false,
+            return new ScriptExecutionOptions(null, null, "FOREGROUND", "HIDDEN", "", false,
                     "file", "", "DOWNLOADS", "", false, false);
         }
 
         private boolean hasScript() {
+            return hasLocalScriptPath() || hasRemoteScriptUrl();
+        }
+
+        private boolean hasLocalScriptPath() {
             return scriptPath != null && !scriptPath.isBlank();
+        }
+
+        private boolean hasRemoteScriptUrl() {
+            return scriptUrl != null && !scriptUrl.isBlank();
         }
 
         private Map<String, Object> toPayload() {

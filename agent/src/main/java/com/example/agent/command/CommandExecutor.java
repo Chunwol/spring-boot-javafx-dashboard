@@ -243,7 +243,9 @@ public class CommandExecutor {
         boolean runAfterTransfer = p.has("runAfterTransfer") && p.get("runAfterTransfer").asBoolean(false);
 
         String source = scriptUrl.trim();
-        String ext = source.toLowerCase().endsWith(".zip") ? ".zip" : ".ps1";
+        boolean hintedFolderSource = p.has("transferMode") && p.get("transferMode").asBoolean(false)
+                && p.has("sourceType") && "folder".equalsIgnoreCase(p.get("sourceType").asText(""));
+        String ext = (source.toLowerCase().endsWith(".zip") || hintedFolderSource) ? ".zip" : ".ps1";
         Path tmpDir = background
                 ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
                 : Files.createTempDirectory("pcagent-ps1-");
