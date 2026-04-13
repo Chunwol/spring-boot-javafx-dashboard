@@ -15,13 +15,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
-import java.util.concurrent.TimeUnit;
 
 /**
  * GitHub Releases API 기반 OTA 자가 업데이트.
  *
  * config.json 에 githubOwner / githubRepo 가 설정된 경우에만 동작한다.
  * 새 버전 감지 → 다운로드 → SHA256 검증(sha256.txt 제공 시) → 백업 → 교체 → 재시작.
+ * AgentMain에서 10번째 하트비트마다 checkAndUpdate()를 호출한다.
  */
 public class OtaUpdater {
 
@@ -96,46 +96,33 @@ public class OtaUpdater {
             // 교체 후 재시작 (지연 실행)
             // Windows: 파일 교체만 하면 워치독(agent-watchdog.ps1)이 자동으로 재시작해 줌
             // Linux: systemctl restart
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String[] cmd;
-            if (os.contains("win")) {
-                String self = selfPath.toString().replace("/", "\\");
-                String newer = newFile.toString().replace("/", "\\");
-                cmd = new String[]{
-                        "cmd", "/c",
-                        "timeout /T 3 /NOBREAK && move /Y \"" + newer + "\" \"" + self + "\""
-                };
+            // ProcessBuilder 사용으로 명령 인젝션 방지 (경로를 개별 인자로 전달)
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            ProcessBuilder pb;
+            if (osName.contains("win")) {
+                // Windows: PowerShell로 대기 후 이동 (cmd timeout은 파이프라인 문제 있음)
+                pb = new ProcessBuilder(
+                        "powershell.exe", "-NoProfile", "-Command",
+                        "Start-Sleep -Seconds 3; Move-Item -Force -Path '" +
+                        newFile.toAbsolutePath() + "' -Destination '" +
+                        selfPath.toAbsolutePath() + "'"
+                );
             } else {
-                cmd = new String[]{
+                pb = new ProcessBuilder(
                         "sh", "-c",
-                        "sleep 3 && mv '" + newFile + "' '" + selfPath + "' " +
-                        "&& systemctl restart pcagent"
-                };
+                        "sleep 3 && mv -- \"$1\" \"$2\" && systemctl restart pcagent",
+                        "ota-update",
+                        newFile.toAbsolutePath().toString(),
+                        selfPath.toAbsolutePath().toString()
+                );
             }
 
-            // HIGH FIX#10: Wait for update process to complete before exiting
-            Process updateProcess = Runtime.getRuntime().exec(cmd);
-            try {
-                boolean completed = updateProcess.waitFor(10, TimeUnit.SECONDS);
-                if (!completed) {
-                    log.warn("OTA: 업데이트 프로세스가 10초 내에 완료되지 않음. 강제 종료 중...");
-                    updateProcess.destroyForcibly();
-                }
-            } catch (InterruptedException e) {
-                log.error("OTA: 업데이트 프로세스 대기 중 중단됨");
-                updateProcess.destroyForcibly();
-                Thread.currentThread().interrupt();
-            }
-
-            // Allow file replacement to complete before exiting
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-
-            log.info("OTA: 업데이트 프로세스 완료. 현재 에이전트 종료 중...");
-            System.exit(0); // 새 프로세스가 시작되면 현재 프로세스 종료
+            // 업데이트 프로세스를 백그라운드로 시작하고 즉시 종료
+            // (지연 시작이므로 현재 프로세스 종료 후에 파일 교체됨)
+            pb.inheritIO();
+            pb.start();
+            log.info("OTA: 업데이트 프로세스 시작됨. 현재 에이전트 종료 중...");
+            System.exit(0);
 
         } catch (Exception e) {
             log.warn("OTA 업데이트 중 오류 (무시하고 계속): {}", e.getMessage());
@@ -204,8 +191,14 @@ public class OtaUpdater {
 
     private static String sha256Hex(Path file) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
-        byte[] bytes = Files.readAllBytes(file);
-        byte[] hash = md.digest(bytes);
+        try (InputStream is = Files.newInputStream(file)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) {
+                md.update(buf, 0, n);
+            }
+        }
+        byte[] hash = md.digest();
         StringBuilder sb = new StringBuilder();
         for (byte b : hash) sb.append(String.format("%02x", b));
         return sb.toString();

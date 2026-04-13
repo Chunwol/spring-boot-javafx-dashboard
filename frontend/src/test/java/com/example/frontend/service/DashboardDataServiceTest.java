@@ -16,16 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DashboardDataServiceTest {
 
     @Test
-    void fetchClassrooms_shouldReturnClientPayload() throws Exception {
-        List<ClassroomSummaryDto> payload = List.of(new ClassroomSummaryDto());
-        DashboardDataService service = new DashboardDataService(new StubApiClient(payload, null));
-
-        List<ClassroomSummaryDto> result = service.fetchClassrooms();
-
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
     void fetchRefreshSnapshotAsync_shouldFallbackToEmptyDtoOnFailure() throws InterruptedException {
         DashboardDataService service = new DashboardDataService(new StubApiClient(null, new RuntimeException("boom")));
         CountDownLatch latch = new CountDownLatch(1);

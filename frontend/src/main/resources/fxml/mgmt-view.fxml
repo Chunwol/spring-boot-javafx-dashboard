@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<ScrollPane fitToWidth="true" fitToHeight="false" pannable="true"
+            xmlns:fx="http://javafx.com/fxml">
+    <content>
+        <VBox spacing="20.0" fillWidth="true" maxWidth="1.7976931348623157E308">
+            <padding><Insets topRightBottomLeft="20.0" /></padding>
+            <children>
+                <StackPane fx:id="agentSlot" maxWidth="1.7976931348623157E308" />
+                <StackPane fx:id="ipRangeSlot" maxWidth="1.7976931348623157E308" />
+                <StackPane fx:id="teacherSlot" maxWidth="1.7976931348623157E308" />
+                <StackPane fx:id="brokenPcSlot" maxWidth="1.7976931348623157E308" />
+                <StackPane fx:id="reportSlot" maxWidth="1.7976931348623157E308" />
+            </children>
+        </VBox>
+    </content>
+</ScrollPane>

@@ -33,12 +33,7 @@ public class DashboardRealtimeModule {
     private static final int RECONNECT_DELAY_SEC = 30;
 
     private final String wsUrl;
-    private final ScheduledExecutorService scheduler =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "ws-reconnect");
-                t.setDaemon(true);
-                return t;
-            });
+    private volatile ScheduledExecutorService scheduler = createScheduler();
 
     private WebSocketStompClient stompClient;
     private volatile StompSession activeSession;  // volatile: 멀티 스레드 접근 안전성
@@ -73,6 +68,10 @@ public class DashboardRealtimeModule {
         this.onAlertMessage = onAlert;
         this.onConnectionLost = onConnectionLost;
         stopped = false;
+        // stop() 후 다시 start() 시 스케줄러 재생성
+        if (scheduler.isShutdown()) {
+            scheduler = createScheduler();
+        }
         if (activeSession != null && activeSession.isConnected()) {
             log.debug("[WS] 이미 연결된 세션이 있어 재사용합니다: {}", wsUrl);
             return;
@@ -103,6 +102,14 @@ public class DashboardRealtimeModule {
     }
 
     // ── 내부 구현 ──────────────────────────────────────────────────────────
+
+    private static ScheduledExecutorService createScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ws-reconnect");
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     private void doConnect() {
         if (stopped) return;

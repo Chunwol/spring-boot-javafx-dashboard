@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox xmlns:fx="http://javafx.com/fxml"
+      fx:id="panel"
+      spacing="8">
+    <padding>
+        <Insets top="10" right="10" bottom="10" left="10" />
+    </padding>
+    <children>
+        <HBox fx:id="gaugeRowSlot" spacing="12" />
+        <StackPane fx:id="chartSlot" VBox.vgrow="ALWAYS" />
+        <Label text="PC별 트래픽" styleClass="network-panel-title" />
+        <StackPane fx:id="tableSlot" />
+    </children>
+</VBox>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.RadioButton?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="mainContent" spacing="10.0" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <padding>
+        <Insets top="15.0" right="15.0" bottom="15.0" left="15.0" />
+    </padding>
+    <children>
+        <Label text="전송할 파일 또는 폴더를 선택하세요. 항목별 또는 전체 실행 여부를 제어할 수 있습니다." styleClass="pcmgmt-transfer-info" wrapText="true" />
+
+        <HBox spacing="15.0" prefHeight="300.0">
+            <children>
+                <VBox spacing="8.0" prefWidth="640.0" styleClass="pcmgmt-transfer-panel" HBox.hgrow="ALWAYS">
+                    <children>
+                        <Label text="선택된 항목:" styleClass="pcmgmt-transfer-section-title" />
+                        <ScrollPane fitToWidth="true" prefHeight="250.0" styleClass="pcmgmt-transfer-list-scroll">
+                            <content>
+                                <VBox fx:id="itemsList" spacing="5.0">
+                                    <padding>
+                                        <Insets top="5.0" right="5.0" bottom="5.0" left="5.0" />
+                                    </padding>
+                                </VBox>
+                            </content>
+                        </ScrollPane>
+                    </children>
+                </VBox>
+
+                <VBox spacing="10.0" alignment="TOP_CENTER" prefWidth="120.0">
+                    <children>
+                        <Button fx:id="addFileBtn" text="+ 파일" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-file" />
+                        <Button fx:id="addFolderBtn" text="+ 폴더" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-folder" />
+                        <Button fx:id="removeBtn" text="- 제거" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-remove" />
+                        <Separator />
+                        <Button fx:id="runAllBtn" text="전체&#10;실행" prefWidth="100.0" wrapText="true" styleClass="pcmgmt-transfer-btn-all-run" />
+                        <Button fx:id="runNoneBtn" text="전체&#10;미실행" prefWidth="100.0" wrapText="true" styleClass="pcmgmt-transfer-btn-all-stop" />
+                    </children>
+                </VBox>
+            </children>
+        </HBox>
+
+        <VBox spacing="8.0" styleClass="pcmgmt-transfer-options">
+            <children>
+                <Label text="목적지 저장 경로:" styleClass="pcmgmt-transfer-section-title" />
+                <VBox spacing="6.0" alignment="TOP_LEFT">
+                    <children>
+                        <RadioButton fx:id="downloadRadio" text="다운로드 폴더" wrapText="true" />
+                        <RadioButton fx:id="desktopRadio" text="바탕화면" wrapText="true" />
+                        <RadioButton fx:id="customRadio" text="경로 직접&#10;입력" wrapText="true" />
+                        <TextField fx:id="customPathField" promptText="경로 입력..." prefWidth="420.0" />
+                    </children>
+                </VBox>
+                <Label text="실행 체크된 항목이 하나 이상이면 전송 후 자동 실행이 활성화됩니다." styleClass="pcmgmt-transfer-run-hint" wrapText="true" />
+            </children>
+        </VBox>
+    </children>
+</VBox>

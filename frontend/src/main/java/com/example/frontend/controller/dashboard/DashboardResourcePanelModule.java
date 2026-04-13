@@ -5,10 +5,8 @@ import com.example.dto.dashboard.DashboardPanelDto;
 import com.example.frontend.service.DashboardService;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBase;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
@@ -23,8 +21,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.Node;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import org.kordamp.ikonli.javafx.FontIcon;
 
 import java.util.List;
@@ -34,6 +30,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.paint.Color;
 
 /**
@@ -84,41 +81,98 @@ public class DashboardResourcePanelModule {
      * 좌측 리소스 패널 VBox를 생성합니다. 반드시 한 번만 호출해야 합니다.
      */
     public VBox buildView() {
-        VBox leftPane = new VBox(10);
-        leftPane.setFillWidth(true);
-        leftPane.setPadding(new Insets(14));
-        leftPane.setPrefWidth(270);
-        leftPane.setMinWidth(220);
-        leftPane.setStyle("-fx-background-color: #ffffff; -fx-background-radius: 12; "
-            + "-fx-border-color: #dbe5f1; -fx-border-radius: 12;");
-
-        // 기본값: 작은 폰트 스타일 적용
-        javafx.scene.Scene scene = leftPane.getScene();
-        if (scene == null) {
-            Platform.runLater(() -> {
-                javafx.scene.Scene s = leftPane.getScene();
-                if (s != null && s.getRoot() != null) {
-                    s.getRoot().getStyleClass().removeAll("font-large");
-                    s.getRoot().getStyleClass().add("font-small");
-                }
-            });
-        } else if (scene.getRoot() != null) {
-            scene.getRoot().getStyleClass().removeAll("font-large");
-            scene.getRoot().getStyleClass().add("font-small");
+        VBox leftPane;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/resource-panel-left.fxml"));
+            leftPane = loader.load();
+            @SuppressWarnings("unchecked")
+            ListView<Object> lv = (ListView<Object>) loader.getNamespace().get("groupListView");
+            groupListView   = lv;
+            leftEditControls = (VBox) loader.getNamespace().get("leftEditControls");
+            editControlsSection = loader.getNamespace().get("controlsScroll") instanceof ScrollPane sp ? sp : leftEditControls;
+        } catch (Exception e) {
+            throw new IllegalStateException("리소스 패널 FXML 로딩 실패", e);
         }
 
-        Label listTitle = new Label("리소스");
-        listTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        Label listSub = new Label("대시보드에서 사용 가능한 패널");
-        listSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
+        // ListView 셀 팩토리 설정 (DTO toString() 대신 포맷된 표시)
+        groupListView.setCellFactory(param -> new ListCell<>() {
+            @Override
+            protected void updateItem(Object item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    return;
+                }
+                ResourceRowModel model = resolveResourceRowModel(item);
 
-        panelClassroomCombo = buildClassroomCombo("Select classroom for panel");
-        networkClassroomCombo = buildClassroomCombo("Select classroom for network panel");
+                Label nameLabel = new Label(model.name());
+                nameLabel.getStyleClass().add("resource-item-name");
+                javafx.scene.control.TextField nameField = new javafx.scene.control.TextField(model.name());
+                nameField.setVisible(false);
+                nameField.setManaged(false);
+                nameField.setPrefWidth(120);
 
-        groupListView = createResourceListView();
-        VBox.setVgrow(groupListView, Priority.ALWAYS);
+                nameLabel.setOnMouseClicked(e -> {
+                    if (e.getClickCount() == 2 && editModeSupplier.getAsBoolean()) {
+                        nameLabel.setVisible(false);
+                        nameLabel.setManaged(false);
+                        nameField.setVisible(true);
+                        nameField.setManaged(true);
+                        nameField.requestFocus();
+                        nameField.selectAll();
+                    }
+                });
+                Runnable commitEdit = () -> {
+                    String newName = nameField.getText().trim();
+                    if (!newName.isEmpty() && !newName.equals(model.name())) {
+                        if (model.kind() == ResourceKind.CLASSROOM && model.refId() != null) {
+                            classroomModule.renameGroup(model.refId(), newName, () -> refreshListView());
+                        } else if (model.kind() == ResourceKind.TEXT && model.refId() != null) {
+                            widgetModule.renameTextItem(model.refId(), newName, () -> refreshListView());
+                        }
+                    }
+                    nameLabel.setText(newName.isEmpty() ? model.name() : newName);
+                    nameLabel.setVisible(true);
+                    nameLabel.setManaged(true);
+                    nameField.setVisible(false);
+                    nameField.setManaged(false);
+                };
+                nameField.setOnAction(e -> commitEdit.run());
+                nameField.focusedProperty().addListener((obs, oldV, newV) -> { if (!newV) commitEdit.run(); });
 
-        leftEditControls = new VBox(8,
+                Label subLabel = new Label(model.subLabel());
+                subLabel.getStyleClass().add("resource-item-sub");
+                VBox textBox = new VBox(2, nameLabel, nameField, subLabel);
+
+                Region spacer = new Region();
+                HBox.setHgrow(spacer, Priority.ALWAYS);
+
+                Button deleteBtn = buildDeleteButton(item, model);
+                Label dragHint = new Label(editModeSupplier.getAsBoolean() ? "추가" : "");
+                dragHint.getStyleClass().add("resource-item-drag-hint");
+
+                HBox row = deleteBtn == null
+                        ? new HBox(10, textBox, spacer, dragHint)
+                        : new HBox(10, textBox, spacer, dragHint, deleteBtn);
+                row.setAlignment(Pos.CENTER_LEFT);
+                configureResourceDrag(row, model.dragKey());
+                setGraphic(row);
+            }
+        });
+
+        // 기본값: 작은 폰트 스타일 적용
+        Platform.runLater(() -> {
+            javafx.scene.Scene s = leftPane.getScene();
+            if (s != null && s.getRoot() != null) {
+                s.getRoot().getStyleClass().removeAll("font-large");
+                s.getRoot().getStyleClass().add("font-small");
+            }
+        });
+
+        panelClassroomCombo = buildClassroomCombo("패널용 강의실 선택");
+        networkClassroomCombo = buildClassroomCombo("네트워크 패널용 강의실 선택");
+
+        leftEditControls.getChildren().setAll(
                 createAddClassroomButton(),
                 createAddTextButton(),
                 createAddImageButton(),
@@ -133,18 +187,6 @@ public class DashboardResourcePanelModule {
         );
         leftEditControls.setFillWidth(true);
 
-        ScrollPane controlsScroll = new ScrollPane(leftEditControls);
-        controlsScroll.setFitToWidth(true);
-        controlsScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        controlsScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        controlsScroll.setPannable(true);
-        controlsScroll.setPrefViewportHeight(220);
-        controlsScroll.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
-        editControlsSection = controlsScroll;
-
-        VBox.setVgrow(groupListView, Priority.ALWAYS);
-
-        leftPane.getChildren().addAll(listTitle, listSub, groupListView, controlsScroll);
         return leftPane;
     }
 
@@ -188,92 +230,13 @@ public class DashboardResourcePanelModule {
 
     // ── UI 빌더 ──────────────────────────────────────────────────
 
-    private ListView<Object> createResourceListView() {
-        ListView<Object> listView = new ListView<>();
-        listView.setPlaceholder(new Label("표시할 항목이 없습니다."));
-        listView.setStyle("-fx-background-radius: 10; -fx-border-color: #dbe5f1; -fx-border-radius: 10;");
-        listView.setPrefHeight(320);
-        listView.setMinHeight(200);
-        listView.setMaxHeight(Double.MAX_VALUE);
-        listView.setFixedCellSize(56);
-        listView.setCellFactory(param -> new ListCell<>() {
-            @Override
-            protected void updateItem(Object item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setGraphic(null);
-                    return;
-                }
-                ResourceRowModel model = resolveResourceRowModel(item);
-
-                Label nameLabel = new Label(model.name());
-                nameLabel.setStyle("-fx-font-weight: 600;");
-                // 인라인 편집용 TextField
-                javafx.scene.control.TextField nameField = new javafx.scene.control.TextField(model.name());
-                nameField.setVisible(false);
-                nameField.setManaged(false);
-                nameField.setPrefWidth(120);
-
-                // 더블클릭 시 편집 모드 진입
-                nameLabel.setOnMouseClicked(e -> {
-                    if (e.getClickCount() == 2 && editModeSupplier.getAsBoolean()) {
-                        nameLabel.setVisible(false);
-                        nameLabel.setManaged(false);
-                        nameField.setVisible(true);
-                        nameField.setManaged(true);
-                        nameField.requestFocus();
-                        nameField.selectAll();
-                    }
-                });
-                // 엔터/포커스아웃 시 이름 변경
-                Runnable commitEdit = () -> {
-                    String newName = nameField.getText().trim();
-                    if (!newName.isEmpty() && !newName.equals(model.name())) {
-                        // 패널/위젯/강의실 이름 변경 API 호출
-                        if (model.kind() == ResourceKind.CLASSROOM && model.refId() != null) {
-                            classroomModule.renameGroup(model.refId(), newName, () -> refreshListView());
-                        } else if (model.kind() == ResourceKind.TEXT && model.refId() != null) {
-                            widgetModule.renameTextItem(model.refId(), newName, () -> refreshListView());
-                        } // 기타 타입 확장 가능
-                    }
-                    nameLabel.setText(newName.isEmpty() ? model.name() : newName);
-                    nameLabel.setVisible(true);
-                    nameLabel.setManaged(true);
-                    nameField.setVisible(false);
-                    nameField.setManaged(false);
-                };
-                nameField.setOnAction(e -> commitEdit.run());
-                nameField.focusedProperty().addListener((obs, oldV, newV) -> { if (!newV) commitEdit.run(); });
-
-                Label subLabel = new Label(model.subLabel());
-                subLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-                VBox textBox = new VBox(2, nameLabel, nameField, subLabel);
-
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
-
-                Button deleteBtn = buildDeleteButton(item, model);
-                Label dragHint = new Label(editModeSupplier.getAsBoolean() ? "추가" : "");
-                dragHint.setStyle("-fx-text-fill: #2563eb; -fx-font-size: 11px; -fx-font-weight: 700;");
-
-                HBox row = deleteBtn == null
-                        ? new HBox(10, textBox, spacer, dragHint)
-                        : new HBox(10, textBox, spacer, dragHint, deleteBtn);
-                row.setAlignment(Pos.CENTER_LEFT);
-                configureResourceDrag(row, model.dragKey());
-                setGraphic(row);
-            }
-        });
-        return listView;
-    }
-
     private ResourceRowModel resolveResourceRowModel(Object item) {
         List<DashboardPanelDto> panels = cachedPanels.isEmpty() ? viewModel.getCachedDashboardPanels() : cachedPanels;
         if (item instanceof ClassroomSummaryDto dto) {
             boolean added = panels.stream().anyMatch(p ->
                     "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
                             && dto.getGroupId().equals(p.getRefGroupId()));
-            String sub = (added ? "Added" : "Not added") + " , online "
+            String sub = (added ? "추가됨" : "미추가") + " , 온라인 "
                     + dto.getOnlinePcs() + "/" + dto.getTotalPcs();
             return new ResourceRowModel("GROUP_ADD:" + dto.getGroupId(), dto.getGroupName(), sub,
                     ResourceKind.CLASSROOM, dto.getGroupId(), added);
@@ -283,23 +246,23 @@ public class DashboardResourcePanelModule {
             Map<String, Object> map = (Map<String, Object>) rawMap;
             Object idObj = map.get("id");
             if (!(idObj instanceof Number idNum)) {
-                return new ResourceRowModel("", "Unknown", "", ResourceKind.UNKNOWN, null, false);
+                return new ResourceRowModel("", "알 수 없음", "", ResourceKind.UNKNOWN, null, false);
             }
             Long id = idNum.longValue();
             String type = String.valueOf(map.getOrDefault("type", "")).toUpperCase();
 
             if ("TEXT".equals(type) || map.containsKey("text")) {
-                String text = String.valueOf(map.getOrDefault("text", "Text #" + id));
+                String text = String.valueOf(map.getOrDefault("text", "텍스트 #" + id));
                 String sub = text.substring(0, Math.min(24, text.length()));
-                return new ResourceRowModel("TEXT_ADD:" + id, "Text widget #" + id, sub,
+                return new ResourceRowModel("TEXT_ADD:" + id, "텍스트 위젯 #" + id, sub,
                         ResourceKind.TEXT, id, true);
             }
             if ("IMAGE".equals(type) || map.containsKey("imageUrl")) {
-                return new ResourceRowModel("IMAGE_ADD:" + id, "Image widget #" + id, "Drag to place on canvas",
+                return new ResourceRowModel("IMAGE_ADD:" + id, "이미지 위젯 #" + id, "캔버스에 드래그하여 배치",
                         ResourceKind.IMAGE, id, true);
             }
         }
-        return new ResourceRowModel("", "Unknown", "", ResourceKind.UNKNOWN, null, false);
+        return new ResourceRowModel("", "알 수 없음", "", ResourceKind.UNKNOWN, null, false);
     }
 
     private void configureResourceDrag(HBox row, String dragKey) {
@@ -353,35 +316,22 @@ public class DashboardResourcePanelModule {
 
     private Button tinyDeleteButton(String text) {
         Button button = new Button(text);
-        button.setStyle("-fx-background-color: #c81d25; -fx-text-fill: #fff; -fx-font-size: 12px; "
-            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
-            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.13), 4, 0, 0, 1);");
+        button.getStyleClass().add("btn-tiny-delete");
         button.setFocusTraversable(true);
         button.setAccessibleText(text + " 버튼");
         button.setOnDragDetected(event -> event.consume());
-        button.setOnMouseEntered(e -> button.setStyle("-fx-background-color: #a61b1b; -fx-text-fill: #fff; -fx-font-size: 12px; "
-            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
-            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 6, 0, 0, 2);"));
-        button.setOnMouseExited(e -> button.setStyle("-fx-background-color: #c81d25; -fx-text-fill: #fff; -fx-font-size: 12px; "
-            + "-fx-font-weight: 700; -fx-background-radius: 8; -fx-padding: 5 12 5 12;"
-            + "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.13), 4, 0, 0, 1);"));
-        // Tab 키로 접근 가능, 포커스 시 테두리 표시
-        button.focusedProperty().addListener((obs, oldV, newV) -> {
-            if (newV) button.setStyle(button.getStyle() + "-fx-border-color: #2563eb; -fx-border-width: 2;");
-            else button.setStyle(button.getStyle().replace("-fx-border-color: #2563eb; -fx-border-width: 2;", ""));
-        });
         return button;
     }
 
     private Button createAddClassroomButton() {
-        Button button = iconButton("Add classroom", "mdi2s-school-outline", "#0ea5e9");
+        Button button = iconButton("강의실 추가", "mdi2s-school-outline", "#0ea5e9");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> classroomModule.handleAddClassroom());
         return button;
     }
 
     private Button createAddClassroomPanelButton() {
-        Button button = actionButton("Add classroom panel", "#2563eb");
+        Button button = actionButton("강의실 패널 추가", "#2563eb");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> {
             ClassroomSummaryDto selected = panelClassroomCombo.getValue();
@@ -402,21 +352,21 @@ public class DashboardResourcePanelModule {
     }
 
     private Button createAddTextButton() {
-        Button button = iconButton("Add text", "mdi2t-text-box-plus-outline", "#334155");
+        Button button = iconButton("텍스트 추가", "mdi2t-text-box-plus-outline", "#334155");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleAddTextItem());
         return button;
     }
 
     private Button createAddImageButton() {
-        Button button = iconButton("Add image", "mdi2i-image-plus", "#334155");
+        Button button = iconButton("이미지 추가", "mdi2i-image-plus", "#334155");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleAddImageItem());
         return button;
     }
 
     private Button createAddDisconnectStatusButton() {
-        Button button = iconButton("접접 패널 추가", "mdi2a-alert-circle-outline", "#d73a49");
+        Button button = iconButton("접속현황 패널 추가", "mdi2a-alert-circle-outline", "#d73a49");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> {
             if (currentDashboardId.get() == null) {
@@ -435,21 +385,21 @@ public class DashboardResourcePanelModule {
     }
 
     private Button createBackupTextButton() {
-        Button button = iconButton("Backup text", "mdi2c-content-save-outline", "#64748b");
+        Button button = iconButton("백업", "mdi2c-content-save-outline", "#64748b");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleBackupTextItems());
         return button;
     }
 
     private Button createRestoreTextButton() {
-        Button button = iconButton("Restore text", "mdi2r-restore", "#64748b");
+        Button button = iconButton("복원", "mdi2r-restore", "#64748b");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> widgetModule.handleRestoreTextItems());
         return button;
     }
 
     private Button createAddNetworkPanelButton() {
-        Button button = iconButton("Add network panel", "mdi2w-wan", "#2563eb");
+        Button button = iconButton("네트워크 패널 추가", "mdi2w-wan", "#2563eb");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> {
             ClassroomSummaryDto selected = networkClassroomCombo.getValue();
@@ -496,9 +446,18 @@ public class DashboardResourcePanelModule {
 
     private Button actionButton(String text, String bgColor) {
         Button button = new Button(text);
-        button.setStyle("-fx-background-color: " + bgColor
-                + "; -fx-text-fill: white; -fx-font-weight: 700;"
-                + " -fx-background-radius: 8; -fx-padding: 8 12 8 12;");
+        button.getStyleClass().add("resource-add-btn");
+        String variant = switch (bgColor) {
+            case "#0ea5e9" -> "resource-add-btn-sky";
+            case "#334155" -> "resource-add-btn-slate";
+            case "#d73a49" -> "resource-add-btn-danger";
+            case "#64748b" -> "resource-add-btn-muted";
+            case "#2563eb" -> "resource-add-btn-blue";
+            default -> null;
+        };
+        if (variant != null) {
+            button.getStyleClass().add(variant);
+        }
         return button;
     }
 

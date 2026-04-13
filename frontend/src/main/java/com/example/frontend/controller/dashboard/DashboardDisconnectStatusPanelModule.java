@@ -10,15 +10,12 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.geometry.Insets;
+import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -60,9 +57,15 @@ public class DashboardDisconnectStatusPanelModule {
     private final DoubleUnaryOperator snapFn;
     private final Supplier<Long> dashboardIdSupplier;
     private final BiConsumer<String, Boolean> showToast;
+    private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final Function<String, double[]> responsiveSizeFn;
     private final Runnable onPanelsChanged;
     private final javafx.scene.layout.Pane classroomContainer;
+
+    @FunctionalInterface
+    public interface PanelLayoutCacheUpdater {
+        void update(Long panelId, double x, double y, double width, double height);
+    }
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
@@ -87,6 +90,7 @@ public class DashboardDisconnectStatusPanelModule {
             DoubleUnaryOperator snapFn,
             Supplier<Long> dashboardIdSupplier,
             BiConsumer<String, Boolean> showToast,
+            PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             Function<String, double[]> responsiveSizeFn,
             Runnable onPanelsChanged) {
         this.dashboardService = dashboardService;
@@ -96,6 +100,7 @@ public class DashboardDisconnectStatusPanelModule {
         this.snapFn = snapFn;
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.showToast = showToast;
+        this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.responsiveSizeFn = responsiveSizeFn;
         this.onPanelsChanged = onPanelsChanged;
     }
@@ -137,15 +142,34 @@ public class DashboardDisconnectStatusPanelModule {
         return panelMap.values();
     }
 
+    @SuppressWarnings("unchecked")
     private VBox buildPanel(DashboardPanelDto panelDto, List<ClassroomSummaryDto> classrooms) {
-        Label title = new Label("접속현황 패널");
-        title.setStyle("-fx-font-weight: 800; -fx-font-size: 15px; -fx-text-fill: #334155;");
+        VBox wrapper;
+        Label summary;
+        Button deleteBtn;
+        TableView<ConnectionLogRow> table;
+        StackPane resizeHandleHolder;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/disconnect-status-panel.fxml"));
+            wrapper            = loader.load();
+            summary            = (Label)     loader.getNamespace().get("summaryLabel");
+            deleteBtn          = (Button)    loader.getNamespace().get("deleteBtn");
+            table              = (TableView<ConnectionLogRow>) loader.getNamespace().get("logTable");
+            resizeHandleHolder = (StackPane) loader.getNamespace().get("resizeHandleHolder");
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+            // Wire CellValueFactories on FXML-defined columns
+            TableColumn<ConnectionLogRow, String> timeCol      = (TableColumn<ConnectionLogRow, String>) table.getColumns().get(0);
+            TableColumn<ConnectionLogRow, String> classroomCol = (TableColumn<ConnectionLogRow, String>) table.getColumns().get(1);
+            TableColumn<ConnectionLogRow, String> pcCol        = (TableColumn<ConnectionLogRow, String>) table.getColumns().get(2);
+            TableColumn<ConnectionLogRow, String> statusCol    = (TableColumn<ConnectionLogRow, String>) table.getColumns().get(3);
+            timeCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().time()));
+            classroomCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().classroom()));
+            pcCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().pcName()));
+            statusCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().event()));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to load disconnect-status-panel.fxml", e);
+        }
 
-        Button deleteBtn = new Button("삭제");
-        deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
         deleteBtn.setVisible(canInteract.getAsBoolean());
         deleteBtn.setManaged(canInteract.getAsBoolean());
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
@@ -156,23 +180,11 @@ public class DashboardDisconnectStatusPanelModule {
             }
         });
 
-        HBox header = new HBox(8, title, spacer, deleteBtn);
-        header.setAlignment(Pos.CENTER_LEFT);
-        header.setPadding(new Insets(8, 10, 8, 10));
-        header.setStyle("-fx-background-color: #e2e8f0; -fx-background-radius: 8;");
-
-        Label summary = new Label();
-        summary.setStyle("-fx-font-size: 12px; -fx-font-weight: 700;");
-
-        TableView<ConnectionLogRow> table = createLogTable();
         table.setItems(logRows);
-        VBox.setVgrow(table, Priority.ALWAYS);
 
-        VBox wrapper = new VBox(10, header, summary, table);
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
         wrapper.getProperties().put("summaryLabel", summary);
-        wrapper.setPadding(new Insets(16, 14, 14, 14));
-        wrapper.setStyle("-fx-background-color: #f8fafc; -fx-background-radius: 12; -fx-border-color: #d8dee8; -fx-border-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.12), 16, 0, 0, 4);");
+        wrapper.getProperties().put("resizeHandleHolder", resizeHandleHolder);
 
         double[] defaultSize = responsiveSizeFn.apply("DISCONNECT");
         wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 120);
@@ -182,31 +194,6 @@ public class DashboardDisconnectStatusPanelModule {
 
         refreshSummary(wrapper, classrooms);
         return wrapper;
-    }
-
-    @SuppressWarnings("unchecked")
-    private TableView<ConnectionLogRow> createLogTable() {
-        TableView<ConnectionLogRow> table = new TableView<>();
-        table.setPlaceholder(new Label("아직 접속 상태 변경 로그가 없습니다."));
-
-        TableColumn<ConnectionLogRow, String> timeCol = new TableColumn<>("시간");
-        timeCol.setPrefWidth(150);
-        timeCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().time()));
-
-        TableColumn<ConnectionLogRow, String> classroomCol = new TableColumn<>("강의실");
-        classroomCol.setPrefWidth(120);
-        classroomCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().classroom()));
-
-        TableColumn<ConnectionLogRow, String> pcCol = new TableColumn<>("PC명");
-        pcCol.setPrefWidth(160);
-        pcCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().pcName()));
-
-        TableColumn<ConnectionLogRow, String> statusCol = new TableColumn<>("이벤트");
-        statusCol.setPrefWidth(110);
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().event()));
-
-        table.getColumns().addAll(timeCol, classroomCol, pcCol, statusCol);
-        return table;
     }
 
     private void refreshSummary(VBox panel, List<ClassroomSummaryDto> classrooms) {
@@ -262,9 +249,9 @@ public class DashboardDisconnectStatusPanelModule {
                             }
 
                             String event = isOnline ? "켜짐(ONLINE)" : "꺼짐(OFFLINE)";
-                            String pcName = (pc.getHostname() == null || pc.getHostname().isBlank())
+                            String pcName = (pc.getPcName() == null || pc.getPcName().isBlank())
                                     ? (pc.getIpAddress() == null ? pc.getMacAddress() : pc.getIpAddress())
-                                    : pc.getHostname();
+                                    : pc.getPcName();
 
                             newRows.add(new ConnectionLogRow(
                                     LocalDateTime.now().format(LOG_TIME_FMT),
@@ -325,14 +312,14 @@ public class DashboardDisconnectStatusPanelModule {
                 () -> persistPosition(panel, panelId)
         );
 
+        StackPane handleHolder = (StackPane) panel.getProperties().get("resizeHandleHolder");
         Label handle = new Label("◢");
-        handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        handle.getStyleClass().add("drag-handle");
         handle.setVisible(canInteract.getAsBoolean());
         handle.setManaged(canInteract.getAsBoolean());
         resizeHandleMap.put(panelId, handle);
-        StackPane handleHolder = new StackPane(handle);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
-        panel.getChildren().add(handleHolder);
+        handleHolder.getChildren().setAll(handle);
 
         interactionService.attachResizeHandlers(
                 panel,
@@ -369,6 +356,15 @@ public class DashboardDisconnectStatusPanelModule {
                 panel.getPrefWidth(),
                 panel.getPrefHeight()
         );
+        if (panelLayoutCacheUpdater != null) {
+            panelLayoutCacheUpdater.update(
+                    panelId,
+                    panel.getLayoutX(),
+                    panel.getLayoutY(),
+                    panel.getPrefWidth(),
+                    panel.getPrefHeight()
+            );
+        }
         showToast.accept("접속현황 패널 저장됨", false);
     }
 

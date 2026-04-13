@@ -3,8 +3,8 @@ package com.example.backend.controller.agent;
 import com.example.backend.dto.agent.AgentRegisterRequest;
 import com.example.backend.dto.agent.AgentRegisterResponse;
 import com.example.backend.service.agent.AgentRegistrationService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -12,6 +12,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -50,8 +51,9 @@ public class AgentController {
      * 현재 연결된 서버 정보를 포함하여 JSON 생성
      */
     @GetMapping("/config/download")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Resource> downloadConfig(
-            @RequestHeader(value = "Host", required = false) String hostHeader) throws JsonProcessingException {
+            @RequestHeader(value = "Host", required = false) String hostHeader) throws JacksonException {
 
         // 요청한 호스트 정보 추출 (Host 헤더에서)
         String serverUrl = "http://localhost:8888"; // 기본값

@@ -5,7 +5,7 @@ import com.example.backend.model.dashboard.DashboardLayout;
 import com.example.backend.model.dashboard.DashboardLayoutBackup;
 import com.example.backend.model.dashboard.DashboardPanel;
 import com.example.backend.service.dashboard.DashboardLayoutService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;

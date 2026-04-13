@@ -3,8 +3,8 @@ package com.example.backend.controller.dashboard;
 import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
 import com.example.backend.service.storage.FileStorageService;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +32,7 @@ public class DashboardWidgetApiController {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
-    @Value("${SERVER_BASE_URL:http://localhost:8080}")
+    @Value("${SERVER_BASE_URL:http://localhost:8888}")
     private String serverBaseUrl;
 
     public DashboardWidgetApiController(DashboardWidgetItemRepository repository,
@@ -119,6 +119,22 @@ public class DashboardWidgetApiController {
         if (!repository.existsById(id)) return ResponseEntity.notFound().build();
         repository.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/dashboard/texts/{id}/rename")
+    public ResponseEntity<Map<String, Object>> renameTextItem(@PathVariable Long id,
+                                                               @RequestBody Map<String, Object> req) {
+        return repository.findById(id).map(item -> {
+            Map<String, Object> cfg = readConfig(item.getConfig());
+            if (req.containsKey("name")) cfg.put("name", req.get("name"));
+            item.setConfig(writeConfig(cfg));
+            if (req.containsKey("dashboardId")) {
+                long did = asLong(req.get("dashboardId"));
+                if (did > 0) item.setDashboardId(did);
+            }
+            DashboardWidgetItem saved = repository.save(item);
+            return ResponseEntity.ok(toTextMap(saved));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/dashboard/texts/restore")

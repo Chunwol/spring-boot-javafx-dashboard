@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Pos?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="handleWrap" alignment="BOTTOM_RIGHT"
+      xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <children>
+        <Label fx:id="handleLabel" text="◢" styleClass="drag-handle" />
+    </children>
+</VBox>

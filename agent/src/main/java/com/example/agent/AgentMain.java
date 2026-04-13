@@ -4,6 +4,7 @@ import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
 import com.example.agent.hardware.HardwareCollector;
 import com.example.agent.heartbeat.HeartbeatSender;
+import com.example.agent.update.OtaUpdater;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import okhttp3.CertificatePinner;
@@ -17,9 +18,9 @@ import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,17 +37,18 @@ import java.util.concurrent.TimeUnit;
 public class AgentMain {
 
     private static final Logger log = LoggerFactory.getLogger(AgentMain.class);
-    private static final Random RANDOM = new Random();
     private static final int SERVER_INITIAL_RETRY = 5;
     private static final long SERVER_RETRY_SLEEP_MS = 10_000L;
     private static final long SERVER_BACKOFF_MS = 10 * 60 * 1000L;
     private static final long INTERNET_RETRY_MS = 30_000L;
+    private static AgentConfig agentConfig; // OTA, 인터넷 체크에서 사용
 
     public static void main(String[] args) throws InterruptedException {
         log.info("=== PC 관제 에이전트 v1.0.0 시작 ===");
 
         AgentConfigLoader configLoader = new AgentConfigLoader();
         AgentConfig config = configLoader.load();
+        agentConfig = config;
 
         log.info("서버: {}", config.getServerUrl());
         log.info("config 경로: {}", configLoader.getConfigPath());
@@ -80,6 +82,10 @@ public class AgentMain {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         HardwareCollector hardware = new HardwareCollector();
         HeartbeatSender heartbeat = new HeartbeatSender(config, configLoader, hardware, httpClient, mapper);
+
+        // OTA 업데이터 초기화
+        OtaUpdater otaUpdater = new OtaUpdater(httpClient, mapper,
+                config.getGithubOwner(), config.getGithubRepo());
 
         waitUntilServerReachable(heartbeat);
 
@@ -116,7 +122,7 @@ public class AgentMain {
             log.warn("초기 하트비트 전송 실패: {}", e.getMessage());
         }
 
-        scheduleNextHeartbeat(scheduler, heartbeat, config);
+        scheduleNextHeartbeat(scheduler, heartbeat, config, otaUpdater, new int[]{0});
 
         // 종료 훅
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -176,12 +182,14 @@ public class AgentMain {
     }
 
     /**
-     * TCP 소켓으로 1.1.1.1:53 연결을 시도한다.
-     * ICMP ping은 기업 방화벽에서 차단될 수 있으므로 TCP DNS 포트를 사용한다.
+     * TCP 소켓으로 설정된 호스트:포트 연결을 시도한다.
+     * config.json의 internetCheckHost/internetCheckPort로 대상 변경 가능.
      */
     private static boolean isInternetAvailable() {
+        String host = agentConfig != null ? agentConfig.getInternetCheckHost() : "1.1.1.1";
+        int port = agentConfig != null ? agentConfig.getInternetCheckPort() : 53;
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress("1.1.1.1", 53), 3000);
+            socket.connect(new InetSocketAddress(host, port), 3000);
             return true;
         } catch (Exception e) {
             return false;
@@ -216,9 +224,13 @@ public class AgentMain {
     private static void scheduleNextHeartbeat(
             ScheduledExecutorService scheduler,
             HeartbeatSender heartbeat,
-            AgentConfig config) {
+            AgentConfig config,
+            OtaUpdater otaUpdater,
+            int[] heartbeatCount) {
 
-        int jitter = RANDOM.nextInt(config.getJitterSec() * 2 + 1) - config.getJitterSec();
+        int jitter = config.getJitterSec() > 0
+                ? ThreadLocalRandom.current().nextInt(-config.getJitterSec(), config.getJitterSec() + 1)
+                : 0;
         int delaySeconds = Math.max(10, config.getHeartbeatIntervalSec() + jitter);
 
         scheduler.schedule(() -> {
@@ -242,11 +254,21 @@ public class AgentMain {
                     }
                 }
                 heartbeat.send();
+
+                // 10번째 하트비트마다 OTA 업데이트 체크
+                heartbeatCount[0]++;
+                if (heartbeatCount[0] % 10 == 0) {
+                    try {
+                        otaUpdater.checkAndUpdate();
+                    } catch (Exception e) {
+                        log.debug("OTA 체크 실패 (무시): {}", e.getMessage());
+                    }
+                }
             } catch (Exception e) {
                 log.error("하트비트 오류: {}", e.getMessage());
             } finally {
                 // 다음 하트비트 스케줄링 (재귀 방식으로 jitter 적용)
-                scheduleNextHeartbeat(scheduler, heartbeat, config);
+                scheduleNextHeartbeat(scheduler, heartbeat, config, otaUpdater, heartbeatCount);
             }
         }, delaySeconds, TimeUnit.SECONDS);
     }

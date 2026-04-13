@@ -10,6 +10,7 @@ import com.example.backend.repository.traffic.TrafficLogsRepository;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.service.classroom.ClassroomResolutionService.PcRole;
+import com.example.backend.service.realtime.WebSocketService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class HeartbeatService {
     private final TrafficLogsRepository trafficLogsRepository;
     private final CommandQueueRepository commandQueueRepository;
     private final AuditService auditService;
+    private final WebSocketService webSocketService;
 
     @Value("${app.heartbeat.persist-interval-seconds:30}")
     private int heartbeatPersistIntervalSeconds;
@@ -82,6 +84,9 @@ public class HeartbeatService {
         pc.setIpAddress(heartbeat.getIpAddress());
         pc.setStatus("ONLINE");
         pc.setLastAgentSessionId(normalizeSessionId(heartbeat.getAgentSessionId()));
+        if (heartbeat.getAgentVersion() != null && !heartbeat.getAgentVersion().isBlank()) {
+            pc.setAgentVersion(heartbeat.getAgentVersion());
+        }
 
         // 자동 그룹핑 (IP 매칭 실패 시 기존 groupId를 해제)
         Long groupId = classroomResolutionService.resolveGroupIdByIp(heartbeat.getIpAddress());
@@ -113,6 +118,15 @@ public class HeartbeatService {
             pc.setLastSeen(now);
             pcMasterRepository.save(pc);
             lastPcPersistedAt.put(mac, now);
+
+            // 실시간 WebSocket 알림: PC 상태 변경 시 대시보드 갱신 트리거
+            if (pcStateChanged) {
+                try {
+                    webSocketService.sendDashboardUpdate(Map.of("eventType", "PC_STATUS"));
+                } catch (Exception e) {
+                    log.debug("WebSocket 알림 전송 실패 (무시): {}", e.getMessage());
+                }
+            }
         }
 
         handleAgentSessionChange(mac, previousAgentSessionId, pc.getLastAgentSessionId(), now);

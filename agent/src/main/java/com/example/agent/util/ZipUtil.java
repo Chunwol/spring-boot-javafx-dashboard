@@ -7,9 +7,9 @@ import java.util.zip.ZipInputStream;
 
 public class ZipUtil {
 
-    private static final long MAX_ENTRY_SIZE  = 512L * 1024 * 1024; // 512MB per entry
-    private static final long MAX_TOTAL_SIZE  = 1024L * 1024 * 1024; // 1GB total
-    private static final int  MAX_ENTRY_COUNT = 10_000;              // 엔트리 수 제한
+    private static final long MAX_ENTRY_SIZE  = 8L * 1024 * 1024 * 1024;   // 8GB per entry
+    private static final long MAX_TOTAL_SIZE  = 32L * 1024 * 1024 * 1024;  // 32GB total
+    private static final int  MAX_ENTRY_COUNT = 100_000;                    // 엔트리 수 제한
 
     /**
      * zip 파일을 targetDir에 해제 (Zip Slip + Zip Bomb 방지)

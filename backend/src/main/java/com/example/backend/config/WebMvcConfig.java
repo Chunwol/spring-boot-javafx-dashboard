@@ -21,6 +21,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns(
                         "/api/v1/heartbeat",
                         "/api/v1/agent/commands/**",
+                        "/api/v1/agent/uploads",
                         "/api/v1/scripts/*/download"
                 );
 

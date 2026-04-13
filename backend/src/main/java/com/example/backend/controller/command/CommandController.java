@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +24,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -72,6 +73,7 @@ public class CommandController {
      * 매직패킷을 릴레이합니다.
      */
     @PostMapping("/commands")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(
         summary = "PC 명령 발행",
         description = "관리자가 PC에 원격 명령(종료, 재부팅, WOL, 스크립트 등)을 발행합니다. " +
@@ -331,6 +333,7 @@ public class CommandController {
      * PC가 등록되어 있지 않으면 404를 반환한다.
      */
     @PostMapping("/commands/to-ip")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "IP 기반 PC 명령 발행",
                description = "IP 주소로 PC를 조회하여 명령을 발행합니다.")
     @Transactional
@@ -343,7 +346,58 @@ public class CommandController {
         if (type == null || type.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "type is required"));
         }
+
+        // PCON → WOL 변환
+        if ("PCON".equals(type)) {
+            type = "WOL";
+        }
+
         Optional<PcMaster> pcOpt = pcMasterRepository.findByIpAddress(ipAddress);
+
+        // WOL: 대상 PC의 그룹 내 온라인 리더를 통해 WOL_RELAY 전송
+        if ("WOL".equals(type)) {
+            PcMaster targetPc = pcOpt.orElse(null);
+            Long groupId = targetPc != null ? targetPc.getGroupId() : null;
+            String targetMac = targetPc != null ? targetPc.getMacAddress() : null;
+
+            if (groupId == null) {
+                return ResponseEntity.badRequest().body(Map.of("message", "대상 PC의 그룹을 찾을 수 없습니다."));
+            }
+
+            List<PcMaster> leaders = pcMasterRepository.findByGroupIdAndStatus(groupId, "ONLINE");
+            if (leaders.isEmpty()) {
+                return ResponseEntity.accepted().body(Map.of("queued", 0, "message", "no-online-agent"));
+            }
+
+            PcMaster leader = leaders.get(0);
+            String payloadJson;
+            try {
+                String broadcastIp = body.containsKey("broadcastIp")
+                        ? body.get("broadcastIp").toString() : "255.255.255.255";
+                payloadJson = objectMapper.writeValueAsString(Map.of(
+                        "targetMacs", targetMac != null ? targetMac : "",
+                        "broadcastIp", broadcastIp
+                ));
+            } catch (Exception e) {
+                return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
+            }
+
+            CommandQueue c = new CommandQueue();
+            c.setMacAddress(leader.getMacAddress());
+            c.setCommandType("WOL_RELAY");
+            c.setPayloadJson(payloadJson);
+            c.setStatus("QUEUED");
+            c.setCreatedAt(LocalDateTime.now());
+            c.setIsExecuted(false);
+            CommandQueue saved = commandQueueRepository.save(c);
+            return ResponseEntity.accepted().body(Map.of(
+                    "queued", 1,
+                    "macAddress", leader.getMacAddress(),
+                    "taskId", saved.getTaskId()
+            ));
+        }
+
+        // 일반 명령: 대상 PC에 직접 전달
         if (pcOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("message", "PC not found for IP: " + ipAddress));
         }
@@ -371,6 +425,7 @@ public class CommandController {
      * ?page=0&size=20                 → 페이지네이션 (기본: page=0, size=20)
      */
     @GetMapping("/commands")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "명령 목록 조회", description = "진행 중이거나 완료된 명령 목록을 조회합니다. 페이지네이션을 지원합니다.")
     public ResponseEntity<?> listCommands(
             @RequestParam(required = false) String status,

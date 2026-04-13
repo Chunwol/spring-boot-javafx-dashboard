@@ -13,6 +13,10 @@ public class AgentConfig {
     private String installKey = "";
     private String agentToken = "";
     private String tlsPinSha256 = "";
+    private String githubOwner = "";
+    private String githubRepo = "";
+    private String internetCheckHost = "1.1.1.1";
+    private int internetCheckPort = 53;
     private int heartbeatIntervalSec = 30;
     private int jitterSec = 5;
 
@@ -37,4 +41,16 @@ public class AgentConfig {
 
     public int getJitterSec() { return jitterSec; }
     public void setJitterSec(int jitterSec) { this.jitterSec = jitterSec; }
+
+    public String getGithubOwner() { return githubOwner; }
+    public void setGithubOwner(String githubOwner) { this.githubOwner = githubOwner; }
+
+    public String getGithubRepo() { return githubRepo; }
+    public void setGithubRepo(String githubRepo) { this.githubRepo = githubRepo; }
+
+    public String getInternetCheckHost() { return internetCheckHost; }
+    public void setInternetCheckHost(String internetCheckHost) { this.internetCheckHost = internetCheckHost; }
+
+    public int getInternetCheckPort() { return internetCheckPort; }
+    public void setInternetCheckPort(int internetCheckPort) { this.internetCheckPort = internetCheckPort; }
 }

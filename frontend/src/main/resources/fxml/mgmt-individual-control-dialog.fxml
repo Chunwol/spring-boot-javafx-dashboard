@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="8.0" styleClass="mgmt-dialog-root"
+      xmlns:fx="http://javafx.com/fxml">
+    <padding><Insets topRightBottomLeft="12.0" /></padding>
+    <children>
+        <Label fx:id="headerLabel" styleClass="mgmt-dialog-header" />
+        <TableView fx:id="controlTable" prefHeight="440.0" VBox.vgrow="ALWAYS" styleClass="panel-card">
+            <placeholder><Label text="PC 정보를 불러오는 중..." /></placeholder>
+            <columns>
+                <TableColumn fx:id="nameCol" text="PC명" prefWidth="160.0" />
+                <TableColumn fx:id="ipCol" text="IP 주소" prefWidth="130.0" />
+                <TableColumn fx:id="statusCol" text="상태" prefWidth="80.0" />
+                <TableColumn fx:id="actionCol" text="제어" prefWidth="210.0" />
+            </columns>
+        </TableView>
+    </children>
+</VBox>

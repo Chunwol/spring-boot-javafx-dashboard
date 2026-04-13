@@ -238,6 +238,37 @@ public class ApiClient {
         return "application/octet-stream";
     }
 
+    /**
+     * 범용 파일을 multipart/form-data 로 업로드한다.
+     */
+    public CompletableFuture<String> uploadFile(String path, File file) {
+        String boundary = "----UploadBoundary" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            byte[] fileBytes = Files.readAllBytes(file.toPath());
+            String mimeType = detectMimeType(file.getName());
+            String header = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"file\"; filename=\"" + file.getName() + "\"\r\n"
+                    + "Content-Type: " + mimeType + "\r\n\r\n";
+            String footer = "\r\n--" + boundary + "--\r\n";
+            byte[] headerBytes = header.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] footerBytes = footer.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] body = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
+            System.arraycopy(headerBytes, 0, body, 0, headerBytes.length);
+            System.arraycopy(fileBytes, 0, body, headerBytes.length, fileBytes.length);
+            System.arraycopy(footerBytes, 0, body, headerBytes.length + fileBytes.length, footerBytes.length);
+
+            HttpRequest request = build(path)
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                    .build();
+            return sendWithRetry(request, 0)
+                    .thenApply(this::ensureSuccess)
+                    .thenApply(HttpResponse::body);
+        } catch (IOException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
     public <T> CompletableFuture<T> getJson(String path, Class<T> clazz) {
         return get(path).thenApply(body -> readValue(body, clazz));
     }

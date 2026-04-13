@@ -1,10 +1,7 @@
 package com.example.backend.dto.heartbeat;
 
-import com.example.backend.model.pc.ClientPosition;
-import com.example.backend.dto.dashboard.NetworkTrafficDto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
-import java.util.List;
 
 @Data
 public class HeartbeatDto {
@@ -12,6 +9,7 @@ public class HeartbeatDto {
     private String hostname;
     private String ipAddress;
     private String agentSessionId;
+    private String agentVersion;
 
     /**
      * 하위 호환용 트래픽 필드.
@@ -26,7 +24,4 @@ public class HeartbeatDto {
 
     private Double inboundMbps;
     private Double outboundMbps;
-
-    private List<ClientPosition> positions;
-    private List<NetworkTrafficDto> traffic;
 }

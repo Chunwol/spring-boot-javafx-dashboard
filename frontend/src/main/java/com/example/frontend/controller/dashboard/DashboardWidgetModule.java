@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -25,7 +26,6 @@ import javafx.scene.text.FontWeight;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -91,7 +91,6 @@ public class DashboardWidgetModule {
     private List<Map<String, Object>> cachedImages = new ArrayList<>();
 
     public DashboardWidgetModule(
-            HttpClient httpClient,
             ObjectMapper objectMapper,
             String apiBaseUrl,
             Pane classroomContainer,
@@ -147,9 +146,8 @@ public class DashboardWidgetModule {
             view.setManaged(!editMode);
         });
         textItemMap.values().forEach(box -> {
-            box.setStyle(editMode
-                    ? "-fx-border-color: #94a3b8; -fx-border-width: 1; -fx-background-color: rgba(255,255,255,0.55); -fx-padding: 4;"
-                    : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
+            box.getStyleClass().removeAll("widget-item-text-edit", "widget-item-view");
+            box.getStyleClass().add(editMode ? "widget-item-text-edit" : "widget-item-view");
         });
         imageDeleteBtns.values().forEach(btn -> {
             btn.setVisible(editMode);
@@ -164,9 +162,8 @@ public class DashboardWidgetModule {
             if (iv != null) {
                 box.setPrefSize(iv.getFitWidth(), iv.getFitHeight() + (editMode ? IMAGE_CONTROL_HEIGHT : 0));
             }
-            box.setStyle(editMode
-                    ? "-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;"
-                    : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
+                box.getStyleClass().removeAll("widget-item-image-edit", "widget-item-view");
+                box.getStyleClass().add(editMode ? "widget-item-image-edit" : "widget-item-view");
         });
     }
 
@@ -185,8 +182,16 @@ public class DashboardWidgetModule {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("텍스트 위젯 추가");
         dialog.setHeaderText("표시할 텍스트를 입력하세요");
-        TextArea input = new TextArea("공지사항을 입력하세요");
-        input.setPrefRowCount(4);
+
+        TextArea input;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/widget-text-add-dialog-content.fxml"));
+            input = loader.load();
+        } catch (IOException e) {
+            e.printStackTrace();
+            new Alert(Alert.AlertType.ERROR, "다이얼로그 로드 실패: " + e.getMessage()).showAndWait();
+            return;
+        }
         dialog.getDialogPane().setContent(input);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
 
@@ -268,7 +273,8 @@ public class DashboardWidgetModule {
         onRefreshPanelList.run();
 
         List<Long> visibleIds = items.stream()
-                .filter(m -> (boolean) m.getOrDefault("visible", true))
+                .filter(m -> !Boolean.FALSE.equals(m.getOrDefault("visible", true)))
+                .filter(m -> m.get("id") instanceof Number)
                 .map(m -> ((Number) m.get("id")).longValue())
                 .toList();
 
@@ -286,8 +292,9 @@ public class DashboardWidgetModule {
         });
 
         for (Map<String, Object> item : items) {
-            if (!(boolean) item.getOrDefault("visible", true)) continue;
-            Long id = ((Number) item.get("id")).longValue();
+            if (Boolean.FALSE.equals(item.getOrDefault("visible", true))) continue;
+            if (!(item.get("id") instanceof Number idNum)) continue;
+            Long id = idNum.longValue();
             VBox box = textItemMap.get(id);
 
             Object xObj = item.get("x");
@@ -298,7 +305,7 @@ public class DashboardWidgetModule {
             double w = wObj instanceof Number ? ((Number) wObj).doubleValue() : 220.0;
             Object hObj = item.get("height");
             double h = hObj instanceof Number ? ((Number) hObj).doubleValue() : 120.0;
-            String text = "New Text";
+            String text = "새 텍스트";
             Object fontSizeObj = item.get("fontSize");
             int fontSize = fontSizeObj instanceof Number ? ((Number) fontSizeObj).intValue() : 14;
                 String fontColor = "#111111";
@@ -325,19 +332,30 @@ public class DashboardWidgetModule {
 
             if (box == null) {
                 box = new VBox();
-                Button deleteBtn = new Button("삭제");
-                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                HBox header;
+                Button deleteBtn;
+                Button boldBtn;
+                Button italicBtn;
+                Button sizeDownBtn;
+                Button sizeUpBtn;
+                ColorPicker colorPicker;
+                try {
+                    FXMLLoader headerLoader = new FXMLLoader(getClass().getResource("/fxml/widget-text-header.fxml"));
+                    header      = headerLoader.load();
+                    deleteBtn   = (Button)      headerLoader.getNamespace().get("deleteBtn");
+                    boldBtn     = (Button)      headerLoader.getNamespace().get("boldBtn");
+                    italicBtn   = (Button)      headerLoader.getNamespace().get("italicBtn");
+                    sizeDownBtn = (Button)      headerLoader.getNamespace().get("sizeDownBtn");
+                    sizeUpBtn   = (Button)      headerLoader.getNamespace().get("sizeUpBtn");
+                    colorPicker = (ColorPicker) headerLoader.getNamespace().get("colorPicker");
+                    colorPicker.setValue(parseColorSafe(fontColor));
+                } catch (Exception headerEx) {
+                    throw new IllegalStateException("Failed to load widget-text-header.fxml", headerEx);
+                }
                 deleteBtn.setVisible(editModeSupplier.getAsBoolean());
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteTextItem(id));
                 textDeleteBtns.put(id, deleteBtn);
-                Button boldBtn = new Button("B");
-                Button italicBtn = new Button("I");
-                Button sizeDownBtn = new Button("A-");
-                Button sizeUpBtn = new Button("A+");
-                ColorPicker colorPicker = new ColorPicker(parseColorSafe(fontColor));
-                colorPicker.setPrefWidth(54);
-                HBox header = new HBox(4, deleteBtn, boldBtn, italicBtn, sizeDownBtn, sizeUpBtn, colorPicker);
                 header.setVisible(editModeSupplier.getAsBoolean());
                 header.setManaged(editModeSupplier.getAsBoolean());
                 textHeaders.put(id, header);
@@ -413,8 +431,9 @@ public class DashboardWidgetModule {
                             String.valueOf(textArea.getProperties().getOrDefault("fontColor", "#111111")));
                     updateTextItem(id, textArea.getText(), targetBox.getLayoutX(), targetBox.getLayoutY(), targetBox.getPrefWidth(), targetBox.getPrefHeight());
                 });
-                colorPicker.setOnAction(e -> {
-                    String nextColor = toHexColor(colorPicker.getValue());
+                final ColorPicker colorPickerFinal = colorPicker;
+                colorPickerFinal.setOnAction(e -> {
+                    String nextColor = toHexColor(colorPickerFinal.getValue());
                     textArea.getProperties().put("fontColor", nextColor);
                     applyTextStyle(textArea, nextColor, true);
                     applyTextViewStyle(textView,
@@ -429,9 +448,7 @@ public class DashboardWidgetModule {
 
                 box.getChildren().addAll(header, textArea, textView);
                 box.setPrefSize(w, h);
-                box.setStyle(editModeSupplier.getAsBoolean()
-                        ? "-fx-border-color: #94a3b8; -fx-border-width: 1; -fx-background-color: rgba(255,255,255,0.55); -fx-padding: 4;"
-                        : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
+                box.getStyleClass().add(editModeSupplier.getAsBoolean() ? "widget-item-text-edit" : "widget-item-view");
                 makeTextItemInteractive(box, textArea, id);
                 VBox resizeHandleWrap = addTextResizeHandle(box, textArea, id);
                 textResizeHandles.put(id, resizeHandleWrap);
@@ -524,12 +541,9 @@ public class DashboardWidgetModule {
                 bold ? FontWeight.BOLD : FontWeight.NORMAL,
                 italic ? FontPosture.ITALIC : FontPosture.REGULAR,
                 fontSize));
-        String baseStyle = "-fx-text-fill: " + fontColor + "; ";
-        if (editMode) {
-            textArea.setStyle(baseStyle + "-fx-control-inner-background: rgba(255,255,255,0.95); -fx-background-color: rgba(255,255,255,0.95); -fx-background-insets: 0; -fx-background-radius: 4; -fx-padding: 6;");
-        } else {
-            textArea.setStyle(baseStyle + "-fx-control-inner-background: transparent; -fx-background-color: transparent; -fx-background-insets: 0; -fx-background-radius: 0; -fx-border-color: transparent; -fx-padding: 0;");
-        }
+        textArea.setStyle("-fx-text-fill: " + fontColor + ";");
+        textArea.getStyleClass().removeAll("widget-textarea-edit", "widget-textarea-view");
+        textArea.getStyleClass().add(editMode ? "widget-textarea-edit" : "widget-textarea-view");
     }
 
     private void applyTextViewStyle(Label label, int fontSize, boolean bold, boolean italic, String fontColor) {
@@ -561,7 +575,12 @@ public class DashboardWidgetModule {
         alert.showAndWait().ifPresent(type -> {
             if (type == ButtonType.YES) {
             apiClient.delete("/dashboard/texts/" + id)
-                        .thenAccept(resp -> loadTextItems());
+                        .thenAccept(resp -> Platform.runLater(this::loadTextItems))
+                        .exceptionally(ex -> {
+                            log.warn("텍스트 삭제 실패", ex);
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "텍스트 삭제에 실패했습니다.").showAndWait());
+                            return null;
+                        });
             }
         });
     }
@@ -624,7 +643,8 @@ public class DashboardWidgetModule {
         onRefreshPanelList.run();
 
         List<Long> visibleIds = items.stream()
-                .filter(m -> (boolean) m.getOrDefault("visible", true))
+                .filter(m -> !Boolean.FALSE.equals(m.getOrDefault("visible", true)))
+                .filter(m -> m.get("id") instanceof Number)
                 .map(m -> ((Number) m.get("id")).longValue())
                 .toList();
 
@@ -639,8 +659,9 @@ public class DashboardWidgetModule {
         });
 
         for (Map<String, Object> item : items) {
-            if (!(boolean) item.getOrDefault("visible", true)) continue;
-            Long id = ((Number) item.get("id")).longValue();
+            if (Boolean.FALSE.equals(item.getOrDefault("visible", true))) continue;
+            if (!(item.get("id") instanceof Number idNum)) continue;
+            Long id = idNum.longValue();
 
             double x = item.getOrDefault("x", 80.0) instanceof Number ? ((Number) item.get("x")).doubleValue() : 80.0;
             double y = item.getOrDefault("y", 80.0) instanceof Number ? ((Number) item.get("y")).doubleValue() : 80.0;
@@ -673,10 +694,15 @@ public class DashboardWidgetModule {
 
             VBox box = imageItemMap.get(id);
             if (box == null) {
-                VBox newBox = new VBox(4);
-                newBox.setStyle("-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;");
-                Button deleteBtn = new Button("삭제");
-                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 6;");
+                VBox newBox;
+                Button deleteBtn;
+                try {
+                    FXMLLoader imgLoader = new FXMLLoader(getClass().getResource("/fxml/widget-image-item.fxml"));
+                    newBox    = imgLoader.load();
+                    deleteBtn = (Button) imgLoader.getNamespace().get("deleteBtn");
+                } catch (Exception ex) {
+                    throw new IllegalStateException("Failed to load widget-image-item.fxml", ex);
+                }
                 deleteBtn.setVisible(editModeSupplier.getAsBoolean());
                 deleteBtn.setManaged(editModeSupplier.getAsBoolean());
                 deleteBtn.setOnAction(e -> handleDeleteImageItem(id));
@@ -684,18 +710,18 @@ public class DashboardWidgetModule {
                 ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true));
                 imageView.setFitWidth(widthFinal);
                 imageView.setFitHeight(heightFinal);
-                newBox.getChildren().addAll(deleteBtn, imageView);
+                newBox.getChildren().add(imageView);
                 newBox.setPrefSize(widthFinal, heightFinal + (editModeSupplier.getAsBoolean() ? IMAGE_CONTROL_HEIGHT : 0));
-                newBox.setStyle(editModeSupplier.getAsBoolean()
-                        ? "-fx-border-color: #999; -fx-border-width: 1; -fx-background-color: #fff; -fx-padding: 4;"
-                        : "-fx-border-color: transparent; -fx-border-width: 0; -fx-background-color: transparent; -fx-padding: 0;");
+                newBox.getStyleClass().removeAll("widget-item-image-edit", "widget-item-view");
+                newBox.getStyleClass().add(editModeSupplier.getAsBoolean() ? "widget-item-image-edit" : "widget-item-view");
+                final VBox newBoxFinal = newBox;
                 dashboardInteractionService.attachDragHandlers(
-                        newBox,
+                        newBoxFinal,
                         editModeSupplier,
                         this::applySnap,
                         () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
-                                "x", newBox.getLayoutX(),
-                                "y", newBox.getLayoutY(),
+                                "x", newBoxFinal.getLayoutX(),
+                                "y", newBoxFinal.getLayoutY(),
                                 "width", imageView.getFitWidth(),
                                 "height", imageView.getFitHeight(),
                                 "visible", true,
@@ -705,12 +731,12 @@ public class DashboardWidgetModule {
                     return null;
                 })
                 );
-                imageItemMap.put(id, newBox);
-                classroomContainer.getChildren().add(newBox);
-                VBox resizeHandleWrap = addImageResizeHandle(newBox, id, imageUrlFinal);
+                imageItemMap.put(id, newBoxFinal);
+                classroomContainer.getChildren().add(newBoxFinal);
+                VBox resizeHandleWrap = addImageResizeHandle(newBoxFinal, id, imageUrlFinal);
                 imageResizeHandles.put(id, resizeHandleWrap);
-                newBox.toFront();
-                box = newBox;
+                newBoxFinal.toFront();
+                box = newBoxFinal;
             } else {
                 if (box.getChildren().size() > 1 && box.getChildren().get(1) instanceof ImageView iv) {
                     iv.setImage(new Image(imageUrlFinal, w, h, true, true, true));
@@ -732,7 +758,7 @@ public class DashboardWidgetModule {
             "height", h,
             "visible", visible
         )).exceptionally(ex -> {
-            log.warn("Failed to update text position", ex);
+            log.warn("Failed to update image position", ex);
             return null;
         });
     }
@@ -742,7 +768,12 @@ public class DashboardWidgetModule {
         alert.showAndWait().ifPresent(type -> {
             if (type == ButtonType.YES) {
             apiClient.delete("/dashboard/images/" + id)
-                        .thenAccept(resp -> loadImageItems());
+                        .thenAccept(resp -> Platform.runLater(this::loadImageItems))
+                        .exceptionally(ex -> {
+                            log.warn("이미지 삭제 실패", ex);
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이미지 삭제에 실패했습니다.").showAndWait());
+                            return null;
+                        });
             }
         });
     }
@@ -813,10 +844,8 @@ public class DashboardWidgetModule {
     }
 
     private VBox addTextResizeHandle(VBox box, TextArea textArea, Long id) {
-        Label handle = new Label("◢");
-        handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
-        VBox handleWrap = new VBox(handle);
-        handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
+        VBox handleWrap = loadResizeHandleWrap();
+        Label handle = (Label) handleWrap.getProperties().get("resizeHandleLabel");
         handleWrap.setVisible(editModeSupplier.getAsBoolean());
         handleWrap.setManaged(editModeSupplier.getAsBoolean());
         box.getChildren().add(handleWrap);
@@ -844,10 +873,8 @@ public class DashboardWidgetModule {
     }
 
     private VBox addImageResizeHandle(VBox box, Long id, String imageUrlFinal) {
-        Label handle = new Label("◢");
-        handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
-        VBox handleWrap = new VBox(handle);
-        handleWrap.setAlignment(javafx.geometry.Pos.BOTTOM_RIGHT);
+        VBox handleWrap = loadResizeHandleWrap();
+        Label handle = (Label) handleWrap.getProperties().get("resizeHandleLabel");
         handleWrap.setVisible(editModeSupplier.getAsBoolean());
         handleWrap.setManaged(editModeSupplier.getAsBoolean());
         box.getChildren().add(handleWrap);
@@ -880,6 +907,18 @@ public class DashboardWidgetModule {
                 })
         );
         return handleWrap;
+    }
+
+    private VBox loadResizeHandleWrap() {
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/widget-resize-handle.fxml"));
+            VBox handleWrap = loader.load();
+            Label handle = (Label) loader.getNamespace().get("handleLabel");
+            handleWrap.getProperties().put("resizeHandleLabel", handle);
+            return handleWrap;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to load widget-resize-handle.fxml", e);
+        }
     }
 
     private ImageView findImageView(VBox box) {

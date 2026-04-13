@@ -20,13 +20,22 @@ import java.net.*;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * 서버에서 전달받은 명령을 실행한다.
- * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY
+ * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY, COLLECT_FILES, LIST_FILES
  */
 public class CommandExecutor {
 
@@ -60,8 +69,12 @@ public class CommandExecutor {
     public void execute(JsonNode cmdNode) {
         if (cmdNode == null || cmdNode.isNull()) return;
 
-        long taskId = cmdNode.get("taskId").asLong();
-        String type = cmdNode.get("type").asText();
+        long taskId = cmdNode.has("taskId") ? cmdNode.get("taskId").asLong() : 0;
+        String type = cmdNode.has("type") ? cmdNode.get("type").asText("") : "";
+        if (type.isEmpty()) {
+            log.warn("명령에 type 필드 없음. 무시.");
+            return;
+        }
         String payload = cmdNode.has("payload") && !cmdNode.get("payload").isNull()
                 ? cmdNode.get("payload").asText() : "{}";
         String scriptUrl = cmdNode.has("scriptUrl") && !cmdNode.get("scriptUrl").isNull()
@@ -87,6 +100,8 @@ public class CommandExecutor {
                     yield executePs1(taskId, scriptUrl, payload);
                 }
                 case "WOL_RELAY"  -> executeWolRelay(payload);
+                case "COLLECT_FILES" -> executeCollectFiles(taskId, payload);
+                case "LIST_FILES" -> executeListFiles(payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
             persistAndSendResult(taskId, result);
@@ -241,18 +256,15 @@ public class CommandExecutor {
                 : tmpDir.resolve("script-" + taskId + ext);
 
         try {
-            // 다운로드
-            byte[] scriptBytes;
+            // 다운로드 (스트리밍 방식 — 30GB+ 대용량 파일 지원)
             Path localPath = resolveLocalScriptPath(source);
             if (localPath != null) {
                 if (!Files.exists(localPath)) {
-                    // MEDIUM FIX#9: Mask file path to hide directory structure
                     return new CommandResult(1, "", "로컬 스크립트 파일 없음: " + SensitiveDataMasker.maskPath(localPath.toString()));
                 }
-                scriptBytes = Files.readAllBytes(localPath);
+                Files.copy(localPath, tmpFile, StandardCopyOption.REPLACE_EXISTING);
             } else {
                 String url = resolveRemoteScriptUrl(source);
-                // MEDIUM FIX#9: Log masked URL path (without revealing full URL)
                 log.debug("PS1 다운로드 taskId={} url={}", taskId, SensitiveDataMasker.maskPath(url));
                 boolean[] cancelled = {false};
                 FileTransferProgressDialog dialog = new FileTransferProgressDialog(
@@ -260,10 +272,7 @@ public class CommandExecutor {
                         -1L,
                         () -> cancelled[0] = true
                 );
-                // MEDIUM FIX#8: Ensure UI operation on proper thread
                 UiThreadUtils.runOnSwingThread(dialog::show);
-                long[] downloaded = {0};
-                long contentLength = -1;
 
                 Request dlReq = new Request.Builder()
                         .url(url)
@@ -275,40 +284,42 @@ public class CommandExecutor {
                         dialog.close();
                         return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
                     }
-                    contentLength = resp.body().contentLength();
+                    long contentLength = resp.body().contentLength();
                     dialog.setStatus("전송중입니다...");
                     dialog.setEta("계산중...");
 
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    byte[] buf = new byte[8192];
+                    // 디스크에 직접 스트리밍 + SHA-256 동시 계산
+                    String serverHash = resp.header("X-Script-SHA256");
+                    MessageDigest md = (serverHash != null && !serverHash.isBlank())
+                            ? MessageDigest.getInstance("SHA-256") : null;
+                    long downloaded = 0;
+                    byte[] buf = new byte[64 * 1024]; // 64KB 버퍼 (대용량 전송 최적화)
                     int r;
                     long start = System.currentTimeMillis();
-                    try (InputStream in = resp.body().byteStream()) {
+                    try (InputStream in = resp.body().byteStream();
+                         OutputStream out = Files.newOutputStream(tmpFile)) {
                         while ((r = in.read(buf)) > 0) {
                             if (cancelled[0]) {
                                 dialog.close();
-                                baos.close();  // CRITICAL FIX: Explicitly close stream on cancel
                                 return new CommandResult(2, "", "사용자 취소");
                             }
-                            baos.write(buf, 0, r);
-                            downloaded[0] += r;
-                            double progress = contentLength > 0 ? (double) downloaded[0] / contentLength : -1;
+                            out.write(buf, 0, r);
+                            if (md != null) md.update(buf, 0, r);
+                            downloaded += r;
+                            double progress = contentLength > 0 ? (double) downloaded / contentLength : -1;
                             long elapsed = System.currentTimeMillis() - start;
-                            double speed = elapsed > 0 ? (downloaded[0] * 1000.0 / elapsed) : 0;
+                            double speed = elapsed > 0 ? (downloaded * 1000.0 / elapsed) : 0;
                             long remain = (speed > 0 && contentLength > 0)
-                                    ? (long) ((contentLength - downloaded[0]) / speed)
+                                    ? (long) ((contentLength - downloaded) / speed)
                                     : -1;
                             dialog.setProgress(progress);
                             dialog.setEta(remain > 0 ? remain + "초" : "-");
                         }
                     }
-                    scriptBytes = baos.toByteArray();
-                    baos.close();  // Ensure close on normal completion
 
-                    // SHA-256 검증 (서버가 X-Script-SHA256 헤더로 전달)
-                    String serverHash = resp.header("X-Script-SHA256");
-                    if (serverHash != null && !serverHash.isBlank()) {
-                        String localHash = sha256(scriptBytes);
+                    // SHA-256 검증
+                    if (md != null) {
+                        String localHash = HexFormat.of().formatHex(md.digest());
                         if (!localHash.equalsIgnoreCase(serverHash)) {
                             dialog.close();
                             return new CommandResult(1, "", "스크립트 무결성 검증 실패");
@@ -317,8 +328,6 @@ public class CommandExecutor {
                     dialog.close();
                 }
             }
-
-            Files.write(tmpFile, scriptBytes);
 
             boolean transferMode = p.has("transferMode") && p.get("transferMode").asBoolean(false);
             String sourceType = p.has("sourceType") ? p.get("sourceType").asText("file") : "file";
@@ -521,6 +530,241 @@ public class CommandExecutor {
             DatagramPacket pkt = new DatagramPacket(
                     magic, magic.length, InetAddress.getByName(broadcastIp), 9);
             socket.send(pkt);
+        }
+    }
+
+    // ─── 파일 수집 (Agent -> Server -> Admin Download) ───────────────────
+
+    private CommandResult executeCollectFiles(long taskId, String payloadJson) throws Exception {
+        JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+        List<String> requestedPaths = extractCollectPaths(payload);
+        if (requestedPaths.isEmpty()) {
+            return new CommandResult(1, "", "수집 경로(paths) 누락");
+        }
+
+        String outputName = payload.has("outputName") ? payload.get("outputName").asText("") : "";
+        if (outputName == null || outputName.isBlank()) {
+            String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            outputName = "collected-" + taskId + "-" + ts + ".zip";
+        }
+        outputName = sanitizeName(outputName);
+        if (!outputName.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            outputName += ".zip";
+        }
+
+        Path tmpZip = Files.createTempFile("pcagent-collect-" + taskId + "-", ".zip");
+        try {
+            int zippedCount = zipRequestedPaths(tmpZip, requestedPaths);
+            if (zippedCount <= 0) {
+                return new CommandResult(1, "", "선택한 경로에서 수집 가능한 파일이 없습니다.");
+            }
+
+            JsonNode uploadResp = uploadCollectedArtifact(tmpZip, outputName, taskId);
+            String downloadUrl = uploadResp.path("downloadUrl").asText("");
+            String id = uploadResp.path("id").asText("");
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("파일 수집 완료: ").append(zippedCount).append("개 파일");
+            if (!id.isBlank()) {
+                sb.append(" (artifactId=").append(id).append(")");
+            }
+            if (!downloadUrl.isBlank()) {
+                sb.append("\n다운로드: ").append(downloadUrl);
+            }
+            return new CommandResult(0, sb.toString(), "");
+        } finally {
+            try {
+                Files.deleteIfExists(tmpZip);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private List<String> extractCollectPaths(JsonNode payload) {
+        Set<String> unique = new LinkedHashSet<>();
+        JsonNode pathsNode = payload.get("paths");
+        if (pathsNode != null && pathsNode.isArray()) {
+            for (JsonNode n : pathsNode) {
+                if (n != null && !n.isNull()) {
+                    String p = n.asText("").trim();
+                    if (!p.isBlank()) {
+                        unique.add(p);
+                    }
+                }
+            }
+        }
+        if (unique.isEmpty() && payload.has("path")) {
+            String one = payload.get("path").asText("").trim();
+            if (!one.isBlank()) {
+                unique.add(one);
+            }
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private int zipRequestedPaths(Path zipPath, List<String> requestedPaths) throws IOException {
+        int[] count = {0};
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
+            for (int i = 0; i < requestedPaths.size(); i++) {
+                String raw = requestedPaths.get(i);
+                Path p;
+                try {
+                    p = Path.of(raw);
+                } catch (Exception ex) {
+                    log.warn("수집 경로 파싱 실패: {}", SensitiveDataMasker.maskPath(raw));
+                    continue;
+                }
+                if (!Files.exists(p)) {
+                    log.warn("수집 경로 없음: {}", SensitiveDataMasker.maskPath(raw));
+                    continue;
+                }
+
+                String baseName = p.getFileName() != null ? p.getFileName().toString() : ("item-" + (i + 1));
+                String rootPrefix = String.format("item-%02d-%s", i + 1, sanitizeName(baseName));
+
+                if (Files.isRegularFile(p)) {
+                    addFileToZip(zos, p, rootPrefix);
+                    count[0]++;
+                    continue;
+                }
+
+                if (Files.isDirectory(p)) {
+                    try (var stream = Files.walk(p)) {
+                        stream.filter(Files::isRegularFile).forEach(f -> {
+                            Path rel = p.relativize(f);
+                            String entryName = rootPrefix + "/" + rel.toString().replace('\\', '/');
+                            try {
+                                addFileToZip(zos, f, entryName);
+                                count[0]++;
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                    } catch (UncheckedIOException e) {
+                        throw e.getCause();
+                    }
+                }
+            }
+        }
+        return count[0];
+    }
+
+    private static void addFileToZip(ZipOutputStream zos, Path file, String entryName) throws IOException {
+        String normalized = entryName.replace('\\', '/');
+        ZipEntry entry = new ZipEntry(normalized);
+        zos.putNextEntry(entry);
+        Files.copy(file, zos);
+        zos.closeEntry();
+    }
+
+    private JsonNode uploadCollectedArtifact(Path zipPath, String originalFilename, long taskId) throws IOException {
+        String url = config.getServerUrl() + "/api/v1/agent/uploads";
+        RequestBody fileBody = RequestBody.create(zipPath.toFile(), MediaType.parse("application/zip"));
+        MultipartBody body = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", originalFilename, fileBody)
+                .addFormDataPart("originalFilename", originalFilename)
+                .addFormDataPart("taskId", String.valueOf(taskId))
+                .build();
+
+        Request req = new Request.Builder()
+                .url(url)
+                .header("X-Agent-Token", config.getAgentToken())
+                .post(body)
+                .build();
+
+        try (Response resp = httpClient.newCall(req).execute()) {
+            if (!resp.isSuccessful() || resp.body() == null) {
+                String bodyText = resp.body() != null ? resp.body().string() : "";
+                throw new IOException("수집 파일 업로드 실패: HTTP " + resp.code() + " " + truncate(bodyText));
+            }
+            return mapper.readTree(resp.body().string());
+        }
+    }
+
+    private CommandResult executeListFiles(String payloadJson) {
+        try {
+            JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+            String requestedPath = payload.has("path") ? payload.get("path").asText("").trim() : "";
+
+            Path current = resolveBrowsePath(requestedPath);
+            if (current == null) {
+                List<Map<String, Object>> drives = new ArrayList<>();
+                for (File root : File.listRoots()) {
+                    if (root == null) continue;
+                    Map<String, Object> e = new java.util.LinkedHashMap<>();
+                    e.put("name", root.getPath());
+                    e.put("type", "drive");
+                    e.put("size", 0L);
+                    drives.add(e);
+                }
+                Map<String, Object> rootResp = new java.util.LinkedHashMap<>();
+                rootResp.put("ok", true);
+                rootResp.put("currentPath", "");
+                rootResp.put("parentPath", "");
+                rootResp.put("entries", drives);
+                return new CommandResult(0, mapper.writeValueAsString(rootResp), "");
+            }
+
+            List<Map<String, Object>> entries = new ArrayList<>();
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(current)) {
+                for (Path child : stream) {
+                    try {
+                        boolean isDir = Files.isDirectory(child);
+                        String type = isDir ? "dir" : "file";
+                        long size = isDir ? 0L : Files.size(child);
+                        Map<String, Object> e = new java.util.LinkedHashMap<>();
+                        e.put("name", child.getFileName() == null ? child.toString() : child.getFileName().toString());
+                        e.put("type", type);
+                        e.put("size", size);
+                        entries.add(e);
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            entries.sort((a, b) -> {
+                String ta = String.valueOf(a.getOrDefault("type", "file"));
+                String tb = String.valueOf(b.getOrDefault("type", "file"));
+                if (!ta.equals(tb)) {
+                    if ("dir".equals(ta)) return -1;
+                    if ("dir".equals(tb)) return 1;
+                }
+                String na = String.valueOf(a.getOrDefault("name", ""));
+                String nb = String.valueOf(b.getOrDefault("name", ""));
+                return na.compareToIgnoreCase(nb);
+            });
+
+            boolean truncated = false;
+            int maxEntries = 40;
+            if (entries.size() > maxEntries) {
+                entries = new ArrayList<>(entries.subList(0, maxEntries));
+                truncated = true;
+            }
+
+            Map<String, Object> resp = new java.util.LinkedHashMap<>();
+            resp.put("ok", true);
+            resp.put("currentPath", current.toString());
+            Path parent = current.getParent();
+            resp.put("parentPath", parent == null ? "" : parent.toString());
+            resp.put("truncated", truncated);
+            resp.put("entries", entries);
+            return new CommandResult(0, mapper.writeValueAsString(resp), "");
+        } catch (Exception e) {
+            return new CommandResult(1, "", "파일 목록 조회 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    private Path resolveBrowsePath(String requestedPath) {
+        if (requestedPath == null || requestedPath.isBlank()) {
+            return null;
+        }
+        try {
+            Path p = Path.of(requestedPath).normalize();
+            if (!Files.exists(p) || !Files.isDirectory(p)) {
+                return null;
+            }
+            return p;
+        } catch (Exception ex) {
+            return null;
         }
     }
 

@@ -1,9 +1,9 @@
 package com.example.backend.controller.dashboard;
 
-import com.example.backend.dto.dashboard.DashboardRefreshDto;
-import com.example.backend.dto.dashboard.ClassroomSummaryDto;
-import com.example.backend.dto.dashboard.PcStatusDto;
-import com.example.backend.dto.dashboard.NetworkTrafficDto;
+import com.example.dto.dashboard.DashboardRefreshDto;
+import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.PcStatusDto;
+import com.example.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.service.dashboard.DashboardService;
 import com.example.backend.service.dashboard.ClassroomService;
 import com.example.backend.service.dashboard.PcStatusService;

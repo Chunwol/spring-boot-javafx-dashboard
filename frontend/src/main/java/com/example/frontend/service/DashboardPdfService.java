@@ -1,6 +1,7 @@
 package com.example.frontend.service;
 
 import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.stage.FileChooser;
@@ -41,31 +42,35 @@ public class DashboardPdfService {
         ButtonType generateBtn = new ButtonType("생성", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(generateBtn, ButtonType.CANCEL);
 
-        GridPane grid = new GridPane();
-        grid.setHgap(10);
-        grid.setVgap(10);
-        grid.setPadding(new javafx.geometry.Insets(20, 150, 10, 10));
+        // FXML에서 다이얼로그 콘텐츠 로드
+        GridPane grid;
+        RadioButton weeklyBtn, lastWeekBtn, monthlyBtn;
+        ComboBox<Integer> yearCombo, monthCombo;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pdf-report-dialog-content.fxml"));
+            grid = loader.load();
+            weeklyBtn   = (RadioButton) loader.getNamespace().get("weeklyBtn");
+            lastWeekBtn = (RadioButton) loader.getNamespace().get("lastWeekBtn");
+            monthlyBtn  = (RadioButton) loader.getNamespace().get("monthlyBtn");
+            yearCombo   = (ComboBox<Integer>) loader.getNamespace().get("yearCombo");
+            monthCombo  = (ComboBox<Integer>) loader.getNamespace().get("monthCombo");
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load pdf-report-dialog-content.fxml", e);
+        }
 
-        // 보고서 유형 선택
+        // 보고서 유형 토글 그룹
         ToggleGroup typeGroup = new ToggleGroup();
-        RadioButton weeklyBtn = new RadioButton("주간 보고서 (이번 주)");
         weeklyBtn.setToggleGroup(typeGroup);
         weeklyBtn.setSelected(true);
-
-        RadioButton lastWeekBtn = new RadioButton("주간 보고서 (지난 주)");
         lastWeekBtn.setToggleGroup(typeGroup);
-
-        RadioButton monthlyBtn = new RadioButton("월간 보고서");
         monthlyBtn.setToggleGroup(typeGroup);
 
         // 월간 선택 시 연/월 입력
-        ComboBox<Integer> yearCombo = new ComboBox<>();
         int currentYear = LocalDate.now().getYear();
         for (int y = currentYear - 2; y <= currentYear; y++) yearCombo.getItems().add(y);
         yearCombo.setValue(currentYear);
         yearCombo.setDisable(true);
 
-        ComboBox<Integer> monthCombo = new ComboBox<>();
         for (int m = 1; m <= 12; m++) monthCombo.getItems().add(m);
         monthCombo.setValue(LocalDate.now().getMonthValue());
         monthCombo.setDisable(true);
@@ -74,15 +79,6 @@ public class DashboardPdfService {
             yearCombo.setDisable(!n);
             monthCombo.setDisable(!n);
         });
-
-        grid.add(new Label("보고서 유형:"), 0, 0);
-        grid.add(weeklyBtn, 1, 0);
-        grid.add(lastWeekBtn, 1, 1);
-        grid.add(monthlyBtn, 1, 2);
-        grid.add(new Label("연도:"), 0, 3);
-        grid.add(yearCombo, 1, 3);
-        grid.add(new Label("월:"), 0, 4);
-        grid.add(monthCombo, 1, 4);
 
         dialog.getDialogPane().setContent(grid);
 

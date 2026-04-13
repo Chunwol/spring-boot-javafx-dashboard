@@ -38,6 +38,9 @@ public class PcMaster {
     @Column(name = "broken_note")
     private String brokenNote;
 
+    @Column(name = "agent_version", length = 40)
+    private String agentVersion;
+
     public PcMaster() {
     }
 
@@ -112,5 +115,13 @@ public class PcMaster {
 
     public void setBrokenNote(String brokenNote) {
         this.brokenNote = brokenNote;
+    }
+
+    public String getAgentVersion() {
+        return agentVersion;
+    }
+
+    public void setAgentVersion(String agentVersion) {
+        this.agentVersion = agentVersion;
     }
 }

@@ -10,7 +10,7 @@ import com.example.backend.model.dashboard.DashboardPanel;
 import com.example.backend.repository.dashboard.DashboardLayoutBackupRepository;
 import com.example.backend.repository.dashboard.DashboardLayoutRepository;
 import com.example.backend.repository.dashboard.DashboardPanelRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;

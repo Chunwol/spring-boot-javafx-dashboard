@@ -4,6 +4,8 @@ import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.DashboardService;
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.layout.VBox;
 
 import javafx.geometry.Insets;
@@ -19,6 +21,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.application.Platform;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
@@ -29,7 +32,6 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -42,8 +44,19 @@ public class NetworkPanelController {
     private double gaugeMaxMbps = 1000.0;
     private double classroomThresholdMbps = 1000.0;
     private double pcThresholdMbps = 300.0;
-    
-    private final VBox panel;
+
+    @FXML
+    private VBox panel;
+
+    @FXML
+    private HBox gaugeRowSlot;
+
+    @FXML
+    private StackPane chartSlot;
+
+    @FXML
+    private StackPane tableSlot;
+
     private final ClassroomSummaryDto summary;
     private final LineChart<String, Number> networkChart;
     private final XYChart.Series<String, Number> inboundSeries;
@@ -57,149 +70,151 @@ public class NetworkPanelController {
     private final DashboardService dashboardService = new DashboardService();
     private Timeline inboundBlinkingTimeline;
     private Timeline outboundBlinkingTimeline;
-    private Map<String, Timeline> pcRowBlinkingTimelines = new HashMap<>();
 
     public NetworkPanelController(ClassroomSummaryDto summary) {
         this.summary = summary;
+        loadPanelFxml();
         this.inboundSeries = new XYChart.Series<>();
-        this.inboundSeries.setName("Inbound");
+        this.inboundSeries.setName("인바운드");
         this.outboundSeries = new XYChart.Series<>();
-        this.outboundSeries.setName("Outbound");
+        this.outboundSeries.setName("아웃바운드");
         this.networkChart = createNetworkChart();
-        this.inboundGauge = createGaugeBar("#2563eb");
-        this.outboundGauge = createGaugeBar("#dc2626");
+        this.inboundGauge = createGaugeBar("gauge-bar-inbound");
+        this.outboundGauge = createGaugeBar("gauge-bar-outbound");
         this.inboundGaugeValue = createGaugeValueLabel();
         this.outboundGaugeValue = createGaugeValueLabel();
         this.pcTrafficTable = createPcTrafficTable();
         HBox gaugeRow = createGaugeRow();
 
-        Label listTitle = new Label("PC별 트래픽");
-        listTitle.setStyle("-fx-font-size: 15px; -fx-font-weight: 800; -fx-text-fill: #334155;");
+        if (gaugeRowSlot != null) {
+            gaugeRowSlot.getChildren().setAll(gaugeRow);
+        }
+        if (chartSlot != null) {
+            chartSlot.getChildren().setAll(networkChart);
+        }
+        if (tableSlot != null) {
+            tableSlot.getChildren().setAll(pcTrafficTable);
+        }
 
-        this.panel = new VBox(8, gaugeRow, networkChart, listTitle, pcTrafficTable);
-        this.panel.setPadding(new Insets(10));
-        VBox.setVgrow(networkChart, Priority.ALWAYS);
         updateGaugeValues(0.0, 0.0);
         
         // 설정값 비동기로 가져오기
         applyTrafficThresholdsAsync();
     }
 
+    private void loadPanelFxml() {
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/network-panel.fxml"));
+            loader.setController(this);
+            panel = loader.load();
+        } catch (Exception e) {
+            throw new IllegalStateException("네트워크 패널 FXML 로딩 실패", e);
+        }
+    }
+
     private LineChart<String, Number> createNetworkChart() {
-        CategoryAxis xAxis = new CategoryAxis();
-        xAxis.setLabel("시간");
-        NumberAxis yAxis = new NumberAxis();
-        yAxis.setLabel("트래픽 (Mbps)");
-        LineChart<String, Number> chart = new LineChart<>(xAxis, yAxis);
-        chart.setTitle("실시간 전체 네트워크 트래픽");
-        chart.setCreateSymbols(false);
-        chart.setAnimated(false);
-        xAxis.setStyle("-fx-font-size: 13px;");
-        yAxis.setStyle("-fx-font-size: 13px;");
-        chart.setStyle("-fx-font-size: 13px;");
-        chart.getData().add(inboundSeries);
-        chart.getData().add(outboundSeries);
-        return chart;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/network-chart.fxml"));
+            LineChart<String, Number> chart = loader.load();
+            chart.getData().add(inboundSeries);
+            chart.getData().add(outboundSeries);
+            return chart;
+        } catch (Exception e) {
+            throw new IllegalStateException("네트워크 차트 FXML 로딩 실패", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
     private TableView<Map<String, Object>> createPcTrafficTable() {
-        TableView<Map<String, Object>> table = new TableView<>();
-        table.setPrefHeight(300);
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        Label placeholder = new Label("PC 트래픽 데이터가 없습니다.");
-        placeholder.setStyle("-fx-font-size: 13px; -fx-text-fill: #64748b;");
-        table.setPlaceholder(placeholder);
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/network-traffic-table.fxml"));
+            TableView<Map<String, Object>> table = loader.load();
+            var ns = loader.getNamespace();
 
-        TableColumn<Map<String, Object>, String> pcCol = new TableColumn<>("PC명");
-        pcCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
-        pcCol.setPrefWidth(90);
+            TableColumn<Map<String, Object>, String> pcCol = (TableColumn<Map<String, Object>, String>) ns.get("pcCol");
+            TableColumn<Map<String, Object>, String> ipCol = (TableColumn<Map<String, Object>, String>) ns.get("ipCol");
+            TableColumn<Map<String, Object>, String> inCol = (TableColumn<Map<String, Object>, String>) ns.get("inCol");
+            TableColumn<Map<String, Object>, String> outCol = (TableColumn<Map<String, Object>, String>) ns.get("outCol");
+            TableColumn<Map<String, Object>, Double> loadCol = (TableColumn<Map<String, Object>, Double>) ns.get("loadCol");
 
-        TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP주소");
-        ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
-        ipCol.setPrefWidth(110);
+            pcCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
+            ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
+            inCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("inboundMbps"))));
+            outCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("outboundMbps"))));
 
-        TableColumn<Map<String, Object>, String> inCol = new TableColumn<>("입력(Mbps)");
-        inCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("inboundMbps"))));
-        inCol.setPrefWidth(80);
-        inCol.setStyle("-fx-alignment: CENTER_RIGHT;");
-
-        TableColumn<Map<String, Object>, String> outCol = new TableColumn<>("출력(Mbps)");
-        outCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("outboundMbps"))));
-        outCol.setPrefWidth(80);
-        outCol.setStyle("-fx-alignment: CENTER_RIGHT;");
-
-        TableColumn<Map<String, Object>, Double> loadCol = new TableColumn<>("부하율");
-        loadCol.setCellValueFactory(d -> new javafx.beans.property.SimpleObjectProperty<>(
-                combinedLoadRatio(d.getValue())));
-        loadCol.setPrefWidth(75);
-        loadCol.setCellFactory(col -> new TableCell<>() {
-            private final ProgressBar bar = new ProgressBar(0);
-            private Timeline blinkingTimeline;
-            {
-                bar.setPrefWidth(60);
-                bar.setStyle("-fx-accent: #0f766e;");
-                setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-            }
-
-            @Override
-            protected void updateItem(Double value, boolean empty) {
-                super.updateItem(value, empty);
-                if (empty || value == null) {
-                    setGraphic(null);
-                    stopBlinking();
-                    return;
-                }
-                bar.setProgress(Math.max(0.0, Math.min(1.0, value)));
-
-                // PC당 임계값 초과 시 깜빡거림 및 색상 변경
-                double pcLoad = value;
-                if (pcLoad > 1.0) {  // 임계값 초과 (300M 기준)
-                    bar.setStyle("-fx-accent: #ff0000;");  // 빨간색
-                    startBlinking();
-                } else {
-                    bar.setStyle("-fx-accent: #0f766e;");  // 기본 색상
-                    stopBlinking();
+            loadCol.setCellValueFactory(d -> new javafx.beans.property.SimpleObjectProperty<>(combinedLoadRatio(d.getValue())));
+            loadCol.setCellFactory(col -> new TableCell<>() {
+                private final ProgressBar bar = new ProgressBar(0);
+                private Timeline blinkingTimeline;
+                {
+                    bar.setPrefWidth(60);
+                    bar.getStyleClass().add("network-progress-normal");
+                    setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
                 }
 
-                setGraphic(bar);
-            }
-
-            private void startBlinking() {
-                if (blinkingTimeline == null || blinkingTimeline.getStatus() == javafx.animation.Animation.Status.STOPPED) {
-                    // 이전 타임라인 정리 (메모리 누수 방지)
-                    if (blinkingTimeline != null) {
-                        blinkingTimeline.stop();
+                @Override protected void updateItem(Double value, boolean empty) {
+                    super.updateItem(value, empty);
+                    if (empty || value == null) { setGraphic(null); stopBlinking(); return; }
+                    bar.setProgress(Math.max(0.0, Math.min(1.0, value)));
+                    if (value > 1.0) {
+                        bar.getStyleClass().removeAll("network-progress-normal", "network-progress-warning");
+                        bar.getStyleClass().add("network-progress-warning");
+                        startBlinking();
+                    } else {
+                        bar.getStyleClass().removeAll("network-progress-warning", "network-progress-normal");
+                        bar.getStyleClass().add("network-progress-normal");
+                        stopBlinking();
                     }
-
-                    blinkingTimeline = new Timeline();
-                    blinkingTimeline.setCycleCount(Timeline.INDEFINITE);
-                    blinkingTimeline.getKeyFrames().addAll(
-                        new KeyFrame(Duration.millis(0), e -> bar.setOpacity(1.0)),
-                        new KeyFrame(Duration.millis(300), e -> bar.setOpacity(1.0)),
-                        new KeyFrame(Duration.millis(600), e -> bar.setOpacity(0.3)),
-                        new KeyFrame(Duration.millis(900), e -> bar.setOpacity(0.3))
-                    );
-                    blinkingTimeline.play();
+                    setGraphic(bar);
                 }
-            }
 
-            private void stopBlinking() {
-                if (blinkingTimeline != null && blinkingTimeline.getStatus() == javafx.animation.Animation.Status.RUNNING) {
-                    blinkingTimeline.stop();
-                    blinkingTimeline = null;  // 메모리 정리
+                private void startBlinking() {
+                    if (blinkingTimeline == null || blinkingTimeline.getStatus() == javafx.animation.Animation.Status.STOPPED) {
+                        if (blinkingTimeline != null) blinkingTimeline.stop();
+                        blinkingTimeline = new Timeline();
+                        blinkingTimeline.setCycleCount(Timeline.INDEFINITE);
+                        blinkingTimeline.getKeyFrames().addAll(
+                            new KeyFrame(Duration.millis(0), e -> bar.setOpacity(1.0)),
+                            new KeyFrame(Duration.millis(300), e -> bar.setOpacity(1.0)),
+                            new KeyFrame(Duration.millis(600), e -> bar.setOpacity(0.3)),
+                            new KeyFrame(Duration.millis(900), e -> bar.setOpacity(0.3))
+                        );
+                        blinkingTimeline.play();
+                    }
                 }
-                bar.setOpacity(1.0);
-            }
-        });
 
-        table.getColumns().addAll(pcCol, ipCol, inCol, outCol, loadCol);
-        table.setStyle("-fx-font-family: 'Noto Sans CJK KR'; -fx-font-size: 14px;");
-        return table;
+                private void stopBlinking() {
+                    if (blinkingTimeline != null && blinkingTimeline.getStatus() == javafx.animation.Animation.Status.RUNNING) {
+                        blinkingTimeline.stop();
+                        blinkingTimeline = null;
+                    }
+                    bar.setOpacity(1.0);
+                }
+            });
+
+            return table;
+        } catch (Exception e) {
+            throw new IllegalStateException("PC 트래픽 테이블 FXML 로딩 실패", e);
+        }
     }
 
     public VBox getPanel() {
         return panel;
+    }
+
+    /**
+     * 리소스 정리: 실행 중인 Timeline 애니메이션을 모두 중지합니다.
+     * 패널 제거 시 반드시 호출해야 메모리 누수를 방지합니다.
+     */
+    public void shutdown() {
+        if (inboundBlinkingTimeline != null) {
+            inboundBlinkingTimeline.stop();
+            inboundBlinkingTimeline = null;
+        }
+        if (outboundBlinkingTimeline != null) {
+            outboundBlinkingTimeline.stop();
+            outboundBlinkingTimeline = null;
+        }
     }
 
     // 네트워크 트래픽 데이터 갱신
@@ -328,7 +343,7 @@ public class NetworkPanelController {
 
     private VBox createGaugeBox(String titleText, ProgressBar gauge, Label valueLabel) {
         Label title = new Label(titleText);
-        title.setStyle("-fx-font-size: 15px; -fx-font-weight: 800; -fx-text-fill: #334155;");
+        title.getStyleClass().add("network-panel-title");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox top = new HBox(8, title, spacer, valueLabel);
@@ -336,7 +351,7 @@ public class NetworkPanelController {
 
         VBox box = new VBox(4, top, gauge);
         box.setPadding(new Insets(8));
-        box.setStyle("-fx-background-color: #f8fafc; -fx-border-color: #cbd5e1; -fx-border-radius: 8; -fx-background-radius: 8;");
+        box.getStyleClass().add("network-stat-box");
         box.setPrefWidth(260);
         return box;
     }
@@ -344,13 +359,13 @@ public class NetworkPanelController {
     private ProgressBar createGaugeBar(String color) {
         ProgressBar bar = new ProgressBar(0);
         bar.setPrefWidth(240);
-        bar.setStyle("-fx-accent: " + color + ";");
+        bar.getStyleClass().add(color);
         return bar;
     }
 
     private Label createGaugeValueLabel() {
         Label label = new Label("0.00 Mbps");
-        label.setStyle("-fx-font-size: 15px; -fx-text-fill: #0f172a; -fx-font-weight: 700;");
+        label.getStyleClass().add("network-value-label");
         return label;
     }
 
@@ -401,7 +416,7 @@ public class NetworkPanelController {
     }
 
     private void startGaugeBlinking(ProgressBar gauge) {
-        gauge.setStyle(gauge.getStyle() + "; -fx-border-color: #ff0000; -fx-border-width: 2;");
+        gauge.getStyleClass().add("gauge-alert");
     }
 
     private void stopGaugeBlinking(ProgressBar gauge, Timeline timeline) {
@@ -410,11 +425,7 @@ public class NetworkPanelController {
         }
         // 빨간 테두리 제거 및 기본 상태로 복원
         gauge.setOpacity(1.0);
-        String style = gauge.getStyle();
-        if (style.contains("-fx-border-color")) {
-            style = style.replaceAll("; -fx-border-color: #ff0000; -fx-border-width: 2;", "");
-            gauge.setStyle(style);
-        }
+        gauge.getStyleClass().remove("gauge-alert");
     }
 
     private double combinedLoadRatio(Map<String, Object> row) {

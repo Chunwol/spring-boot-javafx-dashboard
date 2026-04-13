@@ -1,16 +1,19 @@
 package com.example.backend.service.dashboard;
 
-import com.example.backend.dto.dashboard.DashboardRefreshDto;
-import com.example.backend.dto.dashboard.ClassroomSummaryDto;
-import com.example.backend.dto.dashboard.NetworkTrafficDto;
+import com.example.dto.dashboard.DashboardRefreshDto;
+import com.example.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.NetworkTrafficDto;
 import com.example.backend.model.dashboard.DashboardWidgetItem;
+import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.backend.repository.traffic.TrafficLogsRepository;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,13 +29,16 @@ public class DashboardService {
 
     private final DashboardWidgetItemRepository dashboardWidgetItemRepository;
     private final ClassroomService classroomService;
+    private final TrafficLogsRepository trafficLogsRepository;
     private final ObjectMapper objectMapper;
 
     public DashboardService(DashboardWidgetItemRepository dashboardWidgetItemRepository,
                            ClassroomService classroomService,
+                           TrafficLogsRepository trafficLogsRepository,
                            ObjectMapper objectMapper) {
         this.dashboardWidgetItemRepository = dashboardWidgetItemRepository;
         this.classroomService = classroomService;
+        this.trafficLogsRepository = trafficLogsRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -44,11 +50,26 @@ public class DashboardService {
     }
 
     /**
-     * Get network traffic data (placeholder for future integration)
+     * Get network traffic data from recent traffic logs (최근 1분간 전체 평균)
      */
     public NetworkTrafficDto getNetworkTraffic() {
-        // Currently returns default values; will be updated with actual traffic pipeline integration
-        return new NetworkTrafficDto(0.0, 0.0);
+        try {
+            LocalDateTime since = LocalDateTime.now().minusMinutes(1);
+            List<TrafficLog> recentLogs = trafficLogsRepository.findByTimestampBetween(since, LocalDateTime.now());
+            if (recentLogs.isEmpty()) {
+                return new NetworkTrafficDto(0.0, 0.0);
+            }
+            double avgInbound = recentLogs.stream()
+                    .mapToLong(TrafficLog::getInboundKbps).average().orElse(0.0) / 1000.0; // Kbps -> Mbps
+            double avgOutbound = recentLogs.stream()
+                    .mapToLong(TrafficLog::getOutboundKbps).average().orElse(0.0) / 1000.0;
+            return new NetworkTrafficDto(
+                    Math.round(avgInbound * 100.0) / 100.0,
+                    Math.round(avgOutbound * 100.0) / 100.0);
+        } catch (Exception e) {
+            logger.warn("트래픽 데이터 조회 실패: {}", e.getMessage());
+            return new NetworkTrafficDto(0.0, 0.0);
+        }
     }
 
     /**

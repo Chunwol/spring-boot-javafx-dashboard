@@ -4,14 +4,11 @@ import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardPanelDto;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.DashboardService;
-import javafx.geometry.Insets;
+import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
@@ -126,7 +123,10 @@ public class DashboardNetworkPanelModule {
                 if (node != null) {
                     classroomContainer.getChildren().remove(node);
                 }
-                controllerMap.remove(id);
+                NetworkPanelController ctrl = controllerMap.remove(id);
+                if (ctrl != null) {
+                    ctrl.shutdown();
+                }
                 panelGroupMap.remove(id);
                 deleteBtnMap.remove(id);
                 resizeHandleMap.remove(id);
@@ -136,7 +136,7 @@ public class DashboardNetworkPanelModule {
 
     private void addPanel(DashboardPanelDto panelDto, List<ClassroomSummaryDto> classrooms) {
         ClassroomSummaryDto linked = classrooms.stream()
-                .filter(c -> c.getGroupId().equals(panelDto.getRefGroupId()))
+                .filter(c -> java.util.Objects.equals(c.getGroupId(), panelDto.getRefGroupId()))
                 .findFirst()
                 .orElse(null);
 
@@ -152,15 +152,24 @@ public class DashboardNetworkPanelModule {
 
     private VBox buildWrapper(DashboardPanelDto panelDto, ClassroomSummaryDto linked,
                               NetworkPanelController controller) {
-        Label title = new Label(linked != null ? linked.getGroupName() + " 네트워크" : "네트워크 패널");
-        title.setStyle("-fx-font-weight: 700; -fx-text-fill: #0f172a;");
+        VBox wrapper;
+        Label title;
+        Button deleteBtn;
+        StackPane contentSlot;
+        StackPane resizeHandleHolder;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/network-wrapper-panel.fxml"));
+            wrapper           = loader.load();
+            title             = (Label)     loader.getNamespace().get("titleLabel");
+            deleteBtn         = (Button)    loader.getNamespace().get("deleteBtn");
+            contentSlot       = (StackPane) loader.getNamespace().get("contentSlot");
+            resizeHandleHolder = (StackPane) loader.getNamespace().get("resizeHandleHolder");
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to load network-wrapper-panel.fxml", e);
+        }
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+        title.setText(linked != null ? linked.getGroupName() + " 네트워크" : "네트워크 패널");
 
-        Button deleteBtn = new Button("삭제");
-        deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; "
-                + "-fx-font-size: 11px; -fx-background-radius: 6;");
         deleteBtn.setVisible(canInteract.getAsBoolean());
         deleteBtn.setManaged(canInteract.getAsBoolean());
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
@@ -171,20 +180,18 @@ public class DashboardNetworkPanelModule {
             }
         });
 
-        HBox header = new HBox(8, title, spacer, deleteBtn);
-        header.setAlignment(Pos.CENTER_LEFT);
+        contentSlot.getChildren().setAll(controller.getPanel());
 
-        VBox wrapper = new VBox(8, header, controller.getPanel());
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
-        wrapper.setPadding(new Insets(12));
-        wrapper.setStyle("-fx-background-color: white; -fx-background-radius: 10; "
-                + "-fx-border-color: #cbd5e1; -fx-border-radius: 10;");
         wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 80);
         wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 80);
 
         double[] defaultSize = responsiveSizeFn.apply("NETWORK");
         wrapper.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : defaultSize[0]);
         wrapper.setPrefHeight(panelDto.getHeight() != null ? panelDto.getHeight() : defaultSize[1]);
+
+        // Store resizeHandleHolder for attachInteraction
+        wrapper.getProperties().put("resizeHandleHolder", resizeHandleHolder);
         return wrapper;
     }
 
@@ -214,24 +221,23 @@ public class DashboardNetworkPanelModule {
                 panel,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
-                () -> persistPosition(panel, panelId, "Panel position saved")
+                () -> persistPosition(panel, panelId, "패널 위치 저장됨")
         );
 
+        StackPane handleHolder = (StackPane) panel.getProperties().get("resizeHandleHolder");
         Label handle = new Label("◢");
-        handle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        handle.getStyleClass().add("drag-handle");
         handle.setVisible(canInteract.getAsBoolean());
         handle.setManaged(canInteract.getAsBoolean());
         resizeHandleMap.put(panelId, handle);
-        StackPane handleHolder = new StackPane(handle);
-        handleHolder.setPickOnBounds(false);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
-        panel.getChildren().add(handleHolder);
+        handleHolder.getChildren().setAll(handle);
 
         interactionService.attachResizeHandlers(
                 panel, handle, 320, 220,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
-                () -> persistPosition(panel, panelId, "Panel size saved")
+                () -> persistPosition(panel, panelId, "패널 크기 저장됨")
         );
     }
 

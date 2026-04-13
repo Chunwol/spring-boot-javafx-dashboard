@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
-import javafx.geometry.Point2D;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.prefs.Preferences;
@@ -111,25 +110,12 @@ public class DashboardViewModel {
         isEditMode.set(!isEditMode.get());
     }
 
-    public void toggleDashboardOnlyMode() {
-        dashboardOnlyMode.set(!dashboardOnlyMode.get());
-        savePreferences();
-    }
-
-    public void toggleFocusMode() {
-        focusMode.set(!focusMode.get());
-    }
-
     // Snap utilities
     public double snapValue(double value) {
         if (!snapToGrid.get()) {
             return value;
         }
         return Math.round(value / GRID_SIZE) * GRID_SIZE;
-    }
-
-    public Point2D snapPoint(double x, double y) {
-        return new Point2D(snapValue(x), snapValue(y));
     }
 
     // Property accessors

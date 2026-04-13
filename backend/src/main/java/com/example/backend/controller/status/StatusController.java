@@ -1,6 +1,6 @@
 package com.example.backend.controller.status;
 
-import com.example.backend.dto.dashboard.PcStatusDto;
+import com.example.dto.dashboard.PcStatusDto;
 import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;

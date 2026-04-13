@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Spinner?>
+<?import javafx.scene.layout.GridPane?>
+
+<GridPane xmlns:fx="http://javafx.com/fxml" hgap="12" vgap="8" styleClass="dialog-content">
+    <padding>
+        <Insets top="12" right="12" bottom="12" left="12" />
+    </padding>
+    <children>
+        <Label text="셀 최소 크기 (px):" GridPane.columnIndex="0" GridPane.rowIndex="0" />
+        <Spinner fx:id="minSpinner" prefWidth="85" GridPane.columnIndex="1" GridPane.rowIndex="0" />
+
+        <Label text="셀 최대 크기 (px):" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+        <Spinner fx:id="maxSpinner" prefWidth="85" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+
+        <Label text="최대 열 수:" GridPane.columnIndex="0" GridPane.rowIndex="2" />
+        <Spinner fx:id="colsSpinner" prefWidth="85" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+    </children>
+</GridPane>

@@ -50,10 +50,10 @@ public class HeartbeatSender {
             configLoader.getConfigPath().getParent(), mapper);
         this.commandExecutor = new CommandExecutor(config, configLoader, httpClient, mapper, pendingResultStore);
 
-        // CRITICAL FIX#2: Use bounded thread pool instead of creating new threads on demand
-        this.commandExecutorService = Executors.newSingleThreadExecutor(r -> {
+        // 파일 전송은 별도 스레드에서 처리 (일반 명령이 블로킹되지 않도록)
+        this.commandExecutorService = Executors.newFixedThreadPool(3, r -> {
             Thread t = new Thread(r, "agent-command-executor");
-            t.setDaemon(false);  // Allow graceful shutdown
+            t.setDaemon(false);
             return t;
         });
     }
@@ -69,12 +69,9 @@ public class HeartbeatSender {
                     .get()
                     .build();
             try (Response resp = httpClient.newCall(req).execute()) {
-                // 보안 정책으로 /actuator/health가 401/403일 수 있어도
-                // HTTP 응답 자체가 오면 서버 도달은 가능한 상태로 본다.
-                if (resp.code() >= 200 && resp.code() < 300) {
-                    return true;
-                }
-                log.info("서버 health endpoint 응답 코드: {} (도달 성공으로 처리)", resp.code());
+                // HTTP 응답 자체가 오면 서버 도달 가능한 상태로 본다.
+                // (보안 정책으로 /actuator/health가 401/403일 수 있음)
+                log.debug("서버 health endpoint 응답 코드: {}", resp.code());
                 return true;
             }
         } catch (Exception e) {
@@ -107,7 +104,12 @@ public class HeartbeatSender {
             try (Response resp = httpClient.newCall(req).execute()) {
                 if (resp.code() == 201 && resp.body() != null) {
                     JsonNode node = mapper.readTree(resp.body().string());
-                    String token = node.get("agentToken").asText();
+                    JsonNode tokenNode = node.get("agentToken");
+                    if (tokenNode == null || tokenNode.isNull()) {
+                        log.error("에이전트 등록 응답에 agentToken 필드 없음");
+                        return false;
+                    }
+                    String token = tokenNode.asText();
                     configLoader.saveToken(config, token);
                     // MEDIUM FIX#9: Mask token in logs
                     log.info("에이전트 등록 완료. 토큰 저장됨. (토큰: {})", SensitiveDataMasker.maskToken(token));

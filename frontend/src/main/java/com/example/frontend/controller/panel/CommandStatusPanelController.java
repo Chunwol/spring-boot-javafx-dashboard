@@ -7,16 +7,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.scene.input.MouseButton;
+import javafx.stage.FileChooser;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -39,11 +39,22 @@ public class CommandStatusPanelController {
 
     private VBox rootPanel;
     private TableView<Map<String, Object>> commandTable;
+    @FXML
     private Label summaryLabel;
+    @FXML
     private Label lastUpdatedLabel;
+    @FXML
     private TextField searchField;
+    @FXML
     private ComboBox<String> statusFilterCombo;
+    @FXML
     private ComboBox<String> sortCombo;
+    @FXML
+    private Button refreshButton;
+    @FXML
+    private Button clearButton;
+    @FXML
+    private StackPane commandTableSlot;
     private List<Map<String, Object>> latestCommands = List.of();
     private ScheduledExecutorService scheduler;
 
@@ -53,44 +64,68 @@ public class CommandStatusPanelController {
     /** 패널 VBox 반환 */
     public VBox getPanel() {
         if (rootPanel == null) {
-            rootPanel = buildPanel();
+            try {
+                FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/command-status-panel.fxml"));
+                loader.setController(this);
+                rootPanel = loader.load();
+                initializePanel();
+            } catch (Exception e) {
+                throw new IllegalStateException("명령 상태 패널 FXML 로딩 실패", e);
+            }
         }
         return rootPanel;
     }
 
-    private VBox buildPanel() {
-        VBox panel = new VBox(8);
-        panel.setPadding(new Insets(12));
-        panel.setStyle("-fx-background-color: #f8fbff; -fx-background-radius: 8; -fx-border-color: #cbd5e0; -fx-border-radius: 8;");
-        panel.setPrefSize(1100, 360);
+    private void initializePanel() {
+        if (refreshButton != null) {
+            refreshButton.getStyleClass().add("btn-sm");
+            refreshButton.setOnAction(e -> refresh());
+        }
 
-        Label title = new Label("명령 상태");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        title.setTextFill(Color.web("#0f172a"));
+        if (searchField != null) {
+            searchField.setPromptText("검색: 강의실, PC명, IP, MAC, 명령 종류");
+            searchField.textProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        }
 
-        Button refreshBtn = new Button("새로고침");
-        refreshBtn.setStyle("-fx-background-color: #edf2f7; -fx-text-fill: #2d3748; -fx-font-weight: 700;");
-        refreshBtn.setOnAction(e -> refresh());
+        if (statusFilterCombo != null) {
+            statusFilterCombo.setItems(FXCollections.observableArrayList(
+                    "전체",
+                    "진행중",
+                    "완료",
+                    "실패",
+                    "검증중",
+                    "시점저장필요"
+            ));
+            statusFilterCombo.setValue("전체");
+            statusFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        }
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox header = new HBox(6, title, spacer, refreshBtn);
-        header.setAlignment(Pos.CENTER_LEFT);
+        if (sortCombo != null) {
+            sortCombo.setItems(FXCollections.observableArrayList(
+                    "최신순",
+                    "오래된순",
+                    "강의실순",
+                    "PC명순",
+                    "상태순",
+                    "명령종류순"
+            ));
+            sortCombo.setValue("최신순");
+            sortCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        }
 
-        summaryLabel = new Label("조회 중...");
-        summaryLabel.setFont(Font.font("Segoe UI", 11));
-        summaryLabel.setTextFill(Color.web("#334155"));
-
-        lastUpdatedLabel = new Label("마지막 갱신: -");
-        lastUpdatedLabel.setFont(Font.font("Segoe UI", 11));
-        lastUpdatedLabel.setTextFill(Color.web("#64748b"));
-
-        HBox controlBar = buildControlBar();
+        if (clearButton != null) {
+            clearButton.getStyleClass().add("btn-sm");
+            clearButton.setOnAction(e -> {
+                if (searchField != null) searchField.clear();
+                if (statusFilterCombo != null) statusFilterCombo.setValue("전체");
+                if (sortCombo != null) sortCombo.setValue("최신순");
+            });
+        }
 
         commandTable = createCommandTable();
-        VBox.setVgrow(commandTable, Priority.ALWAYS);
-
-        panel.getChildren().addAll(header, summaryLabel, lastUpdatedLabel, controlBar, new Separator(), commandTable);
+        if (commandTableSlot != null) {
+            commandTableSlot.getChildren().setAll(commandTable);
+        }
 
         // 자동 폴링 (10초)
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -101,60 +136,9 @@ public class CommandStatusPanelController {
         scheduler.scheduleAtFixedRate(this::refresh, 0, 10, TimeUnit.SECONDS);
 
         // 패널이 scene에서 제거될 때 scheduler 자동 종료
-        panel.sceneProperty().addListener((obs, oldScene, newScene) -> {
+        rootPanel.sceneProperty().addListener((obs, oldScene, newScene) -> {
             if (newScene == null) shutdown();
         });
-
-        rootPanel = panel;
-        return panel;
-    }
-
-    private HBox buildControlBar() {
-        searchField = new TextField();
-        searchField.setPromptText("검색: 강의실, PC명, IP, MAC, 명령 종류");
-        searchField.setPrefWidth(320);
-        searchField.textProperty().addListener((obs, oldValue, newValue) -> applyTableView());
-
-        statusFilterCombo = new ComboBox<>(FXCollections.observableArrayList(
-                "전체",
-                "진행중",
-                "완료",
-                "실패",
-                "검증중",
-                "시점저장필요"
-        ));
-        statusFilterCombo.setValue("전체");
-        statusFilterCombo.setPrefWidth(130);
-        statusFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
-
-        sortCombo = new ComboBox<>(FXCollections.observableArrayList(
-                "최신순",
-                "오래된순",
-                "강의실순",
-                "PC명순",
-                "상태순",
-                "명령종류순"
-        ));
-        sortCombo.setValue("최신순");
-        sortCombo.setPrefWidth(140);
-        sortCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
-
-        Button clearButton = new Button("초기화");
-        clearButton.setStyle("-fx-background-color: #edf2f7; -fx-text-fill: #1f2937; -fx-font-weight: 700;");
-        clearButton.setOnAction(e -> {
-            searchField.clear();
-            statusFilterCombo.setValue("전체");
-            sortCombo.setValue("최신순");
-        });
-
-        Label filterLabel = new Label("필터");
-        filterLabel.setTextFill(Color.web("#475569"));
-        Label sortLabel = new Label("정렬");
-        sortLabel.setTextFill(Color.web("#475569"));
-
-        HBox bar = new HBox(8, searchField, filterLabel, statusFilterCombo, sortLabel, sortCombo, clearButton);
-        bar.setAlignment(Pos.CENTER_LEFT);
-        return bar;
     }
 
     /** 서버에서 최근 명령 목록을 가져와 UI를 갱신한다. */
@@ -173,111 +157,82 @@ public class CommandStatusPanelController {
 
     @SuppressWarnings("unchecked")
     private TableView<Map<String, Object>> createCommandTable() {
-        TableView<Map<String, Object>> table = new TableView<>();
-        table.setPlaceholder(new Label("명령 로그가 없습니다."));
-        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/command-table.fxml"));
+            TableView<Map<String, Object>> table = loader.load();
+            var ns = loader.getNamespace();
 
-        TableColumn<Map<String, Object>, String> timeCol = new TableColumn<>("시간");
-        timeCol.setPrefWidth(160);
-        timeCol.setCellValueFactory(data -> new SimpleStringProperty(extractTime(data.getValue())));
+            TableColumn<Map<String, Object>, String> timeCol = (TableColumn<Map<String, Object>, String>) ns.get("timeCol");
+            TableColumn<Map<String, Object>, String> roomCol = (TableColumn<Map<String, Object>, String>) ns.get("roomCol");
+            TableColumn<Map<String, Object>, String> pcNameCol = (TableColumn<Map<String, Object>, String>) ns.get("pcNameCol");
+            TableColumn<Map<String, Object>, String> ipCol = (TableColumn<Map<String, Object>, String>) ns.get("ipCol");
+            TableColumn<Map<String, Object>, String> macCol = (TableColumn<Map<String, Object>, String>) ns.get("macCol");
+            TableColumn<Map<String, Object>, String> typeCol = (TableColumn<Map<String, Object>, String>) ns.get("typeCol");
+            TableColumn<Map<String, Object>, String> transferCol = (TableColumn<Map<String, Object>, String>) ns.get("transferCol");
+            TableColumn<Map<String, Object>, String> destinationCol = (TableColumn<Map<String, Object>, String>) ns.get("destinationCol");
+            TableColumn<Map<String, Object>, String> modeCol = (TableColumn<Map<String, Object>, String>) ns.get("modeCol");
+            TableColumn<Map<String, Object>, String> statusCol = (TableColumn<Map<String, Object>, String>) ns.get("statusCol");
+            TableColumn<Map<String, Object>, String> exitCol = (TableColumn<Map<String, Object>, String>) ns.get("exitCol");
+            TableColumn<Map<String, Object>, Void> detailCol = (TableColumn<Map<String, Object>, Void>) ns.get("detailCol");
 
-        TableColumn<Map<String, Object>, String> roomCol = new TableColumn<>("강의실");
-        roomCol.setPrefWidth(140);
-        roomCol.setCellValueFactory(data -> new SimpleStringProperty(extractGroupName(data.getValue())));
+            timeCol.setCellValueFactory(data -> new SimpleStringProperty(extractTime(data.getValue())));
+            roomCol.setCellValueFactory(data -> new SimpleStringProperty(extractGroupName(data.getValue())));
+            pcNameCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "pcName")));
+            ipCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "ipAddress")));
+            macCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "macAddress")));
+            typeCol.setCellValueFactory(data -> new SimpleStringProperty(extractCommandDisplayType(data.getValue())));
+            transferCol.setCellValueFactory(data -> new SimpleStringProperty(extractTransferDisplay(data.getValue())));
+            destinationCol.setCellValueFactory(data -> new SimpleStringProperty(extractDestinationDisplay(data.getValue())));
+            modeCol.setCellValueFactory(data -> new SimpleStringProperty(extractRunMode(data.getValue())));
+            exitCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "exitCode")));
 
-        TableColumn<Map<String, Object>, String> pcNameCol = new TableColumn<>("PC명");
-        pcNameCol.setPrefWidth(170);
-        pcNameCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "pcName")));
-
-        TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP");
-        ipCol.setPrefWidth(140);
-        ipCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "ipAddress")));
-
-        TableColumn<Map<String, Object>, String> macCol = new TableColumn<>("MAC");
-        macCol.setPrefWidth(170);
-        macCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "macAddress")));
-
-        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("종류");
-        typeCol.setPrefWidth(90);
-        typeCol.setCellValueFactory(data -> new SimpleStringProperty(extractCommandDisplayType(data.getValue())));
-
-        TableColumn<Map<String, Object>, String> transferCol = new TableColumn<>("전송대상");
-        transferCol.setPrefWidth(180);
-        transferCol.setCellValueFactory(data -> new SimpleStringProperty(extractTransferDisplay(data.getValue())));
-
-        TableColumn<Map<String, Object>, String> destinationCol = new TableColumn<>("대상경로");
-        destinationCol.setPrefWidth(190);
-        destinationCol.setCellValueFactory(data -> new SimpleStringProperty(extractDestinationDisplay(data.getValue())));
-
-        TableColumn<Map<String, Object>, String> modeCol = new TableColumn<>("실행옵션");
-        modeCol.setPrefWidth(220);
-        modeCol.setCellValueFactory(data -> new SimpleStringProperty(extractRunMode(data.getValue())));
-
-        // 상태 컬럼 - SCMATE 상태 포함
-        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("상태");
-        statusCol.setPrefWidth(130);
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(extractDetailedStatus(data.getValue())));
-        statusCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                } else {
-                    setText(item);
-                    // 상태별 색상 표시
-                    if (item.contains("시점저장")) {
-                        setStyle("-fx-text-fill: #d97706; -fx-font-weight: 700;"); // 주황색 - 주의
-                    } else if (item.contains("COMPLETED")) {
-                        setStyle("-fx-text-fill: #10b981; -fx-font-weight: 600;"); // 초록색 - 완료
-                    } else if (item.contains("DELIVERED")) {
-                        setStyle("-fx-text-fill: #3b82f6; -fx-font-weight: 600;"); // 파란색 - 전송
-                    } else if (item.contains("ACKED")) {
-                        setStyle("-fx-text-fill: #8b5cf6; -fx-font-weight: 600;"); // 보라색 - 실행중
-                    } else if (item.contains("FAILED")) {
-                        setStyle("-fx-text-fill: #ef4444; -fx-font-weight: 600;"); // 빨강색 - 실패
+            statusCol.setCellValueFactory(data -> new SimpleStringProperty(extractDetailedStatus(data.getValue())));
+            statusCol.setCellFactory(col -> new TableCell<>() {
+                @Override protected void updateItem(String item, boolean empty) {
+                    super.updateItem(item, empty);
+                    if (empty || item == null) {
+                        setText(null);
+                        getStyleClass().removeAll("status-warning", "status-completed", "status-delivered", "status-acked", "status-failed");
+                    } else {
+                        setText(item);
+                        getStyleClass().removeAll("status-warning", "status-completed", "status-delivered", "status-acked", "status-failed");
+                        if (item.contains("시점저장")) getStyleClass().add("status-warning");
+                        else if (item.contains("COMPLETED")) getStyleClass().add("status-completed");
+                        else if (item.contains("DELIVERED")) getStyleClass().add("status-delivered");
+                        else if (item.contains("ACKED")) getStyleClass().add("status-acked");
+                        else if (item.contains("FAILED")) getStyleClass().add("status-failed");
                     }
-                }
-            }
-        });
-
-        TableColumn<Map<String, Object>, String> exitCol = new TableColumn<>("종료코드");
-        exitCol.setPrefWidth(80);
-        exitCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "exitCode")));
-
-        TableColumn<Map<String, Object>, Void> detailCol = new TableColumn<>("결과");
-        detailCol.setPrefWidth(100);
-        detailCol.setCellFactory(col -> new TableCell<>() {
-            private final Button button = new Button("보기");
-            {
-                button.setStyle("-fx-background-color: #edf2f7; -fx-text-fill: #1f2937; -fx-font-weight: 700;");
-                button.setOnAction(e -> {
-                    Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
-                    if (row != null) {
-                        showCommandDetail(row);
-                    }
-                });
-            }
-
-            @Override
-            protected void updateItem(Void item, boolean empty) {
-                super.updateItem(item, empty);
-                setGraphic(empty || getTableRow() == null || getTableRow().getItem() == null ? null : button);
-            }
-        });
-
-        table.getColumns().addAll(timeCol, roomCol, pcNameCol, ipCol, macCol, typeCol, transferCol, destinationCol, modeCol, statusCol, exitCol, detailCol);
-        table.setRowFactory(tv -> {
-            TableRow<Map<String, Object>> row = new TableRow<>();
-            row.setOnMouseClicked(event -> {
-                if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
-                    showCommandDetail(row.getItem());
                 }
             });
-            return row;
-        });
-        return table;
+
+            detailCol.setCellFactory(col -> new TableCell<>() {
+                private final Button button = new Button("보기");
+                {
+                    button.getStyleClass().addAll("btn-neutral", "btn-sm");
+                    button.setOnAction(e -> {
+                        Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
+                        if (row != null) showCommandDetail(row);
+                    });
+                }
+                @Override protected void updateItem(Void item, boolean empty) {
+                    super.updateItem(item, empty);
+                    setGraphic(empty || getTableRow() == null || getTableRow().getItem() == null ? null : button);
+                }
+            });
+
+            table.setRowFactory(tv -> {
+                TableRow<Map<String, Object>> row = new TableRow<>();
+                row.setOnMouseClicked(event -> {
+                    if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
+                        showCommandDetail(row.getItem());
+                    }
+                });
+                return row;
+            });
+            return table;
+        } catch (Exception e) {
+            throw new IllegalStateException("명령 테이블 FXML 로딩 실패", e);
+        }
     }
 
     private void updateUI(List<Map<String, Object>> commands) {
@@ -531,6 +486,9 @@ public class CommandStatusPanelController {
 
     private String extractCommandDisplayType(Map<String, Object> row) {
         String type = asText(row, "commandType", "type");
+        if ("COLLECT_FILES".equalsIgnoreCase(type)) {
+            return "FILE_RX";
+        }
         if (!"RUN_PS1".equalsIgnoreCase(type)) {
             return type;
         }
@@ -581,53 +539,125 @@ public class CommandStatusPanelController {
         dialog.setHeaderText(asText(row, "commandType", "type") + " - " + asText(row, "pcName", "macAddress"));
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
 
-        VBox content = new VBox(10);
-        content.setPadding(new Insets(12));
-        content.setPrefWidth(760);
-        content.setPrefHeight(560);
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/command-detail-dialog-content.fxml"));
+            Node content = loader.load();
+            var ns = loader.getNamespace();
 
-        content.getChildren().addAll(
-            buildMetaRow("상태", extractDetailedStatus(row)),
-            buildMetaRow("실행방식", extractRunMode(row)),
-            buildMetaRow("전송대상", extractTransferDisplay(row)),
-            buildMetaRow("대상경로", extractDestinationDisplay(row)),
-            buildMetaRow("종료코드", asText(row, "exitCode")),
-            buildMetaRow("검증상태", verificationLabel(row)),
-            buildMetaRow("강의실", extractGroupName(row)),
-            buildMetaRow("PC", asText(row, "pcName")),
-            buildMetaRow("IP", asText(row, "ipAddress")),
-            buildMetaRow("스크립트", asText(row, "scriptUrl")),
-            buildMetaRow("Payload", prettyPayload(asText(row, "payloadJson")))
-        );
+            setLabelText(ns, "statusValue", extractDetailedStatus(row));
+            setLabelText(ns, "runModeValue", extractRunMode(row));
+            setLabelText(ns, "transferTargetValue", extractTransferDisplay(row));
+            setLabelText(ns, "destinationValue", extractDestinationDisplay(row));
+            setLabelText(ns, "exitCodeValue", asText(row, "exitCode"));
+            setLabelText(ns, "verificationValue", verificationLabel(row));
+            setLabelText(ns, "groupNameValue", extractGroupName(row));
+            setLabelText(ns, "pcNameValue", asText(row, "pcName"));
+            setLabelText(ns, "ipAddressValue", asText(row, "ipAddress"));
+            String detailUrl = resolveDetailUrl(row);
+            setLabelText(ns, "scriptUrlValue", detailUrl);
+            setLabelText(ns, "payloadValue", prettyPayload(asText(row, "payloadJson")));
 
-        content.getChildren().add(buildTextSection("stdout", asText(row, "stdout")));
-        content.getChildren().add(buildTextSection("stderr", asText(row, "stderr")));
+            setAreaText(ns, "stdoutArea", asText(row, "stdout"));
+            setAreaText(ns, "stderrArea", asText(row, "stderr"));
 
-        dialog.getDialogPane().setContent(content);
+            Object dlNode = ns.get("downloadButton");
+            if (dlNode instanceof Button downloadButton) {
+                boolean enabled = detailUrl != null && !detailUrl.isBlank() && !"-".equals(detailUrl);
+                downloadButton.setDisable(!enabled);
+                downloadButton.setOnAction(e -> handleDownloadFromDetail(detailUrl, suggestDownloadFilename(row)));
+            }
+
+            dialog.getDialogPane().setContent(content);
+        } catch (Exception e) {
+            e.printStackTrace();
+            dialog.getDialogPane().setContent(new Label("다이얼로그 로드 실패: " + e.getMessage()));
+        }
         dialog.showAndWait();
     }
 
-    private Node buildMetaRow(String label, String value) {
-        VBox box = new VBox(4);
-        Label title = new Label(label);
-        title.setStyle("-fx-font-size: 11; -fx-font-weight: 700; -fx-text-fill: #475569;");
-        Label body = new Label((value == null || value.isBlank()) ? "-" : value);
-        body.setWrapText(true);
-        body.setStyle("-fx-font-size: 12; -fx-text-fill: #0f172a;");
-        box.getChildren().addAll(title, body);
-        return box;
+    private String resolveDetailUrl(Map<String, Object> row) {
+        String direct = asText(row, "scriptUrl");
+        if (!direct.isBlank()) {
+            return direct;
+        }
+        String stdout = asText(row, "stdout");
+        if (stdout == null || stdout.isBlank()) {
+            return "-";
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(/api/v1/agent/uploads/\\d+/download)")
+                .matcher(stdout);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "-";
     }
 
-    private Node buildTextSection(String title, String value) {
-        VBox box = new VBox(4);
-        Label label = new Label(title);
-        label.setStyle("-fx-font-size: 11; -fx-font-weight: 700; -fx-text-fill: #475569;");
-        TextArea area = new TextArea(value == null || value.isBlank() ? "-" : value);
-        area.setEditable(false);
-        area.setWrapText(true);
-        area.setPrefRowCount(6);
-        box.getChildren().addAll(label, area);
-        return box;
+    private String suggestDownloadFilename(Map<String, Object> row) {
+        try {
+            JsonNode payload = parsePayload(row);
+            if (payload != null && payload.has("outputName")) {
+                String n = payload.get("outputName").asText("").trim();
+                if (!n.isBlank()) {
+                    return n.toLowerCase(Locale.ROOT).endsWith(".zip") ? n : n + ".zip";
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        String taskId = asText(row, "taskId");
+        return (taskId == null || taskId.isBlank()) ? "collected.zip" : "collected-" + taskId + ".zip";
+    }
+
+    private void handleDownloadFromDetail(String downloadUrl, String suggestedName) {
+        if (downloadUrl == null || downloadUrl.isBlank() || "-".equals(downloadUrl)) {
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("수집 파일 저장");
+        chooser.setInitialFileName(suggestedName == null || suggestedName.isBlank() ? "collected.zip" : suggestedName);
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("ZIP 파일", "*.zip"));
+        File target = chooser.showSaveDialog(null);
+        if (target == null) {
+            return;
+        }
+
+        Thread t = new Thread(() -> {
+            try {
+                byte[] data = apiClient.getBytes(downloadUrl).join();
+                Files.write(target.toPath(), data);
+                Platform.runLater(() -> {
+                    Alert ok = new Alert(Alert.AlertType.INFORMATION);
+                    ok.setTitle("다운로드 완료");
+                    ok.setHeaderText(null);
+                    ok.setContentText("저장 완료: " + target.getAbsolutePath());
+                    ok.showAndWait();
+                });
+            } catch (Exception ex) {
+                Platform.runLater(() -> {
+                    Alert err = new Alert(Alert.AlertType.ERROR);
+                    err.setTitle("다운로드 실패");
+                    err.setHeaderText(null);
+                    err.setContentText(ex.getMessage());
+                    err.showAndWait();
+                });
+            }
+        }, "cmd-detail-download");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void setLabelText(Map<String, Object> ns, String fxId, String value) {
+        Object node = ns.get(fxId);
+        if (node instanceof Label label) {
+            label.setText((value == null || value.isBlank()) ? "-" : value);
+        }
+    }
+
+    private void setAreaText(Map<String, Object> ns, String fxId, String value) {
+        Object node = ns.get(fxId);
+        if (node instanceof TextArea area) {
+            area.setText((value == null || value.isBlank()) ? "-" : value);
+        }
     }
 
     private String prettyPayload(String payloadJson) {

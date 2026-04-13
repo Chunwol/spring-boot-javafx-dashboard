@@ -1,9 +1,9 @@
 package com.example.frontend.service;
 
-import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.dto.dashboard.DashboardInfoDto;
 import com.example.dto.dashboard.DashboardPanelDto;
 import com.fasterxml.jackson.core.type.TypeReference;
+import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,16 +23,6 @@ public class DashboardService {
             "classroomMbps", 1000.0,
             "pcMbps", 300.0
     );
-
-    public void fetchClassroomsAsync(Consumer<List<ClassroomSummaryDto>> callback) {
-        apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
-                .thenAccept(callback)
-                .exceptionally(ex -> {
-                    log.warn("Failed to fetch classrooms", ex);
-                    callback.accept(List.of());
-                    return null;
-                });
-    }
 
     public void fetchNetworkTrafficAsync(BiConsumer<Double, Double> callback) {
         apiClient.get("/dashboard/traffic")
@@ -185,10 +175,10 @@ public class DashboardService {
 
     public void deletePanelAsync(Long dashboardId, Long panelId, Runnable onDone) {
         apiClient.delete("/dashboards/" + dashboardId + "/panels/" + panelId)
-                .thenRun(onDone)
+                .thenRun(() -> Platform.runLater(onDone))
                 .exceptionally(ex -> {
                     log.warn("Failed to delete panel {}", panelId, ex);
-                    onDone.run();
+                    Platform.runLater(onDone);
                     return null;
                 });
     }

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="12.0" prefWidth="600.0" prefHeight="500.0" styleClass="dialog-content"
+      xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <padding>
+        <Insets top="15.0" right="15.0" bottom="15.0" left="15.0" />
+    </padding>
+    <children>
+        <VBox fx:id="summaryBox" spacing="4.0" />
+        <VBox fx:id="optionsBox" spacing="8.0" />
+        <Label fx:id="listTitleLabel" text="대상 PC 목록" />
+        <VBox fx:id="tableHolder">
+            <children>
+                <TableView fx:id="confirmTable" prefHeight="300.0">
+                    <columns>
+                        <TableColumn fx:id="confirmRoomCol" text="강의실" />
+                        <TableColumn fx:id="confirmIpCol" text="IP" />
+                        <TableColumn fx:id="confirmHostCol" text="호스트명" />
+                        <TableColumn fx:id="confirmStatusCol" text="전송 여부" />
+                    </columns>
+                    <columnResizePolicy>
+                        <TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" />
+                    </columnResizePolicy>
+                </TableView>
+            </children>
+        </VBox>
+        <Label fx:id="noteLabel" wrapText="true" />
+    </children>
+</VBox>

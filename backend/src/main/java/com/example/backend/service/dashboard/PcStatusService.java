@@ -1,6 +1,6 @@
 package com.example.backend.service.dashboard;
 
-import com.example.backend.dto.dashboard.PcStatusDto;
+import com.example.dto.dashboard.PcStatusDto;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.classroom.ClassroomResolutionService;

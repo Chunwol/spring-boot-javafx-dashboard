@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="leftPane" spacing="10.0" fillWidth="true" prefWidth="270.0" minWidth="220.0"
+      styleClass="resource-left-pane"
+      xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <padding>
+        <Insets top="14.0" right="14.0" bottom="14.0" left="14.0" />
+    </padding>
+    <children>
+        <Label text="리소스" styleClass="resource-title-label" />
+        <Label text="대시보드에서 사용 가능한 패널" styleClass="resource-sub-label" />
+        <ListView fx:id="groupListView" prefHeight="320.0" minHeight="200.0"
+                  maxHeight="1.7976931348623157E308" fixedCellSize="56.0"
+                  styleClass="resource-list-view"
+                  VBox.vgrow="ALWAYS">
+            <placeholder><Label text="사용 가능한 리소스가 없습니다." /></placeholder>
+        </ListView>
+        <ScrollPane fx:id="controlsScroll" fitToWidth="true" pannable="true"
+                    prefViewportHeight="220.0" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED"
+                    styleClass="scroll-transparent">
+            <content>
+                <VBox fx:id="leftEditControls" spacing="8.0" fillWidth="true" />
+            </content>
+        </ScrollPane>
+    </children>
+</VBox>

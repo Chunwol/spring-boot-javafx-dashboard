@@ -3,7 +3,6 @@ package com.example.frontend.controller.dashboard;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Bounds;
-import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
@@ -54,8 +53,7 @@ public class DashboardUIService {
             return;
         }
         Label toast = new Label(message);
-        toast.setStyle("-fx-background-color: " + (isError ? "#d73a49" : "#22863a")
-                + "; -fx-text-fill: white; -fx-padding: 8 12 8 12; -fx-background-radius: 8; -fx-font-weight: 600;");
+        toast.getStyleClass().add(isError ? "toast-error" : "toast-success");
         toastContainer.getChildren().add(0, toast);
 
         PauseTransition delay = new PauseTransition(Duration.seconds(2.2));
@@ -84,7 +82,7 @@ public class DashboardUIService {
 
         if (nodes == null || nodes.isEmpty()) {
             applyZoom(1.0);
-            showToast("No panels to fit", true);
+            showToast("맞출 패널이 없습니다", true);
             return;
         }
 
@@ -133,7 +131,7 @@ public class DashboardUIService {
         dashboardScrollPane.setHvalue(Math.max(0, Math.min(1, (centerX - viewportW / 2.0) / hRange)));
         dashboardScrollPane.setVvalue(Math.max(0, Math.min(1, (centerY - viewportH / 2.0) / vRange)));
 
-        showToast("Fit-all applied", false);
+        showToast("전체 맞춤 적용", false);
     }
 
     /**
@@ -151,36 +149,6 @@ public class DashboardUIService {
             leftEditControls.setManaged(isEditMode);
             leftEditControls.setVisible(isEditMode);
         }
-    }
-
-    /**
-     * Toggle visibility of UI elements.
-     */
-    public void setUIComponentVisibility(Node node, boolean visible) {
-        if (node != null) {
-            node.setManaged(visible);
-            node.setVisible(visible);
-        }
-    }
-
-    /**
-     * Convert scene coordinates to local coordinates in parent.
-     */
-    public Point2D sceneToParentLocal(Node parent, double sceneX, double sceneY) {
-        if (parent == null) {
-            return new Point2D(sceneX, sceneY);
-        }
-        return parent.sceneToLocal(sceneX, sceneY);
-    }
-
-    /**
-     * Convert local coordinates to scene coordinates.
-     */
-    public Point2D localToScene(Node node, double localX, double localY) {
-        if (node == null) {
-            return new Point2D(localX, localY);
-        }
-        return node.localToScene(localX, localY);
     }
 
     /**

@@ -1,6 +1,6 @@
 package com.example.backend.controller;
 
-import com.example.backend.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.service.dashboard.ClassroomService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;

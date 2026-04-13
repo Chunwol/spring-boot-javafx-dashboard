@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="imageItemBox" spacing="4.0" styleClass="widget-item-image-edit"
+      xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <padding><Insets top="4" right="4" bottom="4" left="4" /></padding>
+    <children>
+        <Button fx:id="deleteBtn" text="삭제" styleClass="btn-danger,btn-sm" />
+    </children>
+</VBox>

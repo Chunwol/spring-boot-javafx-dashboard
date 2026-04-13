@@ -1,6 +1,6 @@
 # Backend Dockerfile
 # 멀티스테이지 빌드: 1단계는 빌드, 2단계는 실행
-FROM eclipse-temurin:17-jdk-alpine as builder
+FROM eclipse-temurin:25-jdk as builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ COPY backend backend/
 RUN chmod +x gradlew && ./gradlew :backend:bootJar -x test
 
 # 실행 스테이지
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 

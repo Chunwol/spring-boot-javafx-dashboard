@@ -1,6 +1,6 @@
 # Agent Dockerfile
 # 멀티스테이지 빌드: 1단계는 빌드, 2단계는 실행
-FROM openjdk:17-slim as builder
+FROM eclipse-temurin:25-jdk as builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ COPY agent agent/
 RUN chmod +x gradlew && ./gradlew :agent:build -x test
 
 # 실행 스테이지
-FROM openjdk:17-slim
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ COPY --from=builder /build/agent/build/libs/agent-1.0.0.jar /app/agent.jar
 # 에이전트는 아웃바운드 연결만 수행하므로 EXPOSE가 필요 없다.
 
 # JVM 옵션
-ENV JAVA_OPTS="-Xmx256m -Xms128m"
+ENV JAVA_OPTS="-Xmx1g -Xms128m"
 
 # Agent 실행
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/agent.jar"]

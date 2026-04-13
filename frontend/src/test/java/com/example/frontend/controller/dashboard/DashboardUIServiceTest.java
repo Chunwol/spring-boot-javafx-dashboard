@@ -70,7 +70,7 @@ class DashboardUIServiceTest {
         assertThat(resetScale.getX()).isEqualTo(1.0);
         assertThat(resetScale.getY()).isEqualTo(1.0);
         assertThat(toast.getChildren()).isNotEmpty();
-        assertThat(((Label) toast.getChildren().get(0)).getText()).contains("No panels to fit");
+        assertThat(((Label) toast.getChildren().get(0)).getText()).contains("맞출 패널이 없습니다");
     }
 
     @Test

@@ -26,8 +26,6 @@ import com.example.frontend.service.DashboardLayoutService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.example.frontend.util.AccessibilityHelper;
-import com.example.frontend.util.ThemeColorConstants;
-import com.example.frontend.util.ThemeManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import javafx.beans.value.ChangeListener;
@@ -69,7 +67,6 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.transform.Scale;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.stage.WindowEvent;
@@ -98,6 +95,114 @@ public class DashboardController {
     @FXML
     private VBox rootVBox;
 
+    @FXML
+    private HBox topBarRef;
+
+    @FXML
+    private Label dashboardTitleLabel;
+
+    @FXML
+    private Label dashboardSubtitleLabel;
+
+    @FXML
+    private MenuButton dashboardSettingsMenu;
+
+    @FXML
+    private Button logoutButton;
+
+    @FXML
+    private TabPane mainTabPane;
+
+    @FXML
+    private Tab dashboardTab;
+
+    @FXML
+    private SplitPane dashboardMainSplitPane;
+
+    @FXML
+    private StackPane leftPaneSlot;
+
+    @FXML
+    private Tab pcManagementTab;
+
+    @FXML
+    private StackPane pcManagementSlot;
+
+    @FXML
+    private Tab networkTab;
+
+    @FXML
+    private StackPane networkSlot;
+
+    @FXML
+    private Tab commandTab;
+
+    @FXML
+    private StackPane commandSlot;
+
+    @FXML
+    private Tab settingsTab;
+
+    @FXML
+    private StackPane settingsSlot;
+
+    @FXML
+    private ColorPicker bgColorPicker;
+
+    @FXML
+    private ToggleButton editModeButton;
+
+    @FXML
+    private ToggleButton focusModeButton;
+
+    @FXML
+    private ToggleButton dashboardOnlyButton;
+
+    @FXML
+    private Button fullScreenButton;
+
+    @FXML
+    private Button refreshButton;
+
+    @FXML
+    private ToggleButton gridToggleButton;
+
+    @FXML
+    private ToggleButton snapToggleButton;
+
+    @FXML
+    private MenuButton alignMenuButton;
+
+    @FXML
+    private MenuButton arrangeMenuButton;
+
+    @FXML
+    private Button zoomOutButton;
+
+    @FXML
+    private Button zoomResetButtonNode;
+
+    @FXML
+    private Button zoomInButton;
+
+    @FXML
+    private Button fitAllButton;
+
+    @FXML
+    private Group dashboardCanvasGroup;
+
+    @FXML
+    private ScrollPane dashboardScrollPane;
+
+    @FXML
+    private VBox toastContainer;
+
+    @FXML
+    private HBox editOnlyToolbar;
+
+    @FXML
+    private VBox rightToolPane;
+
     private DashboardCanvasModule canvasModule;
     private DashboardClassroomModule classroomModule;
     private DashboardManagementModule managementModule;
@@ -111,16 +216,11 @@ public class DashboardController {
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
 
     private Pane classroomContainer;
-    private ScrollPane dashboardScrollPane;
     private Label clockLabel;
     private Label statusSummaryLabel;
     private Label connectivityLabel;
-    private VBox toastContainer;
-    private HBox editOnlyToolbar;
-    private HBox topBarRef;
     private SplitPane mainSplitPane;
     private VBox leftToolPane;
-    private VBox rightToolPane;
     private Node leftEditControls;
     private Button zoomResetButton;
     private boolean pendingInitialViewportAdjust = true;
@@ -149,6 +249,7 @@ public class DashboardController {
         }
     };
 
+    @FXML
     private ComboBox<DashboardInfoDto> dashboardSelector;
 
     private NetworkPanelController networkPanelController;
@@ -181,13 +282,13 @@ public class DashboardController {
             return;
         }
 
-        rootVBox.getChildren().clear();
         rootVBox.setSpacing(10);
-        rootVBox.setPadding(new Insets(8, 8, 8, 8));
-        rootVBox.getStyleClass().add("dashboard-root-bg");
+        if (!rootVBox.getStyleClass().contains("dashboard-root-bg")) {
+            rootVBox.getStyleClass().add("dashboard-root-bg");
+        }
 
-        rootVBox.getChildren().add(buildTopBar());
-        rootVBox.getChildren().add(buildTabs());
+        initializeTopBar();
+        initializeTabs();
 
         // Bind zoom property to UI updates
         dashboardViewModel.zoomScaleProperty().addListener((obs, oldV, newV) -> {
@@ -234,9 +335,6 @@ public class DashboardController {
                 oldScene.heightProperty().removeListener(sceneHeightListener);
             }
             if (newScene != null) {
-                // Setup theme manager with the current scene
-                ThemeManager.setCurrentScene(newScene);
-
                 // Setup keyboard accessibility shortcuts
                 newScene.setOnKeyPressed(event -> handleKeyboardShortcuts(event));
 
@@ -260,31 +358,39 @@ public class DashboardController {
             }
         }), 0, 1, TimeUnit.SECONDS);
 
-        scheduler.scheduleAtFixedRate(this::refreshDashboardSnapshot, 0, 30, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::refreshDashboardSnapshot), 0, 30, TimeUnit.SECONDS);
 
         connectWebSocket();
         loadDashboards();
     }
 
-    private Node buildTopBar() {
-        HBox topBar = new HBox(14);
-        this.topBarRef = topBar;
-        topBar.setPadding(new Insets(13, 18, 13, 18));
-        topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.getStyleClass().add("dashboard-topbar");
+    private void loadStatusBarFromFxml() {
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/dashboard-statusbar.fxml"));
+            loader.load();
+            var ns = loader.getNamespace();
+            statusSummaryLabel = (Label) ns.get("statusSummaryLabel");
+            connectivityLabel = (Label) ns.get("connectivityLabel");
+            clockLabel = (Label) ns.get("clockLabel");
+        } catch (Exception e) {
+            // fallback: use simple labels
+            statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
+            connectivityLabel = new Label("연결 대기 중");
+            clockLabel = new Label();
+        }
+    }
 
-        Label title = new Label("통합 강의실 관제");
-        title.setTextFill(Color.WHITE);
-        title.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 20));
-        AccessibilityHelper.makeAccessible(title, "통합 강의실 관제");
+    private void initializeTopBar() {
+        if (dashboardTitleLabel != null) {
+            AccessibilityHelper.makeAccessible(dashboardTitleLabel, "통합 강의실 관제");
+        }
+        if (dashboardSubtitleLabel != null) {
+            AccessibilityHelper.makeAccessible(dashboardSubtitleLabel, "실시간 모니터링, 원격 제어, 리포팅");
+        }
+        if (dashboardSelector == null) {
+            return;
+        }
 
-        Label subtitle = new Label("실시간 모니터링, 원격 제어, 리포팅");
-        subtitle.setTextFill(Color.web("#cbd5e0"));
-        subtitle.setFont(Font.font("Segoe UI", 12));
-        AccessibilityHelper.makeAccessible(subtitle, "실시간 모니터링, 원격 제어, 리포팅");
-        VBox titleBox = new VBox(2, title, subtitle);
-
-        dashboardSelector = new ComboBox<>();
         dashboardSelector.setPromptText("대시보드 선택");
         dashboardSelector.setPrefWidth(200);
         AccessibilityHelper.makeAccessible(dashboardSelector, "대시보드 선택", "사용할 대시보드를 선택합니다");
@@ -309,41 +415,27 @@ public class DashboardController {
             }
         });
 
-        // 설정 메뉴 생성
-        MenuButton settingsMenu = createDashboardSettingsMenu();
+        configureDashboardSettingsMenu(dashboardSettingsMenu);
 
-        Button logoutBtn = createIconActionButton("로그아웃", "mdi2l-logout", "#b4535f", "white");
-        logoutBtn.setOnAction(e -> handleLogout());
-        AccessibilityHelper.makeAccessible(logoutBtn, "로그아웃", "현재 사용자 세션을 종료합니다");
+        if (logoutButton != null) {
+            logoutButton.getStyleClass().add("btn-icon-logout");
+            logoutButton.setOnAction(e -> handleLogout());
+            FontIcon icon = new FontIcon("mdi2l-logout");
+            icon.setIconSize(14);
+            icon.setIconColor(Color.WHITE);
+            logoutButton.setGraphic(icon);
+            AccessibilityHelper.makeAccessible(logoutButton, "로그아웃", "현재 사용자 세션을 종료합니다");
+        }
 
-        statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
-        statusSummaryLabel.setTextFill(Color.web("#cbd5e0"));
-        statusSummaryLabel.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
-
-        connectivityLabel = new Label("연결 대기 중");
-        connectivityLabel.setTextFill(Color.web("#cbd5e0"));
-        connectivityLabel.setFont(Font.font("Segoe UI", 12));
-
+        statusSummaryLabel = new Label();
+        connectivityLabel = new Label();
         clockLabel = new Label();
-        clockLabel.setTextFill(Color.WHITE);
-        clockLabel.setFont(Font.font("Consolas", FontWeight.BOLD, 16));
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        // ComboBox + 설정 메뉴 묶기
-        HBox dashboardBox = new HBox(6, dashboardSelector, settingsMenu);
-        dashboardBox.setAlignment(Pos.CENTER_LEFT);
-
-        topBar.getChildren().addAll(
-            titleBox,
-            dashboardBox,
-            logoutBtn,
-            spacer
-        );
+        loadStatusBarFromFxml();
 
         // 설정 메뉴의 삭제 항목 초기화 및 리스너 등록
-        MenuItem deleteMenuItem = (MenuItem) settingsMenu.getProperties().get("deleteMenuItem");
+        MenuItem deleteMenuItem = dashboardSettingsMenu == null
+                ? null
+                : (MenuItem) dashboardSettingsMenu.getProperties().get("deleteMenuItem");
         if (deleteMenuItem != null) {
             updateDashboardMenuState(deleteMenuItem);
             dashboardSelector.getItems().addListener((javafx.collections.ListChangeListener<DashboardInfoDto>) c -> {
@@ -353,14 +445,14 @@ public class DashboardController {
                 updateDashboardMenuState(deleteMenuItem);
             });
         }
-
-        return topBar;
     }
 
-    // 설정 메뉴 생성
-    private MenuButton createDashboardSettingsMenu() {
-        MenuButton settingsMenu = new MenuButton("⚙ 설정");
-        settingsMenu.getStyleClass().add("dashboard-menu-button");
+    // 설정 메뉴 초기화
+    private void configureDashboardSettingsMenu(MenuButton settingsMenu) {
+        if (settingsMenu == null) {
+            return;
+        }
+        settingsMenu.getItems().clear();
 
         // 대시보드 추가
         MenuItem addItem = new MenuItem("+ 대시보드 추가");
@@ -382,8 +474,6 @@ public class DashboardController {
 
         // 메뉴 참조 저장 (나중에 updateDashboardMenuState 호출용)
         settingsMenu.getProperties().put("deleteMenuItem", deleteItem);
-
-        return settingsMenu;
     }
 
     // 설정 메뉴 삭제 항목 활성화/비활성화 로직
@@ -434,26 +524,10 @@ public class DashboardController {
             try {
                 moveToLoginScreen(null, false);
                 // 상태바 재생성
-                statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
-                statusSummaryLabel.setTextFill(Color.web("#64748b"));
-                statusSummaryLabel.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
-
-                connectivityLabel = new Label("연결 대기 중");
-                connectivityLabel.setTextFill(Color.web("#64748b"));
-                connectivityLabel.setFont(Font.font("Segoe UI", 12));
-
-                clockLabel = new Label();
-                clockLabel.setTextFill(Color.web("#64748b"));
-                clockLabel.setFont(Font.font("Consolas", FontWeight.BOLD, 16));
+                loadStatusBarFromFxml();
 
                 // 하단 상태바 고정
-                HBox statusBar = new HBox(18, statusSummaryLabel, connectivityLabel);
-                Region statusSpacer = new Region();
-                HBox.setHgrow(statusSpacer, Priority.ALWAYS);
-                statusBar.getChildren().addAll(statusSpacer, clockLabel);
-                statusBar.setAlignment(Pos.CENTER_LEFT);
-                statusBar.setPadding(new Insets(8, 18, 8, 18));
-                statusBar.getStyleClass().add("dashboard-statusbar");
+                HBox statusBar = (HBox) statusSummaryLabel.getParent();
                 rootVBox.getChildren().add(statusBar);
             } catch (Exception ex) {
                 dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
@@ -627,52 +701,59 @@ public class DashboardController {
         }
     }
 
-    private Node buildTabs() {
-        TabPane tabPane = new TabPane();
-        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabPane.getStyleClass().add("dashboard-tabpane");
+    private void initializeTabs() {
+        if (mainTabPane == null) {
+            return;
+        }
 
-        // 1. 대시보드
-        Tab mainTab = new Tab("대시보드", createMainDashboardView());
+        if (dashboardTab != null) {
+            dashboardTab.setContent(createMainDashboardView());
+        }
 
-        // 2. PC 관리
-        Tab pcManageTab = new Tab("PC 관리", createPcManagementView());
-        pcManageTab.setOnSelectionChanged(event -> {
-            if (pcManageTab.isSelected() && pcManagementModule != null) {
-                pcManagementModule.reloadData();
+        if (pcManagementTab != null) {
+            if (pcManagementSlot != null) {
+                pcManagementSlot.getChildren().setAll(createPcManagementView());
             }
-        });
+            pcManagementTab.setOnSelectionChanged(event -> {
+                if (pcManagementTab.isSelected() && pcManagementModule != null) {
+                    pcManagementModule.reloadData();
+                }
+            });
+        }
 
-        // 3. 네트워크
         networkPanelController = new NetworkPanelController(null);
-        Tab networkTab = new Tab("네트워크", networkPanelController.getPanel());
-        networkTab.setOnSelectionChanged(event -> {
-            if (networkTab.isSelected()) {
-                refreshNetworkTabData();
+        if (networkTab != null) {
+            if (networkSlot != null) {
+                networkSlot.getChildren().setAll(networkPanelController.getPanel());
             }
-        });
+            networkTab.setOnSelectionChanged(event -> {
+                if (networkTab.isSelected()) {
+                    refreshNetworkTabData();
+                }
+            });
+        }
 
-        // 4. 명령
         commandStatusPanelController = new CommandStatusPanelController();
-        Tab commandTab = new Tab("명령", commandStatusPanelController.getPanel());
-
-        // 5. 설정(기존 관리)
-        Tab manageTab = new Tab("설정", createManagementView());
-        manageTab.setOnSelectionChanged(event -> {
-            if (manageTab.isSelected() && managementModule != null) {
-                managementModule.reloadData();
+        if (commandTab != null) {
+            if (commandSlot != null) {
+                commandSlot.getChildren().setAll(commandStatusPanelController.getPanel());
             }
-        });
+        }
 
-        tabPane.getTabs().addAll(mainTab, pcManageTab, networkTab, commandTab, manageTab);
-        VBox.setVgrow(tabPane, Priority.ALWAYS);
-        return tabPane;
+        if (settingsTab != null) {
+            if (settingsSlot != null) {
+                settingsSlot.getChildren().setAll(createManagementView());
+            }
+            settingsTab.setOnSelectionChanged(event -> {
+                if (settingsTab.isSelected() && managementModule != null) {
+                    managementModule.reloadData();
+                }
+            });
+        }
     }
 
     private Node createManagementView() {
         managementModule = new DashboardManagementModule(
-                httpClient,
-                objectMapper,
             currentApiBaseUrl(),
                 () -> rootVBox.getScene()
         );
@@ -681,22 +762,16 @@ public class DashboardController {
 
     private Node createPcManagementView() {
         pcManagementModule = new DashboardPcManagementModule(
-                httpClient,
-                objectMapper,
-            currentApiBaseUrl()
+                objectMapper
         );
         return pcManagementModule.createView();
     }
 
     private Node createMainDashboardView() {
-        SplitPane splitPane = new SplitPane();
-        this.mainSplitPane = splitPane;
-        splitPane.getStyleClass().add("dashboard-splitpane");
-        VBox rightPane = buildRightPane();
-        this.rightToolPane = rightPane;
+        this.mainSplitPane = dashboardMainSplitPane;
+        initializeMainDashboardShell();
 
         widgetModule = new DashboardWidgetModule(
-                httpClient,
                 objectMapper,
             currentApiBaseUrl(),
                 classroomContainer,
@@ -710,7 +785,6 @@ public class DashboardController {
         // 텍스트/이미지는 loadDashboardPanels()에서 대시보드 컨텍스트와 함께 로드됩니다.
 
         classroomModule = new DashboardClassroomModule(
-                httpClient,
                 objectMapper,
             currentApiBaseUrl(),
                 classroomContainer,
@@ -736,9 +810,12 @@ public class DashboardController {
 
         VBox leftPane = buildLeftPane();
         this.leftToolPane = leftPane;
-
-        splitPane.getItems().addAll(leftPane, rightPane);
-        splitPane.setDividerPositions(0.20);
+        if (leftPaneSlot != null) {
+            leftPaneSlot.getChildren().setAll(leftPane);
+        }
+        if (dashboardMainSplitPane != null) {
+            dashboardMainSplitPane.setDividerPositions(0.20);
+        }
 
             dashboardUIService = new DashboardUIService(
                 toastContainer,
@@ -749,7 +826,7 @@ public class DashboardController {
                 leftEditControls
             );
 
-            dashboardLayoutService = new DashboardLayoutService(httpClient, objectMapper, ApiClient.getInstance().getBaseUrl());
+            dashboardLayoutService = new DashboardLayoutService(objectMapper, ApiClient.getInstance().getBaseUrl());
 
             networkPanelModule = new DashboardNetworkPanelModule(
                 dashboardService,
@@ -772,12 +849,13 @@ public class DashboardController {
                 this::applySnap,
                 this::currentDashboardId,
                 (msg, err) -> dashboardUIService.showToast(msg, err),
+                this::updateCachedPanelPosition,
                 this::getResponsiveDefaultSize,
                 this::loadDashboardPanels
             );
 
         applyEditModeUiState();
-        return splitPane;
+        return dashboardMainSplitPane;
     }
 
     private VBox buildLeftPane() {
@@ -786,55 +864,7 @@ public class DashboardController {
         return leftPane;
     }
 
-    private VBox buildRightPane() {
-        VBox rightPane = new VBox(10);
-        rightPane.setPadding(new Insets(4, 8, 8, 8));
-
-        ToggleButton editModeBtn = createEditModeToggleButton();
-        ToggleButton focusModeBtn = createFocusModeToggleButton();
-        ToggleButton dashboardOnlyBtn = createDashboardOnlyToggleButton();
-        Button fullScreenBtn = createFullScreenButton();
-        Button refreshBtn = createRefreshButton();
-        ColorPicker bgColorPicker = createBackgroundColorPicker();
-
-        ToggleButton gridToggleBtn = createGridToggleButton();
-        ToggleButton snapToggleBtn = createSnapToggleButton();
-        MenuButton alignMenu = createAlignMenu();
-        MenuButton arrangeMenu = createArrangeMenu();
-        Button zoomOutBtn = createZoomOutButton();
-        Button zoomResetBtn = createZoomResetButton();
-        Button zoomInBtn = createZoomInButton();
-        Button fitAllBtn = createFitAllButton();
-
-        editOnlyToolbar = new HBox(
-                8,
-                gridToggleBtn,
-                snapToggleBtn,
-                alignMenu,
-                arrangeMenu
-        );
-        editOnlyToolbar.setManaged(false);
-        editOnlyToolbar.setVisible(false);
-
-        HBox zoomToolbar = new HBox(4, zoomOutBtn, zoomResetBtn, zoomInBtn, fitAllBtn);
-        zoomToolbar.setAlignment(Pos.CENTER_RIGHT);
-
-        HBox rightToolbar = new HBox(
-                10,
-                bgColorPicker,
-                editModeBtn,
-                focusModeBtn,
-                fullScreenBtn,
-                dashboardOnlyBtn,
-                editOnlyToolbar,
-                zoomToolbar,
-                refreshBtn
-        );
-        rightToolbar.setAlignment(Pos.CENTER_RIGHT);
-        rightToolbar.setPadding(new Insets(8, 8, 8, 8));
-        rightToolbar.setMinHeight(Region.USE_PREF_SIZE);
-        rightToolbar.getStyleClass().add("dashboard-right-toolbar");
-
+        private void initializeMainDashboardShell() {
         canvasModule = new DashboardCanvasModule(
                 this::isEditModeActive,
                 this::saveNodePosition,
@@ -845,52 +875,73 @@ public class DashboardController {
 
         classroomContainer = canvasModule.getClassroomContainer();
         classroomContainer.getStyleClass().add("dashboard-canvas-bg");
-        // 초기 줌 레벨 설정은 initialize() 후 ViewModel 리스너를 통해 처리
 
-        // Group 래퍼: Scale(0,0) 트랜스폼이 적용된 classroomContainer의 실제 시각적 크기를
-        // ScrollPane이 인식하도록 Group으로 감쌉니다.
-        Group canvasGroup = new Group(classroomContainer);
-        ScrollPane canvasScroll = new ScrollPane(canvasGroup);
-        dashboardScrollPane = canvasScroll;
-        canvasScroll.setFitToWidth(false);
-        canvasScroll.setFitToHeight(false);
-        canvasScroll.setPannable(true);
-        canvasScroll.getStyleClass().add("dashboard-canvas-scroll");
-        canvasScroll.viewportBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
+        if (dashboardCanvasGroup != null) {
+            dashboardCanvasGroup.getChildren().setAll(classroomContainer);
+        }
+        if (dashboardScrollPane == null) {
+            return;
+        }
+        dashboardScrollPane.viewportBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
             if (pendingInitialViewportAdjust && newBounds != null && newBounds.getWidth() > 1 && newBounds.getHeight() > 1) {
                 logViewportSnapshot("viewport-bounds-changed");
                 viewportAdjustDebounce.playFromStart();
             }
         });
-        VBox.setVgrow(canvasScroll, Priority.ALWAYS);
 
-        toastContainer = new VBox(8);
-        toastContainer.setPickOnBounds(false);
-        toastContainer.setMouseTransparent(true);
-        toastContainer.setPadding(new Insets(12));
-        StackPane.setAlignment(toastContainer, Pos.TOP_RIGHT);
-
-        StackPane canvasStack = new StackPane(canvasScroll, toastContainer);
-        VBox.setVgrow(canvasStack, Priority.ALWAYS);
-
-        rightPane.getChildren().addAll(rightToolbar, canvasStack);
-        return rightPane;
+        if (bgColorPicker != null) {
+            configureBackgroundColorPicker(bgColorPicker);
+        }
+        if (editModeButton != null) {
+            configureEditModeToggleButton(editModeButton);
+        }
+        if (focusModeButton != null) {
+            configureFocusModeToggleButton(focusModeButton);
+        }
+        if (dashboardOnlyButton != null) {
+            configureDashboardOnlyToggleButton(dashboardOnlyButton);
+        }
+        if (fullScreenButton != null) {
+            configureFullScreenButton(fullScreenButton);
+        }
+        if (refreshButton != null) {
+            configureRefreshButton(refreshButton);
+        }
+        if (gridToggleButton != null) {
+            configureGridToggleButton(gridToggleButton);
+        }
+        if (snapToggleButton != null) {
+            configureSnapToggleButton(snapToggleButton);
+        }
+        if (alignMenuButton != null) {
+            configureAlignMenu(alignMenuButton);
+        }
+        if (arrangeMenuButton != null) {
+            configureArrangeMenu(arrangeMenuButton);
+        }
+        if (zoomOutButton != null) {
+            configureZoomOutButton(zoomOutButton);
+        }
+        if (zoomResetButtonNode != null) {
+            configureZoomResetButton(zoomResetButtonNode);
+        }
+        if (zoomInButton != null) {
+            configureZoomInButton(zoomInButton);
+        }
+        if (fitAllButton != null) {
+            configureFitAllButton(fitAllButton);
+        }
     }
 
-    private ToggleButton createEditModeToggleButton() {
-        ToggleButton editModeBtn = new ToggleButton("편집 모드");
-        editModeBtn.getStyleClass().add("dashboard-toolbar-toggle");
+    private void configureEditModeToggleButton(ToggleButton editModeBtn) {
         editModeBtn.setOnAction(e -> {
             dashboardViewModel.setEditMode(editModeBtn.isSelected());
             applyEditModeUiState();
             dashboardUIService.showToast(isEditModeActive() ? "편집 모드 켜짐" : "편집 모드 꺼짐", false);
         });
-        return editModeBtn;
     }
 
-    private ToggleButton createFocusModeToggleButton() {
-        ToggleButton focusModeBtn = new ToggleButton("포커스 모드");
-        focusModeBtn.getStyleClass().add("dashboard-toolbar-toggle");
+    private void configureFocusModeToggleButton(ToggleButton focusModeBtn) {
         focusModeBtn.setOnAction(e -> {
             dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             if (leftToolPane != null) {
@@ -901,51 +952,56 @@ public class DashboardController {
                 mainSplitPane.setDividerPositions(isFocusModeActive() ? 0.0 : 0.23);
             }
         });
-        return focusModeBtn;
     }
 
-    private ToggleButton createDashboardOnlyToggleButton() {
-        ToggleButton dashboardOnlyBtn = new ToggleButton("대시보드만");
-        dashboardOnlyBtn.getStyleClass().add("dashboard-toolbar-toggle");
+    private void configureDashboardOnlyToggleButton(ToggleButton dashboardOnlyBtn) {
         dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
             dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
-            if (leftToolPane != null) {
-                leftToolPane.setManaged(!isDashboardOnlyModeActive());
-                leftToolPane.setVisible(!isDashboardOnlyModeActive());
+            if (leftPaneSlot != null) {
+                leftPaneSlot.setManaged(!isDashboardOnlyModeActive());
+                leftPaneSlot.setVisible(!isDashboardOnlyModeActive());
             }
             if (topBarRef != null) {
                 topBarRef.setManaged(!isDashboardOnlyModeActive());
                 topBarRef.setVisible(!isDashboardOnlyModeActive());
             }
+            if (dashboardMainSplitPane != null && !isDashboardOnlyModeActive()) {
+                dashboardMainSplitPane.setDividerPositions(0.20);
+            }
             dashboardUIService.showToast(isDashboardOnlyModeActive() ? "대시보드만 모드" : "일반 모드", false);
         });
-        return dashboardOnlyBtn;
     }
 
-    private Button createFullScreenButton() {
-        Button fullScreenBtn = createIconActionButton("전체 화면", "mdi2f-fullscreen", "#0891b2", "white");
+    private void configureFullScreenButton(Button fullScreenBtn) {
+        fullScreenBtn.getStyleClass().add("btn-icon-fullscreen");
+        FontIcon icon = new FontIcon("mdi2f-fullscreen");
+        icon.setIconSize(14);
+        icon.setIconColor(Color.WHITE);
+        fullScreenBtn.setGraphic(icon);
         fullScreenBtn.setOnAction(e -> {
             if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
                 stage.setFullScreen(!stage.isFullScreen());
             }
         });
-        return fullScreenBtn;
     }
 
-    private Button createRefreshButton() {
-        Button refreshBtn = createIconActionButton("새로고침", "mdi2r-refresh", "#0d9488", "white");
+    private void configureRefreshButton(Button refreshBtn) {
+        refreshBtn.getStyleClass().add("btn-icon-refresh");
+        FontIcon icon = new FontIcon("mdi2r-refresh");
+        icon.setIconSize(14);
+        icon.setIconColor(Color.WHITE);
+        refreshBtn.setGraphic(icon);
         refreshBtn.setOnAction(e -> {
             RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
             rotate.setByAngle(360);
             rotate.play();
             refreshDashboardSnapshot();
         });
-        return refreshBtn;
     }
 
-    private ColorPicker createBackgroundColorPicker() {
-        ColorPicker bgColorPicker = new ColorPicker(Color.web("#f0f2f5"));
+    private void configureBackgroundColorPicker(ColorPicker bgColorPicker) {
+        bgColorPicker.setValue(Color.web("#f0f2f5"));
         bgColorPicker.setOnAction(e -> {
             if (classroomContainer == null) {
                 return;
@@ -960,31 +1016,23 @@ public class DashboardController {
                 dashboardScrollPane.setStyle("-fx-background: " + hex + "; -fx-background-color: " + hex + ";");
             }
         });
-        return bgColorPicker;
     }
 
-    private ToggleButton createGridToggleButton() {
-        ToggleButton gridToggleBtn = new ToggleButton("격자");
-        gridToggleBtn.getStyleClass().add("dashboard-toolbar-mini-toggle");
+    private void configureGridToggleButton(ToggleButton gridToggleBtn) {
         gridToggleBtn.setOnAction(e -> {
             if (canvasModule != null) {
                 canvasModule.drawGrid(gridToggleBtn.isSelected());
             }
         });
-        return gridToggleBtn;
     }
 
-    private ToggleButton createSnapToggleButton() {
-        ToggleButton snapToggleBtn = new ToggleButton("스냅");
-        snapToggleBtn.getStyleClass().add("dashboard-toolbar-mini-toggle");
+    private void configureSnapToggleButton(ToggleButton snapToggleBtn) {
         snapToggleBtn.setSelected(isSnapToGridEnabled());
         snapToggleBtn.setOnAction(e -> dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected()));
-        return snapToggleBtn;
     }
 
-    private MenuButton createAlignMenu() {
-        MenuButton alignMenu = new MenuButton("정렬");
-        alignMenu.getStyleClass().add("dashboard-toolbar-menu");
+    private void configureAlignMenu(MenuButton alignMenu) {
+        alignMenu.getItems().clear();
         MenuItem alignLeft = new MenuItem("왼쪽");
         alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
         MenuItem alignRight = new MenuItem("오른쪽");
@@ -994,12 +1042,10 @@ public class DashboardController {
         MenuItem alignBottom = new MenuItem("아래");
         alignBottom.setOnAction(e -> canvasModule.alignSelectedNodes("BOTTOM"));
         alignMenu.getItems().addAll(alignLeft, alignRight, alignTop, alignBottom);
-        return alignMenu;
     }
 
-    private MenuButton createArrangeMenu() {
-        MenuButton arrangeMenu = new MenuButton("배열");
-        arrangeMenu.getStyleClass().add("dashboard-toolbar-menu");
+    private void configureArrangeMenu(MenuButton arrangeMenu) {
+        arrangeMenu.getItems().clear();
         MenuItem gridArrange = new MenuItem("격자");
         gridArrange.setOnAction(e -> arrangePanels("GRID"));
         MenuItem rowArrange = new MenuItem("행");
@@ -1007,36 +1053,23 @@ public class DashboardController {
         MenuItem colArrange = new MenuItem("열");
         colArrange.setOnAction(e -> arrangePanels("COLUMN"));
         arrangeMenu.getItems().addAll(gridArrange, rowArrange, colArrange);
-        return arrangeMenu;
     }
 
-    private Button createZoomOutButton() {
-        Button zoomOutBtn = new Button("-");
-        zoomOutBtn.getStyleClass().add("dashboard-zoom-btn");
+    private void configureZoomOutButton(Button zoomOutBtn) {
         zoomOutBtn.setOnAction(e -> dashboardViewModel.zoomOut());
-        return zoomOutBtn;
     }
 
-    private Button createZoomResetButton() {
-        Button zoomResetBtn = new Button("100%");
-        zoomResetBtn.getStyleClass().add("dashboard-zoom-btn");
+    private void configureZoomResetButton(Button zoomResetBtn) {
         zoomResetBtn.setOnAction(e -> dashboardViewModel.resetZoom());
         zoomResetButton = zoomResetBtn;
-        return zoomResetBtn;
     }
 
-    private Button createZoomInButton() {
-        Button zoomInBtn = new Button("+");
-        zoomInBtn.getStyleClass().add("dashboard-zoom-btn");
+    private void configureZoomInButton(Button zoomInBtn) {
         zoomInBtn.setOnAction(e -> dashboardViewModel.zoomIn());
-        return zoomInBtn;
     }
 
-    private Button createFitAllButton() {
-        Button fitAllBtn = new Button("전체 맞춤");
-        fitAllBtn.getStyleClass().add("dashboard-zoom-btn");
+    private void configureFitAllButton(Button fitAllBtn) {
         fitAllBtn.setOnAction(e -> dashboardUIService.fitAllPanelsToViewport(new ArrayList<>(classroomContainer.getChildren())));
-        return fitAllBtn;
     }
 
     private void applyEditModeUiState() {
@@ -1284,7 +1317,7 @@ public class DashboardController {
         TextInputDialog dialog = new TextInputDialog("새 대시보드");
         dialog.setTitle("대시보드 생성");
         dialog.setHeaderText("대시보드 이름 입력");
-        dialog.setContentText("Name:");
+        dialog.setContentText("이름:");
         dialog.showAndWait().ifPresent(name -> {
             String trimmed = name == null ? "" : name.trim();
             if (trimmed.isEmpty()) {
@@ -1948,23 +1981,6 @@ public class DashboardController {
         connectivityLabel.setTextFill(Color.web("#86efac"));
     }
 
-    private Button createActionButton(String text, String bgColor, String textColor) {
-        Button button = new Button(text);
-        button.setStyle("-fx-background-color: " + bgColor
-                + "; -fx-text-fill: " + textColor
-                + "; -fx-font-size: 11px; -fx-font-weight: 700; -fx-background-radius: 10; -fx-padding: 8 12 8 12; -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.15), 4, 0, 0, 1);");
-        return button;
-    }
-
-    private Button createIconActionButton(String text, String iconLiteral, String bgColor, String textColor) {
-        Button button = createActionButton(text, bgColor, textColor);
-        FontIcon icon = new FontIcon(iconLiteral);
-        icon.setIconSize(14);
-        icon.setIconColor(Color.web(textColor));
-        button.setGraphic(icon);
-        return button;
-    }
-
     private DashboardViewModel viewModel() {
         if (dashboardViewModel == null) {
             dashboardViewModel = new DashboardViewModel();
@@ -2010,7 +2026,7 @@ public class DashboardController {
         try {
             new com.example.frontend.service.DashboardPdfService().generateTrafficPdf(rootVBox.getScene().getWindow());
         } catch (Exception e) {
-            showAlert("PDF generation failed", "An error occurred while generating PDF.\n" + e.getMessage());
+            showAlert("PDF 생성 실패", "PDF 생성 중 오류가 발생했습니다.\n" + e.getMessage());
         }
     }
 

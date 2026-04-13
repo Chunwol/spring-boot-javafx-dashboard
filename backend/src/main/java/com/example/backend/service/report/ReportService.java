@@ -412,10 +412,10 @@ public class ReportService {
     // ─── 유틸 ─────────────────────────────────────────────────────────────
 
     private static String kbToReadable(long kbps) {
-        if (kbps >= 1_000_000_000L) return String.format("%.2f PB", kbps / 1_000_000_000.0);
-        if (kbps >= 1_000_000L)     return String.format("%.2f TB", kbps / 1_000_000.0);
-        if (kbps >= 1_000L)         return String.format("%.2f GB", kbps / 1_000.0);
-        return kbps + " MB";
+        if (kbps >= 1_000_000_000L) return String.format("%.2f TB", kbps / 1_000_000_000.0);
+        if (kbps >= 1_000_000L)     return String.format("%.2f GB", kbps / 1_000_000.0);
+        if (kbps >= 1_000L)         return String.format("%.2f MB", kbps / 1_000.0);
+        return kbps + " KB";
     }
 
     private static String str(Map<String, Object> m, String key) {

@@ -4,7 +4,7 @@ import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
-import com.example.backend.dto.dashboard.PcStatusDto;
+import com.example.dto.dashboard.PcStatusDto;
 import com.example.backend.service.dashboard.PcStatusService;
 import com.example.backend.service.dashboard.IpRangeService;
 import io.swagger.v3.oas.annotations.Operation;

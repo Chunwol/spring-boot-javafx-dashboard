@@ -9,9 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -25,13 +22,11 @@ import java.util.concurrent.CompletableFuture;
 public class DashboardLayoutService {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardLayoutService.class);
-    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String apiBaseUrl;
     private final DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss");
 
-    public DashboardLayoutService(HttpClient httpClient, ObjectMapper objectMapper, String apiBaseUrl) {
-        this.httpClient = httpClient;
+    public DashboardLayoutService(ObjectMapper objectMapper, String apiBaseUrl) {
         this.objectMapper = objectMapper;
         this.apiBaseUrl = apiBaseUrl;
     }
@@ -179,11 +174,4 @@ public class DashboardLayoutService {
         });
     }
 
-    /**
-     * Automatic backup scheduled task
-     */
-    public void scheduleAutoBackup(Long dashboardId, int intervalMinutes, Runnable backupCallback) {
-        // This would be integrated with a scheduler in DashboardController
-        // Called every N minutes to auto-backup the current layout
-    }
 }

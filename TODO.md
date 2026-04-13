@@ -110,3 +110,40 @@
 - [ ] 에이전트 자가 업데이트(OTA): 서버 기반 버전 관리 + 자동 다운로드
 - [ ] 관리자/교사 권한 분리: 역할 기반 접근 제어(RBAC)
 - [ ] 테스트 커버리지 확대: 단위/통합 테스트 추가
+
+---
+
+## 8. JavaFX Dashboard FXML 리팩토링 TODO
+
+목표: 동적 패널 생성 로직은 유지하되, 정적 화면 골격과 반복 UI 영역부터 FXML로 분리해 DashboardController의 책임을 단계적으로 축소한다.
+
+- [x] Phase 1. dashboard.fxml 루트 쉘 추출
+- [x] Phase 1-1. 상단바 슬롯, 메인 콘텐츠 슬롯을 FXML에 정의
+- [x] Phase 1-2. DashboardController가 슬롯에 기존 buildTopBar/buildTabs 결과를 주입하도록 전환
+- [x] Phase 1-3. 컴파일 및 로그인 진입 경로 검증
+- [x] Phase 2. 상단바 정적 구조 FXML 분리
+- [x] Phase 2-1. 제목/서브타이틀/대시보드 선택 영역을 FXML 노드로 이동
+- [x] Phase 2-2. 설정 메뉴와 액션 버튼의 이벤트 바인딩을 컨트롤러 메서드로 연결
+- [x] Phase 2-3. 상태 라벨/시계 라벨 fx:id 정리
+- [x] Phase 3. 탭 셸 FXML 분리
+- [x] Phase 3-1. TabPane와 고정 탭 골격을 FXML로 이동
+- [x] Phase 3-2. 각 탭 content는 코드 모듈 주입 방식 유지
+- [x] Phase 3-3. 탭 선택 시 reload/refresh 리스너 재연결
+- [x] Phase 4. 메인 대시보드 SplitPane 쉘 분리
+- [x] Phase 4-1. 좌우 패널 슬롯과 툴바 래퍼를 FXML로 이동
+- [x] Phase 4-2. Resource/Canvas/Toolbar 조립을 슬롯 주입 구조로 정리
+- [x] Phase 5. 반복 위젯/다이얼로그 분리 후보 정리
+- [x] Phase 5-1. 로그인 외 공통 다이얼로그의 FXML 전환 후보 선정
+- [x] Phase 5-2. PC 관리/명령 상세/설정 다이얼로그의 분리 우선순위 수립
+- [x] Phase 5-3. CommandStatusPanel showCommandDetail → command-detail-dialog-content.fxml 추출
+- [x] Phase 5-4. DashboardWidgetModule handleAddTextItem → widget-text-add-dialog-content.fxml 추출
+- [x] Phase 5-5. DashboardPcManagement showConfirmationDialog FXML 확인 (pc-command-confirm-dialog.fxml 기존 분리 적절)
+- [x] Phase 6. TableView 컬럼 및 레이아웃 FXML 추출 (포괄적)
+- [x] Phase 6-1. PcManagementModule.buildPcTable() → pcmgmt-pc-table.fxml (6컬럼)
+- [x] Phase 6-2. CommandStatusPanelController.createCommandTable() → command-table.fxml (12컬럼)
+- [x] Phase 6-3. NetworkPanelController.createPcTrafficTable() → network-traffic-table.fxml (5컬럼)
+- [x] Phase 6-4. NetworkPanelController.createNetworkChart() → network-chart.fxml (LineChart)
+- [x] Phase 6-5. ManagementModule.buildAgentInstallBox() → mgmt-agent-section.fxml 컬럼 확장 (8컬럼)
+- [x] Phase 6-6. showConfirmationDialog 확인 테이블 → pc-command-confirm-dialog.fxml 확장 (4컬럼)
+- [x] Phase 6-7. ManagementModule IP대역/교사/고장PC 액션 컬럼 → 각 FXML 컬럼 추가
+- [x] Phase 6-8. DashboardController 상태바 → dashboard-statusbar.fxml (중복 제거)

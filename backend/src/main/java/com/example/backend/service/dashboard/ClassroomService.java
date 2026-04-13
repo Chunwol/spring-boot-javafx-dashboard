@@ -1,6 +1,6 @@
 package com.example.backend.service.dashboard;
 
-import com.example.backend.dto.dashboard.ClassroomSummaryDto;
+import com.example.dto.dashboard.ClassroomSummaryDto;
 import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
@@ -134,8 +134,6 @@ public class ClassroomService {
                 summary.setGroupName(groupStat.getGroupName());
                 summary.setOnlinePcs((int) onlineCount);
                 summary.setTotalPcs((int) totalCount);
-                summary.setOnlinePcCount((int) onlineCount);
-                summary.setTotalPcCount((int) totalCount);
                 summary.setIpRanges(ipRanges);
                 summary.setTeacherPcStatus(teacherStatus);
                 summary.setVisible(true);

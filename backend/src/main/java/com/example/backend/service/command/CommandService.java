@@ -54,7 +54,7 @@ public class CommandService {
         }
         CommandQueue command = new CommandQueue();
         command.setMacAddress(candidates.get(0).getMacAddress());
-        command.setCommandType("WOL");
+        command.setCommandType("WOL_RELAY");
         command.setStatus("QUEUED");
         command.setCreatedAt(LocalDateTime.now());
         commandQueueRepository.save(command);

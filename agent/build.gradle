@@ -34,13 +34,20 @@ dependencies {
 
     // 테스트
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core:3.25.3'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+
+    // ByteBuddy upgrade for Java 25 class file version support
+    testImplementation 'net.bytebuddy:byte-buddy:1.17.5'
+    testImplementation 'net.bytebuddy:byte-buddy-agent:1.17.5'
 }
 
 test {
     useJUnitPlatform()
+    // Java 25: byte-buddy-agent must be loaded via -javaagent (dynamic agent loading disallowed)
+    jvmArgs '-XX:+EnableDynamicAgentLoading'
 }
 
 application {
@@ -74,12 +81,12 @@ jar {
 // 용법: gradlew :agent:deployPackage
 // 출력: dist/agent-${version}-deploy.zip
 // ═══════════════════════════════════════════════════════════════════════
-task deployPackage(type: Zip) {
+tasks.register('deployPackage', Zip) {
     group = 'distribution'
     description = 'Create deployment package with JAR, config, and scripts'
 
     // JAR 파일 포함
-    from("${project.buildDir}/libs") {
+    from("${layout.buildDirectory.get()}/libs") {
         include 'agent-*.jar'
         into 'agent-package'
     }
@@ -104,12 +111,12 @@ task deployPackage(type: Zip) {
 }
 
 // deployPackage는 JAR 빌드 완료 후 실행
-deployPackage.dependsOn(jar)
+tasks.named('deployPackage') { dependsOn(jar) }
 
 // ═══════════════════════════════════════════════════════════════════════
 // Dockerfile 및 Docker Compose 이미지 빌드 (선택사항)
 // ═══════════════════════════════════════════════════════════════════════
-task buildDockerImage {
+tasks.register('buildDockerImage') {
     group = 'docker'
     description = 'Build Docker image for agent'
     doLast {

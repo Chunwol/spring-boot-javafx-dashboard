@@ -1,6 +1,5 @@
 package com.example.frontend.controller.dashboard;
 
-import javafx.geometry.Point2D;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -45,18 +44,20 @@ class DashboardViewModelTest {
     }
 
     @Test
-    void snapPoint_shouldRespectSnapSetting() {
+    void snapValue_shouldRespectSnapSetting() {
         DashboardViewModel vm = new DashboardViewModel();
 
         vm.setSnapToGrid(true);
-        Point2D snapped = vm.snapPoint(11.0, 29.0);
-        assertThat(snapped.getX()).isEqualTo(20.0);
-        assertThat(snapped.getY()).isEqualTo(20.0);
+        double snappedX = vm.snapValue(11.0);
+        double snappedY = vm.snapValue(29.0);
+        assertThat(snappedX).isEqualTo(20.0);
+        assertThat(snappedY).isEqualTo(20.0);
 
         vm.setSnapToGrid(false);
-        Point2D raw = vm.snapPoint(11.0, 29.0);
-        assertThat(raw.getX()).isEqualTo(11.0);
-        assertThat(raw.getY()).isEqualTo(29.0);
+        double rawX = vm.snapValue(11.0);
+        double rawY = vm.snapValue(29.0);
+        assertThat(rawX).isEqualTo(11.0);
+        assertThat(rawY).isEqualTo(29.0);
     }
 
     @Test

@@ -103,7 +103,7 @@ class CommandServiceTest {
         verify(commandQueueRepository).save(captor.capture());
         CommandQueue saved = captor.getValue();
         assertThat(saved.getMacAddress()).isEqualTo("AA:BB:CC:DD:EE:FF");
-        assertThat(saved.getCommandType()).isEqualTo("WOL");
+        assertThat(saved.getCommandType()).isEqualTo("WOL_RELAY");
         assertThat(saved.getStatus()).isEqualTo("QUEUED");
     }
 }

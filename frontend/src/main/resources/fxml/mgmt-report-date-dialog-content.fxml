@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.DatePicker?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.RadioButton?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+
+<GridPane hgap="10.0" vgap="8.0" styleClass="dialog-content"
+          xmlns:fx="http://javafx.com/fxml">
+    <padding><Insets topRightBottomLeft="12.0" /></padding>
+
+    <Label text="유형:" GridPane.columnIndex="0" GridPane.rowIndex="0" />
+    <HBox spacing="10.0" GridPane.columnIndex="1" GridPane.rowIndex="0">
+        <children>
+            <RadioButton fx:id="weeklyBtn" text="주간 보고서" />
+            <RadioButton fx:id="monthlyBtn" text="월간 보고서" />
+        </children>
+    </HBox>
+    <Label text="시작일:" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+    <DatePicker fx:id="fromPicker" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+    <Label text="종료일:" GridPane.columnIndex="0" GridPane.rowIndex="2" />
+    <DatePicker fx:id="toPicker" GridPane.columnIndex="1" GridPane.rowIndex="2" />
+</GridPane>

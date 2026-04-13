@@ -1,8 +1,12 @@
 {
-  "serverUrl" : "http://pelmon.kro.kr:8888",
+  "serverUrl" : "http://localhost:8888",
   "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
-  "agentToken" : "agt_e9c72d1be2fe43c9b493c43814fd080a",
+  "agentToken" : "",
   "tlsPinSha256" : "",
+  "githubOwner" : "",
+  "githubRepo" : "",
+  "internetCheckHost" : "1.1.1.1",
+  "internetCheckPort" : 53,
   "heartbeatIntervalSec" : 120,
   "jitterSec" : 30
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox spacing="8.0" styleClass="dialog-content" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <padding>
+        <Insets top="8.0" right="8.0" bottom="8.0" left="8.0" />
+    </padding>
+    <children>
+        <Label fx:id="totalPcsLabel" text="전체 PC: -" />
+        <Label fx:id="onlinePcsLabel" text="온라인 PC: -" />
+    </children>
+</VBox>

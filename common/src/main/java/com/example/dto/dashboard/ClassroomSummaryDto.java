@@ -16,17 +16,11 @@ public class ClassroomSummaryDto {
     
     @Schema(description = "강의실 이름", example = "강의실 101")
     private String groupName;
-    
+
     @Schema(description = "온라인 PC 수", example = "15")
-    private int onlinePcCount;
-    
-    @Schema(description = "전체 PC 수", example = "20")
-    private int totalPcCount;
-    
-    @Schema(description = "온라인 PC 수 (long)", example = "15")
     private int onlinePcs;
-    
-    @Schema(description = "전체 PC 수 (long)", example = "20")
+
+    @Schema(description = "전체 PC 수", example = "20")
     private int totalPcs;
     
     @Schema(description = "교사 PC 상태", example = "ONLINE")

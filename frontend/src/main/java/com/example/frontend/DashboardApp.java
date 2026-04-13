@@ -23,7 +23,7 @@ public class DashboardApp extends Application {
         com.example.frontend.controller.LoginController controller = loader.getController();
         controller.setPrimaryStage(primaryStage);
 
-        primaryStage.setTitle("Smart Classroom Dashboard - Login");
+        primaryStage.setTitle("스마트 강의실 대시보드 - 로그인");
         Scene scene = new Scene(root, 460, 360);
         scene.getStylesheets().add(getClass().getResource("/dashboard-theme.css").toExternalForm());
         primaryStage.setMinWidth(420);

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.cell.PropertyValueFactory?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox fx:id="teacherBox" spacing="10.0" alignment="TOP_LEFT" styleClass="panel-card"
+      maxWidth="1.7976931348623157E308"
+      xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
+    <children>
+        <Label text="교사 PC 관리" styleClass="mgmt-section-title" />
+
+        <HBox fx:id="teacherForm" spacing="10.0" alignment="CENTER_LEFT">
+            <children>
+                <ComboBox fx:id="teacherGroupCombo" promptText="강의실 선택" />
+                <TextField fx:id="teacherIp"   promptText="교사 IP" prefWidth="160.0" />
+                <TextField fx:id="teacherMac"  promptText="교사 MAC (선택)" prefWidth="160.0" />
+                <TextField fx:id="teacherDesc" promptText="설명" HBox.hgrow="ALWAYS" />
+                <Button fx:id="addTeacherBtn" text="교사 등록" styleClass="btn-primary,btn-sm" />
+            </children>
+        </HBox>
+
+        <TableView fx:id="teacherDeviceTable" prefHeight="220.0">
+            <placeholder><Label text="등록된 교사 PC가 없습니다." /></placeholder>
+            <columns>
+                <TableColumn text="번호">
+                    <cellValueFactory><PropertyValueFactory property="id" /></cellValueFactory>
+                </TableColumn>
+                <TableColumn text="강의실">
+                    <cellValueFactory><PropertyValueFactory property="groupName" /></cellValueFactory>
+                </TableColumn>
+                <TableColumn text="IP 주소">
+                    <cellValueFactory><PropertyValueFactory property="ipAddress" /></cellValueFactory>
+                </TableColumn>
+                <TableColumn text="MAC 주소">
+                    <cellValueFactory><PropertyValueFactory property="macAddress" /></cellValueFactory>
+                </TableColumn>
+                <TableColumn text="설명">
+                    <cellValueFactory><PropertyValueFactory property="description" /></cellValueFactory>
+                </TableColumn>
+                <TableColumn fx:id="teacherActionCol" text="관리" styleClass="table-col-center" />
+            </columns>
+        </TableView>
+    </children>
+</VBox>

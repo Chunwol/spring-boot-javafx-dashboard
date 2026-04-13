@@ -5,15 +5,11 @@ import com.example.dto.dashboard.PcStatusDto;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.model.dashboard.IpRangeItem;
 import com.example.frontend.model.dashboard.TeacherDeviceItem;
-import com.example.util.MultipartUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
-import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.scene.Cursor;
-import javafx.scene.control.ProgressIndicator;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.Node;
@@ -34,26 +30,15 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleGroup;
-import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
+import javafx.fxml.FXMLLoader;
 import javafx.stage.FileChooser;
 import javafx.util.StringConverter;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
-import javafx.util.Duration;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -62,38 +47,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class DashboardManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardManagementModule.class);
-    private static final ExecutorService SCRIPT_EXECUTOR = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "script-deploy");
-        t.setDaemon(true);
-        return t;
-    });
-
-    // 애플리케이션 종료 시 SCRIPT_EXECUTOR 정리
-    static {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (!SCRIPT_EXECUTOR.isShutdown()) {
-                try {
-                    SCRIPT_EXECUTOR.shutdownNow();
-                    if (!SCRIPT_EXECUTOR.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                        org.slf4j.LoggerFactory.getLogger(DashboardManagementModule.class)
-                                .warn("SCRIPT_EXECUTOR did not terminate within 5 seconds");
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }, "script-executor-shutdown"));
-    }
-    private final HttpClient httpClient;
-    private final ObjectMapper objectMapper;
     private final String apiBaseUrl;
     private final Supplier<javafx.scene.Scene> sceneSupplier;
     private final ApiClient apiClient;
@@ -105,58 +64,40 @@ public class DashboardManagementModule {
     private TableView<TeacherDeviceItem> teacherDeviceTable;
     private TableView<PcStatusDto> brokenPcTable;
     private TableView<Map<String, Object>> agentTable;
-    private TextField fileDistJobIdField;
-    private Label fileDistAlertLabel;
-    private Label fileDistStatusLabel;
-    private Label fileDistProgressLabel;
-    private TableView<Map<String, Object>> fileDistJobsTable;
-    private TableView<Map<String, Object>> fileDistEventsTable;
-    private Timeline fileDistAutoRefresh;
     private Label installKeyLabel;
     private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
     private List<PcStatusDto> cachedBrokenPcs = List.of();
 
-    public DashboardManagementModule(HttpClient httpClient,
-                                     ObjectMapper objectMapper,
-                                     String apiBaseUrl,
+    public DashboardManagementModule(String apiBaseUrl,
                                      Supplier<javafx.scene.Scene> sceneSupplier) {
-        this.httpClient = httpClient;
-        this.objectMapper = objectMapper;
         this.apiBaseUrl = apiBaseUrl;
         this.sceneSupplier = sceneSupplier;
         this.apiClient = ApiClient.getInstance();
     }
 
     public Node createView() {
-        VBox container = new VBox(20);
-        container.setPadding(new Insets(20));
-        container.setFillWidth(true);
-        container.setMaxWidth(Double.MAX_VALUE);
+        ScrollPane scrollPane;
+        StackPane agentSlot, ipRangeSlot, teacherSlot, brokenPcSlot, reportSlot;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-view.fxml"));
+            scrollPane   = loader.load();
+            agentSlot    = (StackPane) loader.getNamespace().get("agentSlot");
+            ipRangeSlot  = (StackPane) loader.getNamespace().get("ipRangeSlot");
+            teacherSlot  = (StackPane) loader.getNamespace().get("teacherSlot");
+            brokenPcSlot = (StackPane) loader.getNamespace().get("brokenPcSlot");
+            reportSlot   = (StackPane) loader.getNamespace().get("reportSlot");
+        } catch (Exception e) {
+            throw new IllegalStateException("관리 뷰 FXML 로딩 실패", e);
+        }
 
-        VBox agentBox = buildAgentInstallBox();
-        VBox ipBox = buildIpRangeBox();
-        VBox teacherBox = buildTeacherDeviceBox();
-        VBox brokenPcBox = buildBrokenPcBox();
-        VBox reportBox = buildReportBox();
+        agentSlot.getChildren().setAll(buildAgentInstallBox());
+        ipRangeSlot.getChildren().setAll(buildIpRangeBox());
+        teacherSlot.getChildren().setAll(buildTeacherDeviceBox());
+        brokenPcSlot.getChildren().setAll(buildBrokenPcBox());
+        reportSlot.getChildren().setAll(buildReportBox());
 
-        agentBox.setMaxWidth(Double.MAX_VALUE);
-        ipBox.setMaxWidth(Double.MAX_VALUE);
-        teacherBox.setMaxWidth(Double.MAX_VALUE);
-        brokenPcBox.setMaxWidth(Double.MAX_VALUE);
-        reportBox.setMaxWidth(Double.MAX_VALUE);
-
-        container.getChildren().addAll(agentBox, ipBox, teacherBox, brokenPcBox, reportBox);
         reloadData();
 
-        ScrollPane scrollPane = new ScrollPane(container);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setFitToHeight(false);
-        scrollPane.setPannable(true);
-        scrollPane.sceneProperty().addListener((obs, oldScene, newScene) -> {
-            if (newScene == null && fileDistAutoRefresh != null) {
-                fileDistAutoRefresh.stop();
-            }
-        });
         return scrollPane;
     }
 
@@ -169,78 +110,78 @@ public class DashboardManagementModule {
 
     @SuppressWarnings("unchecked")
     private VBox buildAgentInstallBox() {
-        Label title = new Label("에이전트 설치 관리");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        VBox box;
+        Button copyKeyBtn;
+        Button refreshKeyBtn;
+        Button downloadConfigBtn;
+        Button refreshAgentBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-agent-section.fxml"));
+            box             = loader.load();
+            installKeyLabel = (Label)  loader.getNamespace().get("installKeyLabel");
+            copyKeyBtn      = (Button) loader.getNamespace().get("copyKeyBtn");
+            refreshKeyBtn   = (Button) loader.getNamespace().get("refreshKeyBtn");
+            downloadConfigBtn = (Button) loader.getNamespace().get("downloadConfigBtn");
+            refreshAgentBtn   = (Button) loader.getNamespace().get("refreshAgentBtn");
+            agentTable        = (TableView<Map<String, Object>>) loader.getNamespace().get("agentTable");
+        } catch (Exception e) {
+            throw new IllegalStateException("에이전트 섹션 FXML 로딩 실패", e);
+        }
 
-        // ── 설치 키 행 ──
-        Label keyLabel = new Label("설치 키:");
-        keyLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
-        installKeyLabel = new Label("불러오는 중...");
-        installKeyLabel.setStyle("-fx-font-family: monospace; -fx-font-size: 13px; -fx-text-fill: #3182ce; " +
-                "-fx-background-color: #eff6ff; -fx-padding: 4 10 4 10; -fx-background-radius: 4;");
-        Button copyKeyBtn = new Button("복사");
-        copyKeyBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
+        // ── 설치 키 행 버튼 동작 연결 ──
+        final Button copyKeyBtnFinal = copyKeyBtn;
         copyKeyBtn.setOnAction(e -> {
             String key = installKeyLabel.getText();
             if (!key.isBlank() && !key.equals("불러오는 중...") && !key.equals("조회 실패")) {
                 ClipboardContent content = new ClipboardContent();
                 content.putString(key);
                 Clipboard.getSystemClipboard().setContent(content);
-                copyKeyBtn.setText("복사됨!");
+                copyKeyBtnFinal.setText("복사됨!");
                 javafx.animation.PauseTransition reset =
                         new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
-                reset.setOnFinished(done -> copyKeyBtn.setText("복사"));
+                reset.setOnFinished(done -> copyKeyBtnFinal.setText("복사"));
                 reset.play();
             }
         });
-        Button refreshKeyBtn = new Button("↺");
-        refreshKeyBtn.setStyle("-fx-background-color: #718096; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         refreshKeyBtn.setOnAction(e -> loadInstallKey());
-
-        // ── config.json 다운로드 ──
-        Button downloadConfigBtn = new Button("설정 파일 다운로드");
-        downloadConfigBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         downloadConfigBtn.setOnAction(e -> downloadConfigJson());
-
-        HBox keyRow = new HBox(8, keyLabel, installKeyLabel, copyKeyBtn, refreshKeyBtn, downloadConfigBtn);
-        keyRow.setAlignment(Pos.CENTER_LEFT);
-
-        // ── 등록 에이전트 테이블 ──
-        Label tableTitle = new Label("등록된 에이전트 목록");
-        tableTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 13px;");
-        Button refreshAgentBtn = new Button("새로고침");
-        refreshAgentBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 12px; -fx-background-radius: 4;");
         refreshAgentBtn.setOnAction(e -> loadAgentList());
-        HBox tableHeader = new HBox(8, tableTitle, refreshAgentBtn);
-        tableHeader.setAlignment(Pos.CENTER_LEFT);
 
-        TableColumn<Map<String, Object>, String> pcNameCol = new TableColumn<>("PC명");
+        // ── 컬럼 바인딩 (FXML에서 정의된 컬럼 사용) ──
+
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> pcNameCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(0);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> ipCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(1);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> macCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(2);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> statusCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(3);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> tokenCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(4);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> orphanCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(5);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, String> lastSeenCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(6);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, Void> actionCol = (TableColumn<Map<String, Object>, Void>) agentTable.getColumns().get(7);
+
         pcNameCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
-        pcNameCol.setPrefWidth(130);
-
-        TableColumn<Map<String, Object>, String> ipCol = new TableColumn<>("IP 주소");
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
-        ipCol.setPrefWidth(120);
-
-        TableColumn<Map<String, Object>, String> macCol = new TableColumn<>("MAC 주소");
         macCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("macAddress"))));
-        macCol.setPrefWidth(140);
+        lastSeenCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("lastSeen"))));
 
-        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("상태");
         statusCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("status"))));
         statusCol.setCellFactory(col -> new TableCell<>() {
             @Override protected void updateItem(String s, boolean empty) {
                 super.updateItem(s, empty);
-                if (empty || s == null) { setText(null); setStyle(""); return; }
+                if (empty || s == null) { setText(null); getStyleClass().removeAll("status-online", "status-offline"); return; }
                 setText(s);
-                setStyle("ONLINE".equalsIgnoreCase(s)
-                        ? "-fx-text-fill: #9fd59f; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #f4a3a3; -fx-font-weight: bold;");
+                getStyleClass().removeAll("status-online", "status-offline");
+                getStyleClass().add("ONLINE".equalsIgnoreCase(s) ? "status-online" : "status-offline");
             }
         });
-        statusCol.setPrefWidth(80);
 
-        TableColumn<Map<String, Object>, String> tokenCol = new TableColumn<>("토큰");
         tokenCol.setCellValueFactory(d -> {
             Object active = d.getValue().get("tokenActive");
             boolean isActive = Boolean.TRUE.equals(active);
@@ -249,20 +190,13 @@ public class DashboardManagementModule {
         tokenCol.setCellFactory(col -> new TableCell<>() {
             @Override protected void updateItem(String s, boolean empty) {
                 super.updateItem(s, empty);
-                if (empty || s == null) { setText(null); setStyle(""); return; }
+                if (empty || s == null) { setText(null); getStyleClass().removeAll("status-token-active", "status-token-revoked"); return; }
                 setText(s);
-                setStyle("활성".equals(s)
-                        ? "-fx-text-fill: #22863a; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #9ca3af;");
+                getStyleClass().removeAll("status-token-active", "status-token-revoked");
+                getStyleClass().add("활성".equals(s) ? "status-token-active" : "status-token-revoked");
             }
         });
-        tokenCol.setPrefWidth(70);
 
-        TableColumn<Map<String, Object>, String> lastSeenCol = new TableColumn<>("마지막 접속");
-        lastSeenCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("lastSeen"))));
-        lastSeenCol.setPrefWidth(150);
-
-        TableColumn<Map<String, Object>, String> orphanCol = new TableColumn<>("등록상태");
         orphanCol.setCellValueFactory(d -> {
             boolean orphan = Boolean.TRUE.equals(d.getValue().get("orphan"));
             return new SimpleStringProperty(orphan ? "고아토큰" : "정상");
@@ -270,24 +204,20 @@ public class DashboardManagementModule {
         orphanCol.setCellFactory(col -> new TableCell<>() {
             @Override protected void updateItem(String s, boolean empty) {
                 super.updateItem(s, empty);
-                if (empty || s == null) { setText(null); setStyle(""); return; }
+                if (empty || s == null) { setText(null); getStyleClass().removeAll("status-orphan", "status-normal"); return; }
                 setText(s);
-                setStyle("고아토큰".equals(s)
-                        ? "-fx-text-fill: #b45309; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #475569;");
+                getStyleClass().removeAll("status-orphan", "status-normal");
+                getStyleClass().add("고아토큰".equals(s) ? "status-orphan" : "status-normal");
             }
         });
-        orphanCol.setPrefWidth(80);
 
-        TableColumn<Map<String, Object>, Void> actionCol = new TableColumn<>("관리");
-        actionCol.setStyle("-fx-alignment: CENTER;");
         actionCol.setCellFactory(col -> new TableCell<>() {
             private final Button revokeBtn = new Button("토큰폐기");
             private final Button deleteBtn = new Button("삭제");
             private final HBox box = new HBox(4, revokeBtn, deleteBtn);
             {
-                revokeBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                revokeBtn.getStyleClass().addAll("btn-warning", "btn-sm");
+                deleteBtn.getStyleClass().addAll("btn-danger", "btn-sm");
                 box.setAlignment(Pos.CENTER);
                 revokeBtn.setOnAction(e -> {
                     Map<String, Object> row = getTableView().getItems().get(getIndex());
@@ -303,18 +233,7 @@ public class DashboardManagementModule {
                 setGraphic(empty ? null : box);
             }
         });
-        actionCol.setPrefWidth(140);
 
-        agentTable = new TableView<>();
-        agentTable.getColumns().addAll(pcNameCol, ipCol, macCol, statusCol, tokenCol, orphanCol, lastSeenCol, actionCol);
-        agentTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        agentTable.setPrefHeight(260);
-        agentTable.setPlaceholder(new Label("등록된 에이전트가 없습니다."));
-        agentTable.setStyle("-fx-background-color: white; -fx-font-size: 12px;");
-
-        VBox box = new VBox(10, title, keyRow, tableHeader, agentTable);
-        box.setAlignment(Pos.TOP_LEFT);
-        box.setStyle("-fx-border-color: #3182ce; -fx-border-width: 2; -fx-padding: 15; -fx-background-color: #eff6ff; -fx-background-radius: 6;");
         return box;
     }
 
@@ -428,56 +347,42 @@ public class DashboardManagementModule {
 
     @SuppressWarnings("unchecked")
     private VBox buildIpRangeBox() {
-        Label ipTitle = new Label("강의실 IP 대역 관리");
-        ipTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        Label ipHint = new Label("강의실을 선택하면 해당 강의실 IP 대역만 표시됩니다.");
-        ipHint.setStyle("-fx-text-fill: #6b7280; -fx-font-size: 12px;");
-
-        groupComboBox = buildClassroomComboBox();
-        groupComboBox.setPromptText("강의실 선택 (전체)");
-        groupComboBox.setPrefWidth(180);
-        // 강의실 선택 시 해당 IP 대역만 필터링
+        VBox ipBox;
+        TextField startIpField;
+        TextField endIpField;
+        TextField descField;
+        Button addIpRangeBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-ip-range-section.fxml"));
+            ipBox         = loader.load();
+            groupComboBox = (ComboBox<ClassroomSummaryDto>) loader.getNamespace().get("groupComboBox");
+            startIpField  = (TextField) loader.getNamespace().get("startIpField");
+            endIpField    = (TextField) loader.getNamespace().get("endIpField");
+            descField     = (TextField) loader.getNamespace().get("descField");
+            addIpRangeBtn = (Button)    loader.getNamespace().get("addIpRangeBtn");
+            ipRangeTable  = (TableView<IpRangeItem>) loader.getNamespace().get("ipRangeTable");
+        } catch (Exception e) {
+            throw new IllegalStateException("IP 대역 섹션 FXML 로딩 실패", e);
+        }
+        groupComboBox.setConverter(new StringConverter<>() {
+            @Override public String toString(ClassroomSummaryDto o) { return o != null ? o.getGroupName() : ""; }
+            @Override public ClassroomSummaryDto fromString(String s) { return null; }
+        });
         groupComboBox.valueProperty().addListener((obs, oldVal, newVal) -> loadIpRangesForGroup(newVal));
 
-        TextField startIpField = new TextField();
-        startIpField.setPromptText("시작 IP (예: 192.168.1.10)");
-        startIpField.setPrefWidth(170);
-        TextField endIpField = new TextField();
-        endIpField.setPromptText("끝 IP (예: 192.168.1.30)");
-        endIpField.setPrefWidth(170);
-        TextField descField = new TextField();
-        descField.setPromptText("설명");
-        descField.setPrefWidth(180);
-        Button addIpRangeBtn = new Button("대역 추가");
-        addIpRangeBtn.setOnAction(e -> addIpRange(startIpField, endIpField, descField));
+        final TextField startIpFinal = startIpField;
+        final TextField endIpFinal   = endIpField;
+        final TextField descFinal    = descField;
+        addIpRangeBtn.setOnAction(e -> addIpRange(startIpFinal, endIpFinal, descFinal));
 
-        HBox ipForm = new HBox(10, groupComboBox, startIpField, endIpField, descField, addIpRangeBtn);
-        ipForm.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(descField, javafx.scene.layout.Priority.ALWAYS);
-
-        ipRangeTable = new TableView<>();
         ipRangeTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        ipRangeTable.setPrefHeight(320);
-
-        TableColumn<IpRangeItem, Long> idCol = new TableColumn<>("번호");
-        idCol.setCellValueFactory(new PropertyValueFactory<>("id"));
-        idCol.setMaxWidth(60);
-        TableColumn<IpRangeItem, String> groupNameCol = new TableColumn<>("강의실");
-        groupNameCol.setCellValueFactory(new PropertyValueFactory<>("groupName"));
-        TableColumn<IpRangeItem, String> startCol = new TableColumn<>("시작 IP");
-        startCol.setCellValueFactory(new PropertyValueFactory<>("startIp"));
-        TableColumn<IpRangeItem, String> endCol = new TableColumn<>("끝 IP");
-        endCol.setCellValueFactory(new PropertyValueFactory<>("endIp"));
-        TableColumn<IpRangeItem, String> descCol = new TableColumn<>("설명");
-        descCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        TableColumn<IpRangeItem, Void> actionCol = new TableColumn<>("관리");
-        actionCol.setMinWidth(80);
-        actionCol.setStyle("-fx-alignment: CENTER;");
+        @SuppressWarnings("unchecked")
+        TableColumn<IpRangeItem, Void> actionCol = (TableColumn<IpRangeItem, Void>) ipRangeTable.getColumns().get(5);
         actionCol.setCellFactory(param -> new TableCell<>() {
             private final Button deleteBtn = new Button("삭제");
             private final HBox box = new HBox(deleteBtn);
             {
-                deleteBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
+                deleteBtn.getStyleClass().addAll("btn-danger", "btn-sm");
                 box.setAlignment(Pos.CENTER);
                 deleteBtn.setOnAction(event -> {
                     IpRangeItem item = getTableView().getItems().get(getIndex());
@@ -487,58 +392,53 @@ public class DashboardManagementModule {
                     });
                 });
             }
-
             @Override
             protected void updateItem(Void item, boolean empty) {
                 super.updateItem(item, empty);
                 setGraphic(empty ? null : box);
             }
         });
-
-        ipRangeTable.getColumns().addAll(idCol, groupNameCol, startCol, endCol, descCol, actionCol);
-
-        VBox ipBox = new VBox(10, ipTitle, ipHint, ipForm, ipRangeTable);
-        ipBox.setAlignment(Pos.TOP_LEFT);
-        ipBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return ipBox;
     }
 
+    @SuppressWarnings("unchecked")
     private VBox buildTeacherDeviceBox() {
-        Label teacherTitle = new Label("교사 PC 관리");
-        teacherTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-
-        teacherGroupCombo = buildClassroomComboBox();
-        teacherGroupCombo.setPromptText("강의실 선택");
+        VBox teacherBox;
+        TextField teacherIp;
+        TextField teacherMac;
+        TextField teacherDesc;
+        Button addTeacherBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-teacher-section.fxml"));
+            teacherBox         = loader.load();
+            teacherGroupCombo  = (ComboBox<ClassroomSummaryDto>) loader.getNamespace().get("teacherGroupCombo");
+            teacherIp          = (TextField) loader.getNamespace().get("teacherIp");
+            teacherMac         = (TextField) loader.getNamespace().get("teacherMac");
+            teacherDesc        = (TextField) loader.getNamespace().get("teacherDesc");
+            addTeacherBtn      = (Button)    loader.getNamespace().get("addTeacherBtn");
+            teacherDeviceTable = (TableView<TeacherDeviceItem>) loader.getNamespace().get("teacherDeviceTable");
+        } catch (Exception e) {
+            throw new IllegalStateException("교사 PC 섹션 FXML 로딩 실패", e);
+        }
+        teacherGroupCombo.setConverter(new StringConverter<>() {
+            @Override public String toString(ClassroomSummaryDto o) { return o != null ? o.getGroupName() : ""; }
+            @Override public ClassroomSummaryDto fromString(String s) { return null; }
+        });
         teacherGroupCombo.setOnAction(e -> loadTeacherDevices());
 
-        TextField teacherIp = new TextField();
-        teacherIp.setPromptText("교사 IP");
-        TextField teacherMac = new TextField();
-        teacherMac.setPromptText("교사 MAC (선택)");
-        TextField teacherDesc = new TextField();
-        teacherDesc.setPromptText("설명");
-        Button addTeacherBtn = new Button("교사 등록");
-        addTeacherBtn.setOnAction(e -> addTeacherDevice(teacherIp, teacherMac, teacherDesc));
+        final TextField teacherIpFinal   = teacherIp;
+        final TextField teacherMacFinal  = teacherMac;
+        final TextField teacherDescFinal = teacherDesc;
+        addTeacherBtn.setOnAction(e -> addTeacherDevice(teacherIpFinal, teacherMacFinal, teacherDescFinal));
 
-        teacherDeviceTable = new TableView<>();
         teacherDeviceTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<TeacherDeviceItem, Long> teacherIdCol = new TableColumn<>("번호");
-        teacherIdCol.setCellValueFactory(new PropertyValueFactory<>("id"));
-        TableColumn<TeacherDeviceItem, String> teacherGroupCol = new TableColumn<>("강의실");
-        teacherGroupCol.setCellValueFactory(new PropertyValueFactory<>("groupName"));
-        TableColumn<TeacherDeviceItem, String> teacherIpCol = new TableColumn<>("IP 주소");
-        teacherIpCol.setCellValueFactory(new PropertyValueFactory<>("ipAddress"));
-        TableColumn<TeacherDeviceItem, String> teacherMacCol = new TableColumn<>("MAC 주소");
-        teacherMacCol.setCellValueFactory(new PropertyValueFactory<>("macAddress"));
-        TableColumn<TeacherDeviceItem, String> teacherDescCol = new TableColumn<>("설명");
-        teacherDescCol.setCellValueFactory(new PropertyValueFactory<>("description"));
-        TableColumn<TeacherDeviceItem, Void> teacherActionCol = new TableColumn<>("관리");
-        teacherActionCol.setStyle("-fx-alignment: CENTER;");
+        @SuppressWarnings("unchecked")
+        TableColumn<TeacherDeviceItem, Void> teacherActionCol = (TableColumn<TeacherDeviceItem, Void>) teacherDeviceTable.getColumns().get(5);
         teacherActionCol.setCellFactory(param -> new TableCell<>() {
             private final Button deleteBtn = new Button("삭제");
             private final HBox box = new HBox(deleteBtn);
             {
-                deleteBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
+                deleteBtn.getStyleClass().addAll("btn-danger", "btn-sm");
                 box.setAlignment(Pos.CENTER);
                 deleteBtn.setOnAction(event -> {
                     TeacherDeviceItem item = getTableView().getItems().get(getIndex());
@@ -551,11 +451,9 @@ public class DashboardManagementModule {
                         });
                 });
             }
-
             private void refreshTeacherDevices() {
                 loadTeacherDevices();
             }
-
             @Override
             protected void updateItem(Void item, boolean empty) {
                 super.updateItem(item, empty);
@@ -563,102 +461,81 @@ public class DashboardManagementModule {
             }
         });
         teacherDeviceTable.setPrefHeight(220);
-        teacherDeviceTable.getColumns().add(teacherIdCol);
-        teacherDeviceTable.getColumns().add(teacherGroupCol);
-        teacherDeviceTable.getColumns().add(teacherIpCol);
-        teacherDeviceTable.getColumns().add(teacherMacCol);
-        teacherDeviceTable.getColumns().add(teacherDescCol);
-        teacherDeviceTable.getColumns().add(teacherActionCol);
-
-        HBox teacherForm = new HBox(10, teacherGroupCombo, teacherIp, teacherMac, teacherDesc, addTeacherBtn);
-        teacherForm.setAlignment(Pos.CENTER_LEFT);
-        VBox teacherBox = new VBox(10, teacherTitle, teacherForm, teacherDeviceTable);
-        teacherBox.setAlignment(Pos.TOP_LEFT);
-        teacherBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return teacherBox;
     }
 
     @SuppressWarnings("unchecked")
     private VBox buildBrokenPcBox() {
-        Label brokenTitle = new Label("고장 PC 등록");
-        brokenTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        
-        brokenGroupCombo = buildClassroomComboBox();
-        brokenGroupCombo.setPromptText("강의실 필터");
+        VBox brokenPcVBox;
+        TextField brokenIpField;
+        TextField brokenMacField;
+        TextField brokenNoteField;
+        Button brokenRegisterBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-broken-pc-section.fxml"));
+            brokenPcVBox      = loader.load();
+            brokenGroupCombo  = (ComboBox<ClassroomSummaryDto>) loader.getNamespace().get("brokenGroupCombo");
+            brokenIpField     = (TextField) loader.getNamespace().get("brokenIpField");
+            brokenMacField    = (TextField) loader.getNamespace().get("brokenMacField");
+            brokenNoteField   = (TextField) loader.getNamespace().get("brokenNoteField");
+            brokenRegisterBtn = (Button)    loader.getNamespace().get("brokenRegisterBtn");
+            brokenPcTable     = (TableView<PcStatusDto>) loader.getNamespace().get("brokenPcTable");
+        } catch (Exception e) {
+            throw new IllegalStateException("고장 PC 섹션 FXML 로딩 실패", e);
+        }
+        brokenGroupCombo.setConverter(new StringConverter<>() {
+            @Override public String toString(ClassroomSummaryDto o) { return o != null ? o.getGroupName() : ""; }
+            @Override public ClassroomSummaryDto fromString(String s) { return null; }
+        });
         brokenGroupCombo.setOnAction(e -> applyBrokenPcFilter());
-        
-        TextField brokenIpField = new TextField();
-        brokenIpField.setPromptText("IP 주소");
-        TextField brokenMacField = new TextField();
-        brokenMacField.setPromptText("MAC 주소 (선택)");
-        TextField brokenNoteField = new TextField();
-        brokenNoteField.setPromptText("고장 사유");
-        Button brokenRegisterBtn = new Button("고장 등록");
-        brokenRegisterBtn.setOnAction(e -> markBrokenPc(brokenIpField, brokenMacField, brokenNoteField));
 
-        brokenPcTable = buildBrokenPcTable();
-        brokenPcTable.setPrefHeight(220);
-
-        HBox brokenFilterBox = new HBox(10, brokenGroupCombo);
-        brokenFilterBox.setAlignment(Pos.CENTER_LEFT);
-        HBox brokenBox = new HBox(10, brokenIpField, brokenMacField, brokenNoteField, brokenRegisterBtn);
-        brokenBox.setAlignment(Pos.CENTER_LEFT);
-        
-        VBox brokenPcBox = new VBox(10, brokenTitle, brokenFilterBox, brokenBox, brokenPcTable);
-        brokenPcBox.setAlignment(Pos.TOP_LEFT);
-        brokenPcBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
-        return brokenPcBox;
+        final TextField brokenIpFinal   = brokenIpField;
+        final TextField brokenMacFinal  = brokenMacField;
+        final TextField brokenNoteFinal = brokenNoteField;
+        brokenRegisterBtn.setOnAction(e -> markBrokenPc(brokenIpFinal, brokenMacFinal, brokenNoteFinal));
+        configureBrokenPcTable(brokenPcTable);
+        return brokenPcVBox;
     }
 
     @SuppressWarnings("unchecked")
-    private TableView<PcStatusDto> buildBrokenPcTable() {
-        TableView<PcStatusDto> table = new TableView<>();
+    private void configureBrokenPcTable(TableView<PcStatusDto> table) {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("등록된 고장 PC가 없습니다."));
 
-        TableColumn<PcStatusDto, String> macCol = new TableColumn<>("MAC 주소");
+        // Wire CellValueFactory on FXML-defined columns
+        TableColumn<PcStatusDto, String> macCol    = (TableColumn<PcStatusDto, String>) table.getColumns().get(0);
+        TableColumn<PcStatusDto, String> ipCol     = (TableColumn<PcStatusDto, String>) table.getColumns().get(1);
+        TableColumn<PcStatusDto, String> groupCol  = (TableColumn<PcStatusDto, String>) table.getColumns().get(2);
+        TableColumn<PcStatusDto, String> statusCol = (TableColumn<PcStatusDto, String>) table.getColumns().get(3);
+        TableColumn<PcStatusDto, String> noteCol   = (TableColumn<PcStatusDto, String>) table.getColumns().get(4);
+
         macCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getMacAddress())));
-        macCol.setPrefWidth(150);
-
-        TableColumn<PcStatusDto, String> ipCol = new TableColumn<>("IP 주소");
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getIpAddress())));
-        ipCol.setPrefWidth(120);
-
-        TableColumn<PcStatusDto, String> groupCol = new TableColumn<>("강의실");
         groupCol.setCellValueFactory(d -> new SimpleStringProperty(resolveGroupName(d.getValue().getGroupId())));
-        groupCol.setPrefWidth(120);
-
-        TableColumn<PcStatusDto, String> statusCol = new TableColumn<>("상태");
         statusCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getStatus())));
-        statusCol.setPrefWidth(80);
         statusCol.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
                 if (empty || item == null) {
                     setText(null);
-                    setStyle("");
+                    getStyleClass().remove("status-broken");
                     return;
                 }
                 setText(item);
-                setStyle("-fx-text-fill: #d73a49; -fx-font-weight: bold;");
+                if (!getStyleClass().contains("status-broken")) getStyleClass().add("status-broken");
             }
         });
-
-        TableColumn<PcStatusDto, String> noteCol = new TableColumn<>("고장 사유");
         noteCol.setCellValueFactory(d -> new SimpleStringProperty(safe(d.getValue().getBrokenNote())));
-        noteCol.setPrefWidth(220);
 
-        TableColumn<PcStatusDto, Void> actionCol = new TableColumn<>("관리");
-        actionCol.setMinWidth(180);
-        actionCol.setStyle("-fx-alignment: CENTER;");
+        @SuppressWarnings("unchecked")
+        TableColumn<PcStatusDto, Void> actionCol = (TableColumn<PcStatusDto, Void>) table.getColumns().get(5);
         actionCol.setCellFactory(col -> new TableCell<>() {
             private final Button editBtn = new Button("사유 수정");
             private final Button clearBtn = new Button("해제");
             private final HBox box = new HBox(6, editBtn, clearBtn);
             {
-                editBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                clearBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                editBtn.getStyleClass().addAll("btn-warning", "btn-sm");
+                clearBtn.getStyleClass().addAll("btn-danger", "btn-sm");
                 box.setAlignment(Pos.CENTER);
                 editBtn.setOnAction(e -> {
                     PcStatusDto item = getTableView().getItems().get(getIndex());
@@ -680,318 +557,25 @@ public class DashboardManagementModule {
                 setGraphic(empty ? null : box);
             }
         });
-
-        table.getColumns().addAll(macCol, ipCol, groupCol, statusCol, noteCol, actionCol);
-        return table;
     }
 
     private VBox buildReportBox() {
-        Label reportTitle = new Label("주간/월간 보고서");
-        reportTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-
-        HBox reportBtns = new HBox(15);
-        reportBtns.setAlignment(Pos.CENTER_LEFT);
-        Button weekBtn = new Button("주간 보고서 생성");
-        weekBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
+        VBox reportBox;
+        Button weekBtn;
+        Button monthBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-report-section.fxml"));
+            reportBox = loader.load();
+            weekBtn   = (Button) loader.getNamespace().get("weekBtn");
+            monthBtn  = (Button) loader.getNamespace().get("monthBtn");
+        } catch (Exception e) {
+            throw new IllegalStateException("보고서 섹션 FXML 로딩 실패", e);
+        }
         weekBtn.setOnAction(e -> showReportDateDialog("WEEKLY"));
-
-        Button monthBtn = new Button("월간 보고서 생성");
-        monthBtn.setStyle("-fx-background-color: #3182ce; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 15;");
         monthBtn.setOnAction(e -> showReportDateDialog("MONTHLY"));
-
-        reportBtns.getChildren().addAll(weekBtn, monthBtn);
-        VBox reportBox = new VBox(10, reportTitle, reportBtns);
-        reportBox.setAlignment(Pos.TOP_LEFT);
-        reportBox.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
         return reportBox;
     }
 
-    @SuppressWarnings("unchecked")
-    private VBox buildFileDistributionBox() {
-        Label title = new Label("파일 배포 모니터링");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-
-        fileDistAlertLabel = new Label("알림: -");
-        fileDistAlertLabel.setStyle("-fx-background-color: #eff6ff; -fx-text-fill: #1e3a8a; -fx-padding: 6 10; -fx-background-radius: 4;");
-
-        fileDistJobIdField = new TextField();
-        fileDistJobIdField.setPromptText("Job ID 입력");
-        fileDistJobIdField.setPrefWidth(140);
-
-        Button refreshBtn = new Button("상태 조회");
-        refreshBtn.setOnAction(e -> {
-            loadRecentFileDistributionJobs();
-            loadFileDistributionIfSelected();
-        });
-
-        Button cancelBtn = new Button("Job 취소");
-        cancelBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white;");
-        cancelBtn.setOnAction(e -> cancelSelectedFileDistributionJob());
-
-        Button retryFailedBtn = new Button("실패 재전송");
-        retryFailedBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white;");
-        retryFailedBtn.setOnAction(e -> retryFailedForSelectedJob());
-
-        Button rollbackBtn = new Button("롤백 실행");
-        rollbackBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white;");
-        rollbackBtn.setOnAction(e -> rollbackSelectedJob());
-
-        HBox topRow = new HBox(8, new Label("Job ID:"), fileDistJobIdField, refreshBtn, retryFailedBtn, rollbackBtn, cancelBtn);
-        topRow.setAlignment(Pos.CENTER_LEFT);
-
-        fileDistStatusLabel = new Label("상태: -");
-        fileDistProgressLabel = new Label("진행률: -");
-        HBox statusRow = new HBox(20, fileDistStatusLabel, fileDistProgressLabel);
-        statusRow.setAlignment(Pos.CENTER_LEFT);
-
-        fileDistJobsTable = new TableView<>();
-        fileDistJobsTable.setPrefHeight(160);
-        fileDistJobsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        fileDistJobsTable.setPlaceholder(new Label("최근 배포 Job 없음"));
-
-        TableColumn<Map<String, Object>, String> jobIdCol = new TableColumn<>("Job ID");
-        jobIdCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("jobId", "-"))));
-        jobIdCol.setPrefWidth(90);
-        TableColumn<Map<String, Object>, String> fileCol = new TableColumn<>("파일명");
-        fileCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("originalFilename", "-"))));
-        fileCol.setPrefWidth(220);
-        TableColumn<Map<String, Object>, String> statusCol = new TableColumn<>("상태");
-        statusCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("status", "-"))));
-        statusCol.setPrefWidth(100);
-        statusCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                    return;
-                }
-                setText(item);
-                String c = switch (item) {
-                    case "COMPLETED" -> "#15803d";
-                    case "FAILED" -> "#b91c1c";
-                    case "CANCELLED" -> "#9a3412";
-                    case "IN_PROGRESS" -> "#1d4ed8";
-                    default -> "#334155";
-                };
-                setStyle("-fx-text-fill: " + c + "; -fx-font-weight: bold;");
-            }
-        });
-        TableColumn<Map<String, Object>, String> createdCol = new TableColumn<>("생성시각");
-        createdCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("createdAt", "-"))));
-        createdCol.setPrefWidth(180);
-        fileDistJobsTable.getColumns().setAll(jobIdCol, fileCol, statusCol, createdCol);
-        fileDistJobsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, row) -> {
-            if (row == null) return;
-            String jobId = String.valueOf(row.getOrDefault("jobId", "")).trim();
-            if (!jobId.isBlank()) {
-                fileDistJobIdField.setText(jobId);
-                loadFileDistributionIfSelected();
-            }
-        });
-
-        fileDistEventsTable = new TableView<>();
-        fileDistEventsTable.setPrefHeight(220);
-        fileDistEventsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-
-        TableColumn<Map<String, Object>, String> typeCol = new TableColumn<>("이벤트");
-        typeCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("eventType", "-"))));
-        typeCol.setPrefWidth(140);
-        TableColumn<Map<String, Object>, String> detailCol = new TableColumn<>("상세");
-        detailCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("detailJson", "-"))));
-        detailCol.setPrefWidth(360);
-        TableColumn<Map<String, Object>, String> eventCreatedCol = new TableColumn<>("시각");
-        eventCreatedCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().getOrDefault("createdAt", "-"))));
-        eventCreatedCol.setPrefWidth(160);
-        fileDistEventsTable.getColumns().setAll(typeCol, detailCol, eventCreatedCol);
-
-        VBox box = new VBox(10, title, fileDistAlertLabel, topRow, statusRow, new Label("최근 배포 Job"), fileDistJobsTable, new Label("선택 Job 이벤트"), fileDistEventsTable);
-        box.setAlignment(Pos.TOP_LEFT);
-        box.setStyle("-fx-border-color: #ddd; -fx-border-width: 1; -fx-padding: 15; -fx-background-color: white;");
-        return box;
-    }
-
-    private void startFileDistAutoRefresh() {
-        if (fileDistAutoRefresh != null) {
-            fileDistAutoRefresh.stop();
-        }
-        fileDistAutoRefresh = new Timeline(new KeyFrame(Duration.seconds(5), e -> {
-            loadRecentFileDistributionJobs();
-            loadFileDistributionIfSelected();
-        }));
-        fileDistAutoRefresh.setCycleCount(Timeline.INDEFINITE);
-        fileDistAutoRefresh.play();
-    }
-
-    private void loadRecentFileDistributionJobs() {
-        if (fileDistJobsTable == null) return;
-        apiClient.getPagedList("/file-distribution/jobs", new TypeReference<List<Map<String, Object>>>() {})
-                .thenAccept(rows -> Platform.runLater(() -> {
-                    List<Map<String, Object>> safeRows = rows == null ? List.of() : rows;
-                    fileDistJobsTable.getItems().setAll(safeRows);
-                    updateFileDistAlert(safeRows);
-                }))
-                .exceptionally(ex -> {
-                    Platform.runLater(() -> {
-                        fileDistJobsTable.getItems().clear();
-                        if (fileDistAlertLabel != null) {
-                            fileDistAlertLabel.setText("알림: 최근 Job 조회 실패");
-                            fileDistAlertLabel.setStyle("-fx-background-color: #fef2f2; -fx-text-fill: #991b1b; -fx-padding: 6 10; -fx-background-radius: 4;");
-                        }
-                    });
-                    return null;
-                });
-    }
-
-    private void updateFileDistAlert(List<Map<String, Object>> rows) {
-        if (fileDistAlertLabel == null) return;
-        List<Map<String, Object>> safeRows = rows == null ? List.of() : rows;
-        long inProgress = safeRows.stream().filter(r -> "IN_PROGRESS".equals(String.valueOf(r.get("status")))).count();
-        long failed = safeRows.stream().filter(r -> "FAILED".equals(String.valueOf(r.get("status")))).count();
-        long cancelled = safeRows.stream().filter(r -> "CANCELLED".equals(String.valueOf(r.get("status")))).count();
-
-        if (failed > 0) {
-            fileDistAlertLabel.setText("알림: 실패 Job " + failed + "건");
-            fileDistAlertLabel.setStyle("-fx-background-color: #fef2f2; -fx-text-fill: #991b1b; -fx-padding: 6 10; -fx-background-radius: 4;");
-            return;
-        }
-        if (cancelled > 0) {
-            fileDistAlertLabel.setText("알림: 취소 Job " + cancelled + "건");
-            fileDistAlertLabel.setStyle("-fx-background-color: #fff7ed; -fx-text-fill: #9a3412; -fx-padding: 6 10; -fx-background-radius: 4;");
-            return;
-        }
-        if (inProgress > 0) {
-            fileDistAlertLabel.setText("알림: 진행중 Job " + inProgress + "건");
-            fileDistAlertLabel.setStyle("-fx-background-color: #eff6ff; -fx-text-fill: #1e3a8a; -fx-padding: 6 10; -fx-background-radius: 4;");
-            return;
-        }
-        fileDistAlertLabel.setText("알림: 현재 이상 없음");
-        fileDistAlertLabel.setStyle("-fx-background-color: #ecfdf5; -fx-text-fill: #065f46; -fx-padding: 6 10; -fx-background-radius: 4;");
-    }
-
-    private void loadFileDistributionIfSelected() {
-        if (fileDistJobIdField == null) return;
-        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
-        if (jobId.isBlank()) return;
-
-        apiClient.getJson("/file-distribution/jobs/" + jobId, new TypeReference<Map<String, Object>>() {})
-                .thenAccept(status -> Platform.runLater(() -> {
-                    String s = String.valueOf(status.getOrDefault("status", "-"));
-                    String p = String.valueOf(status.getOrDefault("progress", "-"));
-                    fileDistStatusLabel.setText("상태: " + s);
-                    fileDistProgressLabel.setText("진행률: " + p);
-                }))
-                .exceptionally(ex -> {
-                    Platform.runLater(() -> {
-                        fileDistStatusLabel.setText("상태: 조회 실패");
-                        fileDistProgressLabel.setText("진행률: -");
-                    });
-                    return null;
-                });
-
-        apiClient.getPagedList("/file-distribution/jobs/" + jobId + "/events", new TypeReference<List<Map<String, Object>>>() {})
-                .thenAccept(events -> Platform.runLater(() -> fileDistEventsTable.getItems().setAll(events == null ? List.of() : events)))
-                .exceptionally(ex -> {
-                    Platform.runLater(() -> fileDistEventsTable.getItems().clear());
-                    return null;
-                });
-    }
-
-    private void cancelSelectedFileDistributionJob() {
-        if (fileDistJobIdField == null) return;
-        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
-        if (jobId.isBlank()) {
-            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
-            return;
-        }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "배포 Job을 취소하시겠습니까?", ButtonType.YES, ButtonType.NO);
-        confirm.showAndWait().ifPresent(type -> {
-            if (type != ButtonType.YES) return;
-            apiClient.postJson("/file-distribution/jobs/" + jobId + "/cancel", Map.of())
-                    .thenAccept(resp -> Platform.runLater(() -> {
-                        new Alert(Alert.AlertType.INFORMATION, "배포 Job이 취소되었습니다.").show();
-                        loadFileDistributionIfSelected();
-                    }))
-                    .exceptionally(ex -> {
-                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                "취소 실패: " + errorMessage(ex)).show());
-                        return null;
-                    });
-        });
-    }
-
-    private void retryFailedForSelectedJob() {
-        if (fileDistJobIdField == null) return;
-        String jobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
-        if (jobId.isBlank()) {
-            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
-            return;
-        }
-        apiClient.postJson("/file-distribution/jobs/" + jobId + "/retry-failed", Map.of())
-                .thenAccept(resp -> Platform.runLater(() -> {
-                    new Alert(Alert.AlertType.INFORMATION, "실패 대상 재전송을 시작했습니다.").show();
-                    loadRecentFileDistributionJobs();
-                    loadFileDistributionIfSelected();
-                }))
-                .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            "실패 재전송 실패: " + errorMessage(ex)).show());
-                    return null;
-                });
-    }
-
-    private void rollbackSelectedJob() {
-        if (fileDistJobIdField == null) return;
-        String sourceJobId = fileDistJobIdField.getText() == null ? "" : fileDistJobIdField.getText().trim();
-        if (sourceJobId.isBlank()) {
-            new Alert(Alert.AlertType.WARNING, "Job ID를 입력하세요.").show();
-            return;
-        }
-
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("롤백 실행");
-        dialog.setHeaderText("복구 기준(안정) Job ID를 입력하세요");
-        dialog.setContentText("rollbackFromJobId:");
-        dialog.showAndWait().ifPresent(rollbackFrom -> {
-            String rollbackFromId = rollbackFrom == null ? "" : rollbackFrom.trim();
-            if (rollbackFromId.isBlank()) {
-                new Alert(Alert.AlertType.WARNING, "rollbackFromJobId를 입력하세요.").show();
-                return;
-            }
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("rollbackFromJobId", rollbackFromId);
-            body.put("waveSize", 20);
-            body.put("canaryOnly", false);
-            apiClient.postJson("/file-distribution/jobs/" + sourceJobId + "/rollback", body)
-                    .thenAccept(resp -> Platform.runLater(() -> {
-                        new Alert(Alert.AlertType.INFORMATION, "롤백 배포 Job이 생성되었습니다.").show();
-                        loadRecentFileDistributionJobs();
-                        loadFileDistributionIfSelected();
-                    }))
-                    .exceptionally(ex -> {
-                        Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                "롤백 실행 실패: " + errorMessage(ex)).show());
-                        return null;
-                    });
-        });
-    }
-
-    private ComboBox<ClassroomSummaryDto> buildClassroomComboBox() {
-        ComboBox<ClassroomSummaryDto> comboBox = new ComboBox<>();
-        comboBox.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(ClassroomSummaryDto object) {
-                return object != null ? object.getGroupName() : "";
-            }
-
-            @Override
-            public ClassroomSummaryDto fromString(String string) {
-                return null;
-            }
-        });
-        return comboBox;
-    }
 
     private ClassroomSummaryDto createAllClassroomOption() {
         ClassroomSummaryDto dto = new ClassroomSummaryDto();
@@ -1130,6 +714,10 @@ public class DashboardManagementModule {
                             })
                             .toList();
                     Platform.runLater(() -> teacherDeviceTable.getItems().setAll(merged));
+                })
+                .exceptionally(ex -> {
+                    log.warn("교사 PC 목록 병합 실패", ex);
+                    return null;
                 });
     }
 
@@ -1359,17 +947,30 @@ public class DashboardManagementModule {
         String title = "개별 PC 제어 — " + item.getGroupName()
                 + " [" + item.getStartIp() + " ~ " + item.getEndIp() + "]";
 
-        TableColumn<PcStatusDto, String> nameCol = new TableColumn<>("PC명");
-        nameCol.setCellValueFactory(d -> new SimpleStringProperty(
-                d.getValue().getHostname() != null ? d.getValue().getHostname() : "-"));
-        nameCol.setPrefWidth(160);
+        VBox root;
+        Label headerLabel;
+        TableView<PcStatusDto> table;
+        TableColumn<PcStatusDto, String> nameCol, ipCol, statusCol;
+        TableColumn<PcStatusDto, Void> actionCol;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-individual-control-dialog.fxml"));
+            root        = loader.load();
+            headerLabel = (Label) loader.getNamespace().get("headerLabel");
+            table       = (TableView<PcStatusDto>) loader.getNamespace().get("controlTable");
+            nameCol     = (TableColumn<PcStatusDto, String>) table.getColumns().get(0);
+            ipCol       = (TableColumn<PcStatusDto, String>) table.getColumns().get(1);
+            statusCol   = (TableColumn<PcStatusDto, String>) table.getColumns().get(2);
+            actionCol   = (TableColumn<PcStatusDto, Void>)   table.getColumns().get(3);
+        } catch (Exception e) {
+            throw new IllegalStateException("개별 PC 제어 다이얼로그 FXML 로딩 실패", e);
+        }
 
-        TableColumn<PcStatusDto, String> ipCol = new TableColumn<>("IP 주소");
+        headerLabel.setText(title);
+
+        nameCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().getPcName() != null ? d.getValue().getPcName() : "-"));
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(
                 d.getValue().getIpAddress() != null ? d.getValue().getIpAddress() : "-"));
-        ipCol.setPrefWidth(130);
-
-        TableColumn<PcStatusDto, String> statusCol = new TableColumn<>("상태");
         statusCol.setCellValueFactory(d -> {
             String s = d.getValue().getStatus();
             if (s == null || s.isBlank()) s = d.getValue().isOnline() ? "ONLINE" : "OFFLINE";
@@ -1378,25 +979,23 @@ public class DashboardManagementModule {
         statusCol.setCellFactory(col -> new TableCell<>() {
             @Override protected void updateItem(String status, boolean empty) {
                 super.updateItem(status, empty);
-                if (empty || status == null) { setText(null); setStyle(""); return; }
+                getStyleClass().removeAll("status-online", "status-offline");
+                if (empty || status == null) { setText(null); return; }
                 setText(status);
-                setStyle("ONLINE".equalsIgnoreCase(status)
-                        ? "-fx-text-fill: #22863a; -fx-font-weight: bold;"
-                        : "-fx-text-fill: #d73a49; -fx-font-weight: bold;");
+                getStyleClass().add("ONLINE".equalsIgnoreCase(status)
+                    ? "status-online"
+                    : "status-offline");
             }
         });
-        statusCol.setPrefWidth(80);
-
-        TableColumn<PcStatusDto, Void> actionCol = new TableColumn<>("제어");
         actionCol.setCellFactory(col -> new TableCell<>() {
             private final Button shutdownBtn = new Button("종료");
             private final Button rebootBtn   = new Button("재시작");
             private final Button wolBtn      = new Button("켜기(WOL)");
             private final HBox box           = new HBox(4, shutdownBtn, rebootBtn, wolBtn);
             {
-                shutdownBtn.setStyle("-fx-background-color: #d73a49; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                rebootBtn.setStyle("-fx-background-color: #e36209; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
-                wolBtn.setStyle("-fx-background-color: #22863a; -fx-text-fill: white; -fx-font-size: 11px; -fx-background-radius: 4;");
+                shutdownBtn.getStyleClass().addAll("btn-danger", "btn-sm");
+                rebootBtn.getStyleClass().addAll("btn-warning", "btn-sm");
+                wolBtn.getStyleClass().addAll("btn-success", "btn-sm");
                 box.setAlignment(Pos.CENTER);
                 shutdownBtn.setOnAction(e -> {
                     PcStatusDto pc = getTableView().getItems().get(getIndex());
@@ -1416,22 +1015,8 @@ public class DashboardManagementModule {
                 setGraphic(empty ? null : box);
             }
         });
-        actionCol.setPrefWidth(210);
 
-        @SuppressWarnings("unchecked")
-        TableView<PcStatusDto> table = new TableView<>();
-        table.getColumns().addAll(nameCol, ipCol, statusCol, actionCol);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("PC 정보를 불러오는 중..."));
-        table.setStyle("-fx-background-color: white; -fx-font-size: 13px;");
-        table.setPrefHeight(440);
-
-        VBox root = new VBox(8);
-        root.setPadding(new Insets(12));
-        root.setStyle("-fx-background-color: #f8fbff;");
-        Label headerLabel = new Label(title);
-        headerLabel.setStyle("-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #1e293b;");
-        root.getChildren().addAll(headerLabel, table);
 
         javafx.stage.Stage dialog = new javafx.stage.Stage();
         dialog.setTitle(title);
@@ -1457,9 +1042,9 @@ public class DashboardManagementModule {
         }
     }
 
-    private Button makeCommandBtn(String label, String color, String ip, String commandType) {
+    private Button makeCommandBtn(String label, String cssClass, String ip, String commandType) {
         Button btn = new Button(label);
-        btn.setStyle("-fx-background-color: " + color + "; -fx-text-fill: white; -fx-font-size: 11px;");
+        btn.getStyleClass().addAll(cssClass, "btn-sm");
         btn.setOnAction(e -> sendCommandToIp(ip, commandType));
         return btn;
     }
@@ -1477,36 +1062,6 @@ public class DashboardManagementModule {
                 });
     }
 
-    /** startIp ~ endIp 범위의 IP 목록을 반환. 최대 255개 제한. */
-    private List<String> enumerateIps(String startIp, String endIp) {
-        List<String> ips = new ArrayList<>();
-        if (startIp == null || endIp == null || startIp.isBlank() || endIp.isBlank()) return ips;
-        try {
-            long start = ipToLong(startIp.trim());
-            long end   = ipToLong(endIp.trim());
-            long limit = Math.min(end, start + 254); // 최대 255개
-            for (long i = start; i <= limit; i++) {
-                ips.add(longToIp(i));
-            }
-        } catch (Exception e) {
-            log.warn("IP 열거 실패 {} ~ {}", startIp, endIp, e);
-        }
-        return ips;
-    }
-
-    private long ipToLong(String ip) {
-        String[] parts = ip.split("\\.");
-        long result = 0;
-        for (String part : parts) {
-            result = result * 256 + Long.parseLong(part.trim());
-        }
-        return result;
-    }
-
-    private String longToIp(long ip) {
-        return ((ip >> 24) & 0xFF) + "." + ((ip >> 16) & 0xFF) + "."
-                + ((ip >> 8) & 0xFF) + "." + (ip & 0xFF);
-    }
 
     private void deleteIpRange(IpRangeItem item) {
         apiClient.delete("/ip-ranges/" + item.getId())
@@ -1518,85 +1073,7 @@ public class DashboardManagementModule {
                 });
     }
 
-    // ─── 스크립트 / 보고서 ────────────────────────────────────────────────
-
-    private void handleScriptUploadAndRun() {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("PowerShell 스크립트 선택");
-        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PowerShell Files", "*.ps1"));
-        File file = fileChooser.showOpenDialog(sceneSupplier.get().getWindow());
-
-        if (file != null) {
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                    "'" + file.getName() + "' 파일을 모든 PC에 배포하고 실행하시겠습니까?",
-                    ButtonType.YES, ButtonType.NO);
-            confirm.showAndWait().ifPresent(type -> {
-                if (type == ButtonType.YES) uploadAndExecuteScript(file);
-            });
-        }
-    }
-
-    private void uploadAndExecuteScript(File file) {
-        SCRIPT_EXECUTOR.execute(() -> {
-            try {
-                HttpRequest uploadRequest = MultipartUtil
-                    .newMultipartRequest(apiBaseUrl + "/scripts",
-                        Map.of("file", file.toPath().toString()),
-                        buildAuthHeaders())
-                        .build();
-                HttpResponse<String> uploadResponse = httpClient.send(uploadRequest, HttpResponse.BodyHandlers.ofString());
-
-                if (uploadResponse.statusCode() < 200 || uploadResponse.statusCode() >= 300) {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            "스크립트 업로드 실패: HTTP " + uploadResponse.statusCode()).show());
-                    return;
-                }
-
-                @SuppressWarnings("unchecked")
-                Map<String, Object> uploadResp = objectMapper.readValue(uploadResponse.body(), Map.class);
-                String scriptUrl = String.valueOf(uploadResp.getOrDefault("downloadUrl", ""));
-                if (scriptUrl.isBlank()) {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            "스크립트 업로드 응답에 downloadUrl이 없습니다.").show());
-                    return;
-                }
-
-                // 전체 강의실에 GROUP RUN_PS1 명령 발행
-                List<ClassroomSummaryDto> classrooms = apiClient
-                        .getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})
-                        .join();
-
-                int queuedGroups = 0;
-                int failedGroups = 0;
-                for (ClassroomSummaryDto c : classrooms) {
-                    if (c == null || c.getGroupId() == null) continue;
-                    Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("scope", "GROUP");
-                    payload.put("groupId", c.getGroupId());
-                    payload.put("role", "ALL");
-                    payload.put("type", "RUN_PS1");
-                    payload.put("scriptUrl", scriptUrl);
-                    payload.put("payloadJson", "{}");
-                    try {
-                        apiClient.postJson("/commands", payload).join();
-                        queuedGroups++;
-                    } catch (Exception e) {
-                        log.warn("Failed to enqueue RUN_PS1 for group {}", c.getGroupId(), e);
-                        failedGroups++;
-                    }
-                }
-
-                final int successCount = queuedGroups;
-                final int failCount = failedGroups;
-                Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
-                    "스크립트 배포 요청 완료: 성공 " + successCount + "개 강의실, 실패 " + failCount + "개").show());
-            } catch (Exception e) {
-                log.warn("Failed to upload/execute script {}", file.getName(), e);
-                Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                        "스크립트 업로드 오류: " + e.getMessage()).show());
-            }
-        });
-    }
+    // ─── 보고서 ────────────────────────────────────────────────
 
     private String errorMessage(Throwable ex) {
         Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
@@ -1616,14 +1093,6 @@ public class DashboardManagementModule {
         return false;
     }
 
-    private Map<String, String> buildAuthHeaders() {
-        String bearerToken = apiClient.getBearerToken();
-        if (bearerToken == null || bearerToken.isBlank()) {
-            return Map.of();
-        }
-        return Map.of("Authorization", "Bearer " + bearerToken);
-    }
-
     private void showReportDateDialog(String defaultType) {
         Dialog<Map<String, Object>> dialog = new Dialog<>();
         dialog.setTitle("보고서 생성");
@@ -1631,10 +1100,22 @@ public class DashboardManagementModule {
         ButtonType generateBtn = new ButtonType("생성", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(generateBtn, ButtonType.CANCEL);
 
+        GridPane form;
+        RadioButton weeklyBtn, monthlyBtn;
+        DatePicker fromPicker, toPicker;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-report-date-dialog-content.fxml"));
+            form        = loader.load();
+            weeklyBtn   = (RadioButton) loader.getNamespace().get("weeklyBtn");
+            monthlyBtn  = (RadioButton) loader.getNamespace().get("monthlyBtn");
+            fromPicker  = (DatePicker)  loader.getNamespace().get("fromPicker");
+            toPicker    = (DatePicker)  loader.getNamespace().get("toPicker");
+        } catch (Exception e) {
+            throw new IllegalStateException("보고서 날짜 다이얼로그 FXML 로딩 실패", e);
+        }
+
         ToggleGroup typeGroup = new ToggleGroup();
-        RadioButton weeklyBtn = new RadioButton("주간 보고서");
         weeklyBtn.setToggleGroup(typeGroup);
-        RadioButton monthlyBtn = new RadioButton("월간 보고서");
         monthlyBtn.setToggleGroup(typeGroup);
         if ("MONTHLY".equalsIgnoreCase(defaultType)) {
             monthlyBtn.setSelected(true);
@@ -1649,8 +1130,8 @@ public class DashboardManagementModule {
         LocalDate monthStart = now.withDayOfMonth(1);
         LocalDate monthEnd = now.withDayOfMonth(now.lengthOfMonth());
 
-        DatePicker fromPicker = new DatePicker(weeklyBtn.isSelected() ? weekStart : monthStart);
-        DatePicker toPicker = new DatePicker(weeklyBtn.isSelected() ? weekEnd : monthEnd);
+        fromPicker.setValue(weeklyBtn.isSelected() ? weekStart : monthStart);
+        toPicker.setValue(weeklyBtn.isSelected() ? weekEnd : monthEnd);
 
         weeklyBtn.selectedProperty().addListener((obs, oldVal, selected) -> {
             if (selected) {
@@ -1665,16 +1146,6 @@ public class DashboardManagementModule {
             }
         });
 
-        GridPane form = new GridPane();
-        form.setHgap(10);
-        form.setVgap(8);
-        form.setPadding(new Insets(12));
-        form.add(new Label("유형:"), 0, 0);
-        form.add(new HBox(10, weeklyBtn, monthlyBtn), 1, 0);
-        form.add(new Label("시작일:"), 0, 1);
-        form.add(fromPicker, 1, 1);
-        form.add(new Label("종료일:"), 0, 2);
-        form.add(toPicker, 1, 2);
         dialog.getDialogPane().setContent(form);
 
         dialog.setResultConverter(btn -> {
@@ -1748,6 +1219,7 @@ public class DashboardManagementModule {
                     return null;
                 });
     }
+
 }
 
 

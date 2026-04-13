@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'com.gradleup.shadow' version '9.4.1'
 }
 
 import org.gradle.internal.os.OperatingSystem
@@ -55,6 +55,7 @@ dependencies {
     implementation 'ch.qos.logback:logback-classic:1.4.11'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core:3.25.3'
 }
 
@@ -81,14 +82,14 @@ tasks.register('packageExe', Exec) {
     onlyIf { OperatingSystem.current().isWindows() }
 
     doFirst {
-        def outputDir = file("$buildDir/package")
+        def outputDir = file("${layout.buildDirectory.get()}/package")
         delete(outputDir)
         outputDir.mkdirs()
 
         commandLine 'jpackage',
             '--type', 'app-image',
             '--name', 'ClassroomDashboard',
-            '--input', file("$buildDir/libs").absolutePath,
+            '--input', file("${layout.buildDirectory.get()}/libs").absolutePath,
             '--main-jar', shadowJar.archiveFileName.get(),
             '--main-class', application.mainClass.get(),
             '--dest', outputDir.absolutePath,
@@ -102,13 +103,13 @@ tasks.register('packageMsi', Exec) {
     onlyIf { OperatingSystem.current().isWindows() }
 
     doFirst {
-        def outputDir = file("$buildDir/package")
+        def outputDir = file("${layout.buildDirectory.get()}/package")
         outputDir.mkdirs()
 
         commandLine 'jpackage',
             '--type', 'msi',
             '--name', 'ClassroomDashboard',
-            '--input', file("$buildDir/libs").absolutePath,
+            '--input', file("${layout.buildDirectory.get()}/libs").absolutePath,
             '--main-jar', shadowJar.archiveFileName.get(),
             '--main-class', application.mainClass.get(),
             '--dest', outputDir.absolutePath,

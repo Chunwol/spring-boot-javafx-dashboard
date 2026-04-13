@@ -1,6 +1,6 @@
 # Frontend JavaFX Dockerfile
 # 멀티스테이지 빌드: 1단계는 빌드, 2단계는 실행
-FROM openjdk:17-slim as builder
+FROM eclipse-temurin:25-jdk as builder
 
 WORKDIR /build
 
@@ -16,7 +16,7 @@ COPY frontend frontend/
 RUN chmod +x gradlew && ./gradlew :frontend:shadowJar -x test
 
 # 실행 스테이지
-FROM openjdk:17-slim
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 
