@@ -272,6 +272,77 @@ public class DashboardController {
     private final AtomicBoolean snapshotRefreshInFlight = new AtomicBoolean(false);
     private final AtomicBoolean serverDisconnectHandled = new AtomicBoolean(false);
 
+    private boolean isViewerMode() {
+        return ApiClient.getInstance().isViewerRole();
+    }
+
+    private boolean ensureWritePermission(String actionName) {
+        if (!isViewerMode()) {
+            return true;
+        }
+        String message = "뷰어 계정은 " + actionName + " 권한이 없습니다.";
+        if (dashboardUIService != null) {
+            dashboardUIService.showToast(message, true);
+        } else {
+            log.info(message);
+        }
+        return false;
+    }
+
+    private void removeTabIfPresent(Tab tab) {
+        if (mainTabPane == null || tab == null) {
+            return;
+        }
+        mainTabPane.getTabs().remove(tab);
+    }
+
+    private void applyViewerUiRestrictions() {
+        if (!isViewerMode()) {
+            return;
+        }
+
+        dashboardViewModel.setEditMode(false);
+
+        if (dashboardSubtitleLabel != null) {
+            String subtitle = dashboardSubtitleLabel.getText();
+            if (subtitle != null && !subtitle.contains("읽기 전용")) {
+                dashboardSubtitleLabel.setText(subtitle + " | 읽기 전용");
+            }
+        }
+
+        if (dashboardSettingsMenu != null) {
+            dashboardSettingsMenu.setDisable(true);
+            dashboardSettingsMenu.setManaged(false);
+            dashboardSettingsMenu.setVisible(false);
+        }
+
+        if (editModeButton != null) {
+            editModeButton.setSelected(false);
+            editModeButton.setDisable(true);
+            editModeButton.setManaged(false);
+            editModeButton.setVisible(false);
+        }
+
+        if (bgColorPicker != null) {
+            bgColorPicker.setDisable(true);
+        }
+
+        if (leftPaneSlot != null) {
+            leftPaneSlot.setManaged(false);
+            leftPaneSlot.setVisible(false);
+        }
+        if (dashboardMainSplitPane != null) {
+            dashboardMainSplitPane.setDividerPositions(0.0);
+        }
+
+        removeTabIfPresent(pcManagementTab);
+        removeTabIfPresent(settingsTab);
+
+        if (mainTabPane != null && dashboardTab != null) {
+            mainTabPane.getSelectionModel().select(dashboardTab);
+        }
+    }
+
     @FXML
     public void initialize() {
         dashboardViewModel = new DashboardViewModel();
@@ -289,6 +360,7 @@ public class DashboardController {
 
         initializeTopBar();
         initializeTabs();
+        applyViewerUiRestrictions();
 
         // Bind zoom property to UI updates
         dashboardViewModel.zoomScaleProperty().addListener((obs, oldV, newV) -> {
@@ -452,6 +524,13 @@ public class DashboardController {
         if (settingsMenu == null) {
             return;
         }
+        if (isViewerMode()) {
+            settingsMenu.getItems().clear();
+            settingsMenu.setDisable(true);
+            settingsMenu.setManaged(false);
+            settingsMenu.setVisible(false);
+            return;
+        }
         settingsMenu.getItems().clear();
 
         // 대시보드 추가
@@ -487,6 +566,9 @@ public class DashboardController {
 
     // 대시보드 삭제 처리
     private void handleDeleteDashboard() {
+        if (!ensureWritePermission("대시보드 삭제")) {
+            return;
+        }
         List<DashboardInfoDto> dashboards = dashboardSelector.getItems();
         DashboardInfoDto selected = dashboardSelector.getValue();
         if (dashboards == null || dashboards.size() <= 1 || selected == null) {
@@ -593,6 +675,9 @@ public class DashboardController {
     }
 
     private void handleLayoutBackup() {
+        if (!ensureWritePermission("레이아웃 백업")) {
+            return;
+        }
         Long dashboardId = currentDashboardId();
         if (dashboardId == null) {
             dashboardUIService.showToast("대시보드를 선택해주세요.", true);
@@ -622,6 +707,9 @@ public class DashboardController {
     }
 
     private void handleLayoutRestore() {
+        if (!ensureWritePermission("레이아웃 복원")) {
+            return;
+        }
         Long dashboardId = currentDashboardId();
         if (dashboardId == null) {
             dashboardUIService.showToast("대시보드를 선택해주세요.", true);
@@ -682,6 +770,11 @@ public class DashboardController {
     }
 
     private void handleKeyboardShortcuts(javafx.scene.input.KeyEvent event) {
+        if (isViewerMode() && event.isControlDown()
+                && (event.getCode() == KeyCode.S || event.getCode() == KeyCode.Z)) {
+            event.consume();
+            return;
+        }
         // Escape: Toggle edit mode off if active
         if (event.getCode() == KeyCode.ESCAPE) {
             if (dashboardViewModel.isEditMode()) {
@@ -705,20 +798,25 @@ public class DashboardController {
         if (mainTabPane == null) {
             return;
         }
+        boolean viewerMode = isViewerMode();
 
         if (dashboardTab != null) {
             dashboardTab.setContent(createMainDashboardView());
         }
 
         if (pcManagementTab != null) {
-            if (pcManagementSlot != null) {
-                pcManagementSlot.getChildren().setAll(createPcManagementView());
-            }
-            pcManagementTab.setOnSelectionChanged(event -> {
-                if (pcManagementTab.isSelected() && pcManagementModule != null) {
-                    pcManagementModule.reloadData();
+            if (viewerMode) {
+                removeTabIfPresent(pcManagementTab);
+            } else {
+                if (pcManagementSlot != null) {
+                    pcManagementSlot.getChildren().setAll(createPcManagementView());
                 }
-            });
+                pcManagementTab.setOnSelectionChanged(event -> {
+                    if (pcManagementTab.isSelected() && pcManagementModule != null) {
+                        pcManagementModule.reloadData();
+                    }
+                });
+            }
         }
 
         networkPanelController = new NetworkPanelController(null);
@@ -741,14 +839,18 @@ public class DashboardController {
         }
 
         if (settingsTab != null) {
-            if (settingsSlot != null) {
-                settingsSlot.getChildren().setAll(createManagementView());
-            }
-            settingsTab.setOnSelectionChanged(event -> {
-                if (settingsTab.isSelected() && managementModule != null) {
-                    managementModule.reloadData();
+            if (viewerMode) {
+                removeTabIfPresent(settingsTab);
+            } else {
+                if (settingsSlot != null) {
+                    settingsSlot.getChildren().setAll(createManagementView());
                 }
-            });
+                settingsTab.setOnSelectionChanged(event -> {
+                    if (settingsTab.isSelected() && managementModule != null) {
+                        managementModule.reloadData();
+                    }
+                });
+            }
         }
     }
 
@@ -934,6 +1036,11 @@ public class DashboardController {
     }
 
     private void configureEditModeToggleButton(ToggleButton editModeBtn) {
+        if (isViewerMode()) {
+            editModeBtn.setSelected(false);
+            editModeBtn.setDisable(true);
+            return;
+        }
         editModeBtn.setOnAction(e -> {
             dashboardViewModel.setEditMode(editModeBtn.isSelected());
             applyEditModeUiState();
@@ -1002,6 +1109,10 @@ public class DashboardController {
 
     private void configureBackgroundColorPicker(ColorPicker bgColorPicker) {
         bgColorPicker.setValue(Color.web("#f0f2f5"));
+        if (isViewerMode()) {
+            bgColorPicker.setDisable(true);
+            return;
+        }
         bgColorPicker.setOnAction(e -> {
             if (classroomContainer == null) {
                 return;
@@ -1152,6 +1263,9 @@ public class DashboardController {
 
     private void saveNodePosition(Node node) {
         if (node == null) {
+            return;
+        }
+        if (isViewerMode()) {
             return;
         }
 
@@ -1314,6 +1428,9 @@ public class DashboardController {
     }
 
     private void handleCreateDashboard() {
+        if (!ensureWritePermission("대시보드 생성")) {
+            return;
+        }
         TextInputDialog dialog = new TextInputDialog("새 대시보드");
         dialog.setTitle("대시보드 생성");
         dialog.setHeaderText("대시보드 이름 입력");
@@ -1737,6 +1854,9 @@ public class DashboardController {
     }
 
     private void handleGroupDrop(Long groupId, double x, double y) {
+        if (!ensureWritePermission("패널 배치 변경")) {
+            return;
+        }
         if (groupId == null || classroomModule == null) {
             return;
         }
@@ -1770,6 +1890,9 @@ public class DashboardController {
     }
 
     private void handleTextDrop(Long id, double x, double y) {
+        if (!ensureWritePermission("텍스트 패널 이동")) {
+            return;
+        }
         if (id == null || widgetModule == null) {
             return;
         }
@@ -1778,6 +1901,9 @@ public class DashboardController {
     }
 
     private void handleImageDrop(Long id, double x, double y) {
+        if (!ensureWritePermission("이미지 패널 이동")) {
+            return;
+        }
         if (id == null || widgetModule == null) {
             return;
         }
@@ -1786,6 +1912,9 @@ public class DashboardController {
     }
 
     private void arrangePanels(String mode) {
+        if (!ensureWritePermission("패널 배열")) {
+            return;
+        }
         if (!isEditModeActive()) {
             dashboardUIService.showToast("편집 모드에서만 배열 기능을 사용할 수 있습니다.", true);
             return;

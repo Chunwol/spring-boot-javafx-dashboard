@@ -43,7 +43,8 @@ scheduler:
 
 app:
   security:
-    admin-users: ${ADMIN_USERS:admin}
+    admin-users: ${ADMIN_USERS:${DEFAULT_ADMIN_USERNAME:admin}}
+    viewer-users: ${VIEWER_USERS:${DEFAULT_VIEWER_USERNAME:}}
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
   file-distribution:

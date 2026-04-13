@@ -1,29 +1,21 @@
 package com.example.backend.service.auth;
 
 import com.example.backend.repository.user.UserRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-import java.util.Arrays;
-import java.util.Set;
-import java.util.stream.Collectors;
-
 @Service
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
-    private final Set<String> adminUsers;
+    private final UserRoleResolver userRoleResolver;
 
     public CustomUserDetailsService(UserRepository userRepository,
-                                    @Value("${app.security.admin-users:admin}") String adminUsersRaw) {
+                                    UserRoleResolver userRoleResolver) {
         this.userRepository = userRepository;
-        this.adminUsers = Arrays.stream(adminUsersRaw.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .collect(Collectors.toSet());
+        this.userRoleResolver = userRoleResolver;
     }
 
     @Override
@@ -33,9 +25,18 @@ public class CustomUserDetailsService implements UserDetailsService {
                         .builder()
                         .username(user.getUsername())
                         .password(user.getPassword())
-                    .roles(adminUsers.contains(user.getUsername()) ? "ADMIN" : "USER")
+                        .roles(resolveSpringRoles(user.getUsername()))
                         .build()
                 )
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+    }
+
+    private String[] resolveSpringRoles(String username) {
+        String role = userRoleResolver.resolveRole(username);
+        return switch (role) {
+            case "ADMIN" -> new String[]{"ADMIN", "USER"};
+            case "VIEWER" -> new String[]{"VIEWER"};
+            default -> new String[]{"USER"};
+        };
     }
 }

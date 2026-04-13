@@ -3,6 +3,7 @@ package com.example.backend.config;
 import com.example.backend.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -48,8 +49,10 @@ public class SecurityConfig {
                 ).permitAll()
                 // 에이전트 명령 엔드포인트: AgentTokenInterceptor에서 토큰 검증 (인증 불필요 but filter 통과)
                 .requestMatchers("/api/v1/agent/commands/**").permitAll()
-                // 업로드 파일은 인증 필요
-                .requestMatchers("/api/v1/files/**").authenticated()
+                // 조회용 API는 ADMIN/USER/VIEWER 허용
+                .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("ADMIN", "USER", "VIEWER")
+                // 변경/제어 API는 VIEWER를 제외한 사용자(ADMIN/USER) 허용
+                .requestMatchers("/api/v1/**").hasAnyRole("ADMIN", "USER")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

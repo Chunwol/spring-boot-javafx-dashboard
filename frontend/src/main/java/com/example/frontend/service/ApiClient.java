@@ -91,6 +91,7 @@ public class ApiClient {
     private volatile String baseUrl;
     private volatile String wsUrl;
     private volatile String bearerToken;
+    private volatile String currentUserRole = "USER";
     private volatile Consumer<Throwable> connectionFailureHandler;
     private volatile Consumer<ApiClientException> authFailureHandler;
     private final AtomicBoolean authFailureNotified = new AtomicBoolean(false);
@@ -120,7 +121,22 @@ public class ApiClient {
         this.bearerToken = bearerToken;
         if (bearerToken != null && !bearerToken.isBlank()) {
             authFailureNotified.set(false);
+        } else {
+            this.currentUserRole = "USER";
         }
+    }
+
+    public void setCurrentUserRole(String role) {
+        String normalized = role == null ? "" : role.trim().toUpperCase(java.util.Locale.ROOT);
+        this.currentUserRole = normalized.isBlank() ? "USER" : normalized;
+    }
+
+    public String getCurrentUserRole() {
+        return currentUserRole;
+    }
+
+    public boolean isViewerRole() {
+        return "VIEWER".equalsIgnoreCase(currentUserRole);
     }
 
     public void setConnectionFailureHandler(Consumer<Throwable> handler) {

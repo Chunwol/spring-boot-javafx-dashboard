@@ -3,8 +3,8 @@ package com.example.backend.controller.auth;
 import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
-import com.example.backend.model.user.User;
 import com.example.backend.repository.user.UserRepository;
+import com.example.backend.service.auth.UserRoleResolver;
 import com.example.backend.util.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -28,11 +28,16 @@ public class AuthController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final UserRoleResolver userRoleResolver;
 
-    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
+    public AuthController(UserRepository userRepository,
+                          PasswordEncoder passwordEncoder,
+                          JwtUtil jwtUtil,
+                          UserRoleResolver userRoleResolver) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
+        this.userRoleResolver = userRoleResolver;
     }
 
     /**
@@ -61,7 +66,8 @@ public class AuthController {
             boolean matches = passwordEncoder.matches(loginRequest.getPassword(), user.getPassword());
             if (matches) {
                 String token = jwtUtil.generateToken(user.getUsername());
-                return ResponseEntity.ok(new LoginResponse(user.getUsername(), token));
+                String role = userRoleResolver.resolveRole(user.getUsername());
+                return ResponseEntity.ok(new LoginResponse(user.getUsername(), token, role));
             }
         }
         throw new UnauthorizedException("Invalid credentials");

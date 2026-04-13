@@ -17,6 +17,7 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 import java.util.Map;
+import java.util.Locale;
 import java.util.prefs.Preferences;
 
 public class LoginController {
@@ -111,6 +112,9 @@ public class LoginController {
                             return;
                         }
                         apiClient.setBearerToken(tokenObj.toString());
+                        Object roleObj = body.get("role");
+                        String role = roleObj == null ? "USER" : roleObj.toString();
+                        apiClient.setCurrentUserRole(role.toUpperCase(Locale.ROOT));
                         PREFS.put(PREF_SERVER_HOST, host.trim());
                         PREFS.put(PREF_SERVER_PORT, Integer.toString(port));
                         try {

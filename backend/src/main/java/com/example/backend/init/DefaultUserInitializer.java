@@ -29,6 +29,18 @@ public class DefaultUserInitializer implements ApplicationRunner {
     @Value("${DEFAULT_ADMIN_SYNC_ON_STARTUP:true}")
     private boolean defaultAdminSyncOnStartup;
 
+    @Value("${DEFAULT_VIEWER_USERNAME:}")
+    private String defaultViewerUsername;
+
+    @Value("${DEFAULT_VIEWER_PASSWORD:}")
+    private String defaultViewerPassword;
+
+    @Value("${DEFAULT_VIEWER_EMAIL:viewer@example.com}")
+    private String defaultViewerEmail;
+
+    @Value("${DEFAULT_VIEWER_SYNC_ON_STARTUP:false}")
+    private boolean defaultViewerSyncOnStartup;
+
     public DefaultUserInitializer(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -36,39 +48,55 @@ public class DefaultUserInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (!defaultAdminSyncOnStartup) {
+        if (defaultAdminSyncOnStartup) {
+            syncUserFromEnv(defaultAdminUsername, defaultAdminPassword, defaultAdminEmail, "admin");
+        } else {
             logger.info("DEFAULT_ADMIN_SYNC_ON_STARTUP is false. Skipping admin sync.");
+        }
+
+        if (defaultViewerSyncOnStartup) {
+            syncUserFromEnv(defaultViewerUsername, defaultViewerPassword, defaultViewerEmail, "viewer");
+        } else {
+            logger.info("DEFAULT_VIEWER_SYNC_ON_STARTUP is false. Skipping viewer sync.");
+        }
+    }
+
+    private void syncUserFromEnv(String username, String rawPassword, String email, String label) {
+        if (username == null || username.isBlank()) {
+            logger.warn("DEFAULT_{}_USERNAME is blank. Skipping.", label.toUpperCase());
+            return;
+        }
+        if (rawPassword == null || rawPassword.isBlank()) {
+            logger.warn("DEFAULT_{}_PASSWORD is blank. Skipping.", label.toUpperCase());
             return;
         }
 
-        userRepository.findByUsername(defaultAdminUsername).ifPresentOrElse(user -> {
+        userRepository.findByUsername(username).ifPresentOrElse(user -> {
             boolean changed = false;
 
-            // ENV 비밀번호와 DB 해시를 매칭하고, 불일치하면 ENV 값으로 재암호화 갱신
-            boolean passwordMatches = passwordEncoder.matches(defaultAdminPassword, user.getPassword());
+            boolean passwordMatches = passwordEncoder.matches(rawPassword, user.getPassword());
             if (!passwordMatches) {
-                user.setPassword(passwordEncoder.encode(defaultAdminPassword));
+                user.setPassword(passwordEncoder.encode(rawPassword));
                 changed = true;
-                logger.warn("Default admin password mismatch. Updated from ENV for user={}", defaultAdminUsername);
+                logger.warn("Default {} password mismatch. Updated from ENV for user={}", label, username);
             }
 
-            if (defaultAdminEmail != null && !defaultAdminEmail.isBlank()
-                    && !defaultAdminEmail.equals(user.getEmail())) {
-                user.setEmail(defaultAdminEmail);
+            if (email != null && !email.isBlank() && !email.equals(user.getEmail())) {
+                user.setEmail(email);
                 changed = true;
-                logger.info("Default admin email updated from ENV for user={}", defaultAdminUsername);
+                logger.info("Default {} email updated from ENV for user={}", label, username);
             }
 
             if (changed) {
                 userRepository.save(user);
             } else {
-                logger.info("Default admin user is already in sync with ENV: {}", defaultAdminUsername);
+                logger.info("Default {} user is already in sync with ENV: {}", label, username);
             }
         }, () -> {
-            String encodedPassword = passwordEncoder.encode(defaultAdminPassword);
-            User admin = new User(defaultAdminUsername, encodedPassword, defaultAdminEmail);
-            userRepository.save(admin);
-            logger.info("Created default admin user from environment: {} (email={})", defaultAdminUsername, defaultAdminEmail);
+            String encodedPassword = passwordEncoder.encode(rawPassword);
+            User account = new User(username, encodedPassword, email);
+            userRepository.save(account);
+            logger.info("Created default {} user from environment: {} (email={})", label, username, email);
         });
     }
 }
