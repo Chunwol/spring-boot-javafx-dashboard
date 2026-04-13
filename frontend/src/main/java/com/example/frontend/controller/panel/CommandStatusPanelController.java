@@ -663,6 +663,15 @@ public class CommandStatusPanelController {
         if (downloadUrl == null || downloadUrl.isBlank() || "-".equals(downloadUrl)) {
             return;
         }
+        String requestPath = normalizeDownloadRequestPath(downloadUrl);
+        if (requestPath.isBlank()) {
+            Alert err = new Alert(Alert.AlertType.ERROR);
+            err.setTitle("다운로드 실패");
+            err.setHeaderText(null);
+            err.setContentText("다운로드 URL 형식이 올바르지 않습니다: " + downloadUrl);
+            err.showAndWait();
+            return;
+        }
         FileChooser chooser = new FileChooser();
         chooser.setTitle("수집 파일 저장");
         chooser.setInitialFileName(suggestedName == null || suggestedName.isBlank() ? "collected.zip" : suggestedName);
@@ -674,7 +683,7 @@ public class CommandStatusPanelController {
 
         Thread t = new Thread(() -> {
             try {
-                byte[] data = apiClient.getBytes(downloadUrl).join();
+                byte[] data = apiClient.getBytes(requestPath).join();
                 Files.write(target.toPath(), data);
                 Platform.runLater(() -> {
                     Alert ok = new Alert(Alert.AlertType.INFORMATION);
@@ -695,6 +704,23 @@ public class CommandStatusPanelController {
         }, "cmd-detail-download");
         t.setDaemon(true);
         t.start();
+    }
+
+    private String normalizeDownloadRequestPath(String downloadUrl) {
+        String u = downloadUrl == null ? "" : downloadUrl.trim();
+        if (u.isBlank()) {
+            return "";
+        }
+        if (u.startsWith("http://") || u.startsWith("https://")) {
+            return u;
+        }
+        if (u.startsWith("/api/v1/")) {
+            return u.substring("/api/v1".length());
+        }
+        if (u.startsWith("/")) {
+            return u;
+        }
+        return "/" + u;
     }
 
     private void setLabelText(Map<String, Object> ns, String fxId, String value) {
