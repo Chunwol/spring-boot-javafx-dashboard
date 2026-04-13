@@ -1,5 +1,6 @@
 package com.example.backend.model.command;
 
+import com.example.backend.common.persistence.LenientLocalDateTimeStringConverter;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -31,15 +32,19 @@ public class CommandQueue {
     private String payloadJson;
 
     @Column(name = "created_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime createdAt;
 
     @Column(name = "delivered_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime deliveredAt;
 
     @Column(name = "acked_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime ackedAt;
 
     @Column(name = "completed_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime completedAt;
 
     @Column(name = "exit_code")
@@ -64,25 +69,31 @@ public class CommandQueue {
 
     /** SCMATE 초기화 감지 시각 */
     @Column(name = "scmate_reset_requested_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime scmateResetRequestedAt;
 
     /** SCMATE 초기화 복구 완료 시각 */
     @Column(name = "scmate_reset_completed_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime scmateResetCompletedAt;
 
     @Column(name = "verification_status")
     private String verificationStatus;
 
     @Column(name = "verification_started_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime verificationStartedAt;
 
     @Column(name = "verification_deadline_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime verificationDeadlineAt;
 
     @Column(name = "verification_observed_offline_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime verificationObservedOfflineAt;
 
     @Column(name = "verification_completed_at")
+    @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime verificationCompletedAt;
 
     public CommandQueue() {
