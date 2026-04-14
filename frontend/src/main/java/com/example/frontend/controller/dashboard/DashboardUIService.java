@@ -163,6 +163,16 @@ public class DashboardUIService {
                     : medium ? new double[]{620, 320}
                     : new double[]{520, 280};
         }
+        if ("DISCONNECT".equals(type)) {
+            return large ? new double[]{680, 360}
+                    : medium ? new double[]{600, 320}
+                    : new double[]{500, 280};
+        }
+        if ("OPERATIONS".equals(type)) {
+            return large ? new double[]{860, 340}
+                    : medium ? new double[]{760, 320}
+                    : new double[]{640, 300};
+        }
         return large ? new double[]{440, 320}
                 : medium ? new double[]{380, 300}
                 : new double[]{320, 260};

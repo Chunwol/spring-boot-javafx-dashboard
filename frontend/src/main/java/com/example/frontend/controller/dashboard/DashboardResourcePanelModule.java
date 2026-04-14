@@ -36,7 +36,7 @@ import javafx.scene.paint.Color;
 /**
  * 대시보드 좌측 리소스 패널 모듈.
  *
- * <p>강의실 패널·텍스트 위젯·이미지 위젯·네트워크 패널을 추가할 수 있는
+ * <p>강의실 패널·텍스트 위젯·이미지 위젯·네트워크 패널·운영 메트릭 패널을 추가할 수 있는
  * "Resources" 패널의 UI 생성·갱신을 담당합니다.</p>
  */
 public class DashboardResourcePanelModule {
@@ -177,6 +177,7 @@ public class DashboardResourcePanelModule {
                 createAddTextButton(),
                 createAddImageButton(),
                 createAddDisconnectStatusButton(),
+                createAddOperationsMetricsButton(),
                 createBackupTextButton(),
                 createRestoreTextButton(),
                 new Separator(),
@@ -384,6 +385,25 @@ public class DashboardResourcePanelModule {
         return button;
     }
 
+    private Button createAddOperationsMetricsButton() {
+        Button button = iconButton("운영 메트릭 패널 추가", "mdi2c-chart-line", "#059669");
+        button.setMaxWidth(Double.MAX_VALUE);
+        button.setOnAction(e -> {
+            if (currentDashboardId.get() == null) {
+                return;
+            }
+            double[] size = responsiveSizeFn.apply("OPERATIONS");
+            dashboardService.createPanelAsync(
+                    currentDashboardId.get(),
+                    "OPERATIONS_METRICS",
+                    null,
+                    100.0, 100.0, size[0], size[1],
+                    dto -> Platform.runLater(onLoadDashboardPanels::run)
+            );
+        });
+        return button;
+    }
+
     private Button createBackupTextButton() {
         Button button = iconButton("백업", "mdi2c-content-save-outline", "#64748b");
         button.setMaxWidth(Double.MAX_VALUE);
@@ -453,6 +473,7 @@ public class DashboardResourcePanelModule {
             case "#d73a49" -> "resource-add-btn-danger";
             case "#64748b" -> "resource-add-btn-muted";
             case "#2563eb" -> "resource-add-btn-blue";
+            case "#059669" -> "resource-add-btn-emerald";
             default -> null;
         };
         if (variant != null) {

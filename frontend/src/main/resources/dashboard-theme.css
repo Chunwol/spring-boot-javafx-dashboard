@@ -607,6 +607,8 @@
 .resource-add-btn-muted:hover { -fx-background-color: -fx-neutral-hover; }
 .resource-add-btn-blue { -fx-background-color: -fx-primary-hover; }
 .resource-add-btn-blue:hover { -fx-background-color: #1d4ed8; }
+.resource-add-btn-emerald { -fx-background-color: #059669; }
+.resource-add-btn-emerald:hover { -fx-background-color: #047857; }
 
 /* ═══════════════════════════════════════════════════════════════════
    Classroom Panel — Card & Banner
@@ -1397,6 +1399,42 @@
     -fx-padding: 3 10 3 10;
     -fx-font-size: 11px;
     -fx-font-weight: 800;
+}
+
+.ops-panel-wrapper {
+    -fx-background-color: #f8fafc;
+}
+
+.ops-panel-updated-prefix {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-text-fill: -fx-text-muted;
+}
+
+.ops-panel-updated-value {
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-text-fill: -fx-text-body;
+}
+
+.ops-panel-pressure-title {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-text-fill: -fx-text-muted;
+}
+
+.ops-panel-refresh-btn {
+    -fx-background-color: #2563eb;
+    -fx-text-fill: white;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-background-radius: 6;
+    -fx-padding: 4 10 4 10;
+    -fx-cursor: hand;
+}
+
+.ops-panel-refresh-btn:hover {
+    -fx-background-color: #1d4ed8;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

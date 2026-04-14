@@ -11,6 +11,7 @@ import com.example.frontend.controller.dashboard.DashboardClassroomModule;
 import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
 import com.example.frontend.controller.dashboard.DashboardDisconnectStatusPanelModule;
+import com.example.frontend.controller.dashboard.DashboardOperationsMetricsPanelModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
 import com.example.frontend.controller.dashboard.DashboardResourcePanelModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
@@ -285,6 +286,7 @@ public class DashboardController {
     private ContextMenu alertContextMenu;
     private long unreadAlertCount = 0L;
     private DashboardNetworkPanelModule networkPanelModule;
+    private DashboardOperationsMetricsPanelModule operationsMetricsPanelModule;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -1056,6 +1058,19 @@ public class DashboardController {
                 this::loadDashboardPanels
             );
 
+            operationsMetricsPanelModule = new DashboardOperationsMetricsPanelModule(
+                dashboardService,
+                classroomContainer,
+                dashboardInteractionService,
+                this::isEditModeActive,
+                this::applySnap,
+                this::currentDashboardId,
+                (msg, err) -> dashboardUIService.showToast(msg, err),
+                this::updateCachedPanelPosition,
+                this::getResponsiveDefaultSize,
+                this::loadDashboardPanels
+            );
+
         applyEditModeUiState();
         return dashboardMainSplitPane;
     }
@@ -1300,6 +1315,9 @@ public class DashboardController {
         }
         if (disconnectStatusPanelModule != null) {
             disconnectStatusPanelModule.applyEditMode(isEditModeActive());
+        }
+        if (operationsMetricsPanelModule != null) {
+            operationsMetricsPanelModule.applyEditMode(isEditModeActive());
         }
         if (resourcePanelModule != null) {
             resourcePanelModule.refreshListView();
@@ -1867,6 +1885,9 @@ public class DashboardController {
         if (disconnectStatusPanelModule != null) {
             disconnectStatusPanelModule.update(classrooms, panels);
         }
+        if (operationsMetricsPanelModule != null) {
+            operationsMetricsPanelModule.update(classrooms, panels);
+        }
         Platform.runLater(this::expandCanvasToContentBounds);
         updateTopSummary();
     }
@@ -2239,6 +2260,11 @@ public class DashboardController {
                 : medium ? new double[]{600, 320}
                 : new double[]{500, 280};
         }
+        if ("OPERATIONS".equals(type)) {
+            return large ? new double[]{860, 340}
+                    : medium ? new double[]{760, 320}
+                    : new double[]{640, 300};
+        }
         return large ? new double[]{440, 320}
                 : medium ? new double[]{380, 300}
                 : new double[]{320, 260};
@@ -2384,6 +2410,9 @@ public class DashboardController {
         }
         if (disconnectStatusPanelModule != null) {
             nodes.addAll(disconnectStatusPanelModule.getPanelViews());
+        }
+        if (operationsMetricsPanelModule != null) {
+            nodes.addAll(operationsMetricsPanelModule.getPanelViews());
         }
         return new ArrayList<>(nodes);
     }
