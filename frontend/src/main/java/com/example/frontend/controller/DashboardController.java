@@ -48,6 +48,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
@@ -601,6 +602,8 @@ public class DashboardController {
     private void configureAlertButton(Button button) {
         button.getStyleClass().add("btn-icon-alert");
         button.setOnAction(event -> toggleAlertPopup());
+        button.setText("");
+        button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         FontIcon icon = new FontIcon("mdi2b-bell-outline");
         icon.setIconSize(15);
         icon.setIconColor(Color.WHITE);
