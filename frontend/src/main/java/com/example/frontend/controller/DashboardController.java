@@ -336,6 +336,7 @@ public class DashboardController {
         }
 
         removeTabIfPresent(pcManagementTab);
+        removeTabIfPresent(commandTab);
         removeTabIfPresent(settingsTab);
 
         if (mainTabPane != null && dashboardTab != null) {
@@ -831,10 +832,14 @@ public class DashboardController {
             });
         }
 
-        commandStatusPanelController = new CommandStatusPanelController();
         if (commandTab != null) {
-            if (commandSlot != null) {
-                commandSlot.getChildren().setAll(commandStatusPanelController.getPanel());
+            if (viewerMode) {
+                removeTabIfPresent(commandTab);
+            } else {
+                commandStatusPanelController = new CommandStatusPanelController();
+                if (commandSlot != null) {
+                    commandSlot.getChildren().setAll(commandStatusPanelController.getPanel());
+                }
             }
         }
 

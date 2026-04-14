@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import javax.swing.filechooser.FileSystemView;
 
 /**
  * 서버에서 전달받은 명령을 실행한다.
@@ -556,9 +557,10 @@ public class CommandExecutor {
 
         Path tmpZip = Files.createTempFile("pcagent-collect-" + taskId + "-", ".zip");
         try {
-            int zippedCount = zipRequestedPaths(tmpZip, requestedPaths);
+            CollectZipResult zipResult = zipRequestedPaths(tmpZip, requestedPaths);
+            int zippedCount = zipResult.zippedCount;
             if (zippedCount <= 0) {
-                return new CommandResult(1, "", "선택한 경로에서 수집 가능한 파일이 없습니다.");
+                return new CommandResult(1, "", "선택한 경로에서 수집 가능한 파일이 없습니다.\n" + formatCollectIssues(zipResult.issues));
             }
 
             JsonNode uploadResp = uploadCollectedArtifact(tmpZip, outputName, taskId);
@@ -573,7 +575,10 @@ public class CommandExecutor {
             if (!downloadUrl.isBlank()) {
                 sb.append("\n다운로드: ").append(downloadUrl);
             }
-            return new CommandResult(0, sb.toString(), "");
+            if (!zipResult.issues.isEmpty()) {
+                sb.append("\n제외 항목: ").append(zipResult.issues.size()).append("건");
+            }
+            return new CommandResult(0, sb.toString(), formatCollectIssues(zipResult.issues));
         } finally {
             try {
                 Files.deleteIfExists(tmpZip);
@@ -603,8 +608,9 @@ public class CommandExecutor {
         return new ArrayList<>(unique);
     }
 
-    private int zipRequestedPaths(Path zipPath, List<String> requestedPaths) throws IOException {
+    private CollectZipResult zipRequestedPaths(Path zipPath, List<String> requestedPaths) throws IOException {
         int[] count = {0};
+        List<String> issues = new ArrayList<>();
         try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
             for (int i = 0; i < requestedPaths.size(); i++) {
                 String raw = requestedPaths.get(i);
@@ -613,10 +619,17 @@ public class CommandExecutor {
                     p = Path.of(raw);
                 } catch (Exception ex) {
                     log.warn("수집 경로 파싱 실패: {}", SensitiveDataMasker.maskPath(raw));
+                    issues.add(buildCollectIssue(raw, "경로 파싱 실패"));
                     continue;
                 }
                 if (!Files.exists(p)) {
                     log.warn("수집 경로 없음: {}", SensitiveDataMasker.maskPath(raw));
+                    issues.add(buildCollectIssue(raw, "경로 없음"));
+                    continue;
+                }
+                if (!Files.isReadable(p)) {
+                    log.warn("수집 경로 읽기 권한 없음: {}", SensitiveDataMasker.maskPath(raw));
+                    issues.add(buildCollectIssue(raw, "읽기 권한 없음"));
                     continue;
                 }
 
@@ -624,30 +637,40 @@ public class CommandExecutor {
                 String rootPrefix = String.format("item-%02d-%s", i + 1, sanitizeName(baseName));
 
                 if (Files.isRegularFile(p)) {
-                    addFileToZip(zos, p, rootPrefix);
-                    count[0]++;
+                    try {
+                        addFileToZip(zos, p, rootPrefix);
+                        count[0]++;
+                    } catch (IOException e) {
+                        issues.add(buildCollectIssue(raw, "파일 읽기 실패: " + safeIoMessage(e)));
+                    }
                     continue;
                 }
 
                 if (Files.isDirectory(p)) {
                     try (var stream = Files.walk(p)) {
                         stream.filter(Files::isRegularFile).forEach(f -> {
+                            if (!Files.isReadable(f)) {
+                                issues.add(buildCollectIssue(f.toString(), "읽기 권한 없음"));
+                                return;
+                            }
                             Path rel = p.relativize(f);
                             String entryName = rootPrefix + "/" + rel.toString().replace('\\', '/');
                             try {
                                 addFileToZip(zos, f, entryName);
                                 count[0]++;
                             } catch (IOException e) {
-                                throw new UncheckedIOException(e);
+                                issues.add(buildCollectIssue(f.toString(), "파일 읽기 실패: " + safeIoMessage(e)));
                             }
                         });
-                    } catch (UncheckedIOException e) {
-                        throw e.getCause();
+                    } catch (IOException e) {
+                        issues.add(buildCollectIssue(raw, "폴더 스캔 실패: " + safeIoMessage(e)));
                     }
+                    continue;
                 }
+                issues.add(buildCollectIssue(raw, "지원하지 않는 경로 타입"));
             }
         }
-        return count[0];
+        return new CollectZipResult(count[0], issues);
     }
 
     private static void addFileToZip(ZipOutputStream zos, Path file, String entryName) throws IOException {
@@ -656,6 +679,42 @@ public class CommandExecutor {
         zos.putNextEntry(entry);
         Files.copy(file, zos);
         zos.closeEntry();
+    }
+
+    private String buildCollectIssue(String path, String reason) {
+        return reason + " :: " + SensitiveDataMasker.maskPath(path);
+    }
+
+    private String safeIoMessage(IOException e) {
+        if (e == null || e.getMessage() == null || e.getMessage().isBlank()) {
+            return e == null ? "입출력 오류" : e.getClass().getSimpleName();
+        }
+        return SensitiveDataMasker.maskExceptionMessage(e.getMessage());
+    }
+
+    private String formatCollectIssues(List<String> issues) {
+        if (issues == null || issues.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("수집 제외 상세:");
+        int limit = Math.min(issues.size(), 12);
+        for (int i = 0; i < limit; i++) {
+            sb.append("\n - ").append(issues.get(i));
+        }
+        if (issues.size() > limit) {
+            sb.append("\n - ... ").append(issues.size() - limit).append("건 추가");
+        }
+        return sb.toString();
+    }
+
+    private static class CollectZipResult {
+        private final int zippedCount;
+        private final List<String> issues;
+
+        private CollectZipResult(int zippedCount, List<String> issues) {
+            this.zippedCount = zippedCount;
+            this.issues = issues == null ? List.of() : List.copyOf(issues);
+        }
     }
 
     private JsonNode uploadCollectedArtifact(Path zipPath, String originalFilename, long taskId) throws IOException {
@@ -691,18 +750,31 @@ public class CommandExecutor {
             Path current = resolveBrowsePath(requestedPath);
             if (current == null) {
                 List<Map<String, Object>> drives = new ArrayList<>();
-                for (File root : File.listRoots()) {
-                    if (root == null) continue;
-                    Map<String, Object> e = new java.util.LinkedHashMap<>();
-                    e.put("name", root.getPath());
-                    e.put("type", "drive");
-                    e.put("size", 0L);
-                    drives.add(e);
+                FileSystemView fsView = FileSystemView.getFileSystemView();
+                File[] roots = File.listRoots();
+                if (roots != null) {
+                    for (File root : roots) {
+                        if (root == null) {
+                            continue;
+                        }
+                        drives.add(buildDriveEntry(root, fsView));
+                    }
                 }
+                drives.sort((a, b) -> {
+                    boolean usbA = Boolean.TRUE.equals(a.get("usb"));
+                    boolean usbB = Boolean.TRUE.equals(b.get("usb"));
+                    if (usbA != usbB) {
+                        return usbA ? -1 : 1;
+                    }
+                    String na = String.valueOf(a.getOrDefault("displayName", a.getOrDefault("name", "")));
+                    String nb = String.valueOf(b.getOrDefault("displayName", b.getOrDefault("name", "")));
+                    return na.compareToIgnoreCase(nb);
+                });
                 Map<String, Object> rootResp = new java.util.LinkedHashMap<>();
                 rootResp.put("ok", true);
                 rootResp.put("currentPath", "");
                 rootResp.put("parentPath", "");
+                rootResp.put("driveCount", drives.size());
                 rootResp.put("entries", drives);
                 return new CommandResult(0, mapper.writeValueAsString(rootResp), "");
             }
@@ -767,6 +839,106 @@ public class CommandExecutor {
             return p;
         } catch (Exception ex) {
             return null;
+        }
+    }
+
+    private Map<String, Object> buildDriveEntry(File root, FileSystemView fsView) {
+        String path = root.getPath();
+        String displayName = safeSystemDisplayName(fsView, root, path);
+        String driveType = detectDriveType(fsView, root, path, displayName);
+        boolean mounted = root.exists();
+        long totalBytes = readTotalSpace(root);
+        long freeBytes = readFreeSpace(root);
+
+        Map<String, Object> e = new java.util.LinkedHashMap<>();
+        e.put("name", path);
+        e.put("displayName", displayName);
+        e.put("label", extractDriveLabel(displayName, path));
+        e.put("type", "drive");
+        e.put("driveType", driveType);
+        e.put("usb", "USB".equals(driveType));
+        e.put("mounted", mounted);
+        e.put("size", 0L);
+        e.put("totalBytes", totalBytes);
+        e.put("freeBytes", freeBytes);
+        return e;
+    }
+
+    private String safeSystemDisplayName(FileSystemView fsView, File root, String fallback) {
+        if (fsView == null || root == null) {
+            return fallback;
+        }
+        try {
+            String value = fsView.getSystemDisplayName(root);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return fallback;
+    }
+
+    private String detectDriveType(FileSystemView fsView, File root, String path, String displayName) {
+        String desc = "";
+        try {
+            if (fsView != null) {
+                desc = fsView.getSystemTypeDescription(root);
+            }
+        } catch (Exception ignored) {
+        }
+        String combined = ((desc == null ? "" : desc) + " "
+                + (displayName == null ? "" : displayName) + " "
+                + (path == null ? "" : path)).toLowerCase(Locale.ROOT);
+        if (combined.contains("usb")
+                || combined.contains("removable")
+                || combined.contains("이동식")) {
+            return "USB";
+        }
+        if (combined.contains("network")
+                || combined.contains("네트워크")) {
+            return "NETWORK";
+        }
+        return "FIXED";
+    }
+
+    private String extractDriveLabel(String displayName, String path) {
+        if (displayName == null || displayName.isBlank()) {
+            return path;
+        }
+        String v = displayName.trim();
+        if (v.equalsIgnoreCase(path)) {
+            return path;
+        }
+        return v;
+    }
+
+    private long readTotalSpace(File root) {
+        if (root == null) {
+            return 0L;
+        }
+        try {
+            return Math.max(0L, Files.getFileStore(root.toPath()).getTotalSpace());
+        } catch (Exception ignored) {
+        }
+        try {
+            return Math.max(0L, root.getTotalSpace());
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
+    private long readFreeSpace(File root) {
+        if (root == null) {
+            return 0L;
+        }
+        try {
+            return Math.max(0L, Files.getFileStore(root.toPath()).getUsableSpace());
+        } catch (Exception ignored) {
+        }
+        try {
+            return Math.max(0L, root.getUsableSpace());
+        } catch (Exception ignored) {
+            return 0L;
         }
     }
 

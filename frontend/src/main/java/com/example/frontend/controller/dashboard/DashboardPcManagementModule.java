@@ -28,6 +28,9 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -42,6 +45,8 @@ import java.util.zip.ZipOutputStream;
  */
 public class DashboardPcManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardPcManagementModule.class);
+    private static final long LARGE_TRANSFER_WARNING_BYTES = 8L * 1024L * 1024L * 1024L; // 8GB+
+    private static final double ESTIMATED_TRANSFER_MB_PER_SEC = 30.0;
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final ObjectMapper objectMapper;
@@ -785,6 +790,12 @@ public class DashboardPcManagementModule {
         Label info = new Label("더블클릭으로 폴더 이동, [선택 추가]로 수집 목록에 담아주세요.");
         info.getStyleClass().add("pcmgmt-dialog-caption");
 
+        CheckBox usbOnlyCheck = new CheckBox("USB만 보기 (루트 드라이브 목록)");
+        Label driveStatusLabel = new Label("드라이브 상태: 로딩 중...");
+        driveStatusLabel.getStyleClass().add("pcmgmt-dialog-caption");
+        Label estimateLabel = new Label("선택 예상 전송량: -");
+        estimateLabel.getStyleClass().add("pcmgmt-dialog-caption");
+
         TextField currentPathField = new TextField();
         currentPathField.setEditable(false);
         currentPathField.setPromptText("(드라이브 목록)");
@@ -816,6 +827,9 @@ public class DashboardPcManagementModule {
 
         root.getChildren().addAll(
                 info,
+                usbOnlyCheck,
+                driveStatusLabel,
+                estimateLabel,
                 pathRow,
                 navRow,
                 new Label("원격 항목"),
@@ -828,25 +842,85 @@ public class DashboardPcManagementModule {
         dialog.getDialogPane().setContent(root);
 
         final String[] currentPath = {""};
+        final String[] driveSnapshotRef = {""};
+        final Set<String> usbDriveRoots = Collections.synchronizedSet(new LinkedHashSet<>());
 
-        Runnable loadRoot = () -> loadRemoteEntriesAsync(browsePc, "", currentPathField, remoteList, currentPath);
-        Runnable refresh = () -> loadRemoteEntriesAsync(browsePc, currentPath[0], currentPathField, remoteList, currentPath);
+        Runnable loadRoot = () -> loadRemoteEntriesAsync(
+                browsePc,
+                "",
+                currentPathField,
+                remoteList,
+                currentPath,
+                usbOnlyCheck,
+                driveStatusLabel,
+                driveSnapshotRef,
+                usbDriveRoots
+        );
+        Runnable refresh = () -> loadRemoteEntriesAsync(
+                browsePc,
+                currentPath[0],
+                currentPathField,
+                remoteList,
+                currentPath,
+                usbOnlyCheck,
+                driveStatusLabel,
+                driveSnapshotRef,
+                usbDriveRoots
+        );
         loadRoot.run();
 
         goButton.setOnAction(e -> {
             String p = pathInputField.getText() == null ? "" : pathInputField.getText().trim();
-            loadRemoteEntriesAsync(browsePc, p, currentPathField, remoteList, currentPath);
+            loadRemoteEntriesAsync(
+                    browsePc,
+                    p,
+                    currentPathField,
+                    remoteList,
+                    currentPath,
+                    usbOnlyCheck,
+                    driveStatusLabel,
+                    driveSnapshotRef,
+                    usbDriveRoots
+            );
         });
         rootButton.setOnAction(e -> loadRoot.run());
         upButton.setOnAction(e -> {
             String parent = parentPath(currentPath[0]);
-            loadRemoteEntriesAsync(browsePc, parent, currentPathField, remoteList, currentPath);
+            loadRemoteEntriesAsync(
+                    browsePc,
+                    parent,
+                    currentPathField,
+                    remoteList,
+                    currentPath,
+                    usbOnlyCheck,
+                    driveStatusLabel,
+                    driveSnapshotRef,
+                    usbDriveRoots
+            );
         });
         refreshButton.setOnAction(e -> refresh.run());
+        usbOnlyCheck.selectedProperty().addListener((obs, oldV, newV) -> refresh.run());
+
+        ScheduledExecutorService refreshScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "pcmgmt-remote-browse-refresh");
+            t.setDaemon(true);
+            return t;
+        });
+        refreshScheduler.scheduleAtFixedRate(() -> {
+            if (dialog.getDialogPane() == null || dialog.getDialogPane().getScene() == null) {
+                return;
+            }
+            Platform.runLater(refresh);
+        }, 4, 4, TimeUnit.SECONDS);
+        dialog.setOnHidden(evt -> refreshScheduler.shutdownNow());
 
         addSelectedButton.setOnAction(e -> {
             List<RemoteBrowseEntry> selected = new ArrayList<>(remoteList.getSelectionModel().getSelectedItems());
             if (selected.isEmpty()) {
+                return;
+            }
+            SelectionEstimate estimate = estimateSelection(selected, currentPath[0], usbDriveRoots);
+            if (!confirmLargeUsbSelection(estimate)) {
                 return;
             }
             Set<String> existing = new LinkedHashSet<>(selectedPathList.getItems());
@@ -874,7 +948,23 @@ public class DashboardPcManagementModule {
                 return;
             }
             String nextPath = resolveEntryAbsolutePath(currentPath[0], entry);
-            loadRemoteEntriesAsync(browsePc, nextPath, currentPathField, remoteList, currentPath);
+            loadRemoteEntriesAsync(
+                    browsePc,
+                    nextPath,
+                    currentPathField,
+                    remoteList,
+                    currentPath,
+                    usbOnlyCheck,
+                    driveStatusLabel,
+                    driveSnapshotRef,
+                    usbDriveRoots
+            );
+        });
+
+        remoteList.getSelectionModel().getSelectedItems().addListener((javafx.collections.ListChangeListener<RemoteBrowseEntry>) change -> {
+            List<RemoteBrowseEntry> selected = new ArrayList<>(remoteList.getSelectionModel().getSelectedItems());
+            SelectionEstimate estimate = estimateSelection(selected, currentPath[0], usbDriveRoots);
+            estimateLabel.setText(formatEstimateLabel(estimate));
         });
 
         Optional<ButtonType> result = dialog.showAndWait();
@@ -912,7 +1002,11 @@ public class DashboardPcManagementModule {
                                         String path,
                                         TextField currentPathField,
                                         ListView<RemoteBrowseEntry> remoteList,
-                                        String[] currentPathRef) {
+                                        String[] currentPathRef,
+                                        CheckBox usbOnlyCheck,
+                                        Label driveStatusLabel,
+                                        String[] driveSnapshotRef,
+                                        Set<String> usbDriveRoots) {
         Thread t = new Thread(() -> {
             try {
                 Map<String, Object> resp = requestRemoteFileList(browsePc, path);
@@ -923,13 +1017,51 @@ public class DashboardPcManagementModule {
                         .map(row -> new RemoteBrowseEntry(
                                 String.valueOf(row.getOrDefault("name", "")),
                                 String.valueOf(row.getOrDefault("type", "file")),
-                                toLong(row.get("size"))
+                                toLong(row.get("size")),
+                                String.valueOf(row.getOrDefault("displayName", row.getOrDefault("name", ""))),
+                                String.valueOf(row.getOrDefault("driveType", "")),
+                                String.valueOf(row.getOrDefault("label", "")),
+                                toLong(row.get("totalBytes")),
+                                toLong(row.get("freeBytes")),
+                                toBoolean(row.get("mounted"), true),
+                                toBoolean(row.get("usb"), false)
                         ))
                         .toList();
+
+                boolean rootLevel = currentPath == null || currentPath.isBlank();
+                List<RemoteBrowseEntry> displayEntries = entries;
+                if (rootLevel && usbOnlyCheck != null && usbOnlyCheck.isSelected()) {
+                    displayEntries = entries.stream()
+                            .filter(RemoteBrowseEntry::isUsbDrive)
+                            .toList();
+                }
+                final List<RemoteBrowseEntry> displayEntriesFinal = displayEntries;
+                String nextSnapshot = rootLevel ? snapshotDriveNames(entries) : driveSnapshotRef[0];
+                String changeMessage = rootLevel ? describeDriveChanges(driveSnapshotRef[0], nextSnapshot) : "";
+                String driveSummary = rootLevel ? buildDriveSummary(entries, usbOnlyCheck != null && usbOnlyCheck.isSelected()) : "";
+
                 Platform.runLater(() -> {
                     currentPathRef[0] = currentPath;
                     currentPathField.setText(currentPath == null ? "" : currentPath);
-                    remoteList.setItems(FXCollections.observableArrayList(entries));
+                    remoteList.setItems(FXCollections.observableArrayList(displayEntriesFinal));
+                    if (rootLevel) {
+                        if (usbDriveRoots != null) {
+                            usbDriveRoots.clear();
+                            entries.stream()
+                                    .filter(RemoteBrowseEntry::isUsbDrive)
+                                    .map(e -> e.name)
+                                    .filter(Objects::nonNull)
+                                    .forEach(usbDriveRoots::add);
+                        }
+                        driveSnapshotRef[0] = nextSnapshot;
+                        if (driveStatusLabel != null) {
+                            if (!changeMessage.isBlank()) {
+                                driveStatusLabel.setText("드라이브 변경 감지: " + changeMessage);
+                            } else {
+                                driveStatusLabel.setText(driveSummary);
+                            }
+                        }
+                    }
                 });
             } catch (Exception ex) {
                 Platform.runLater(() -> showAlert("원격 탐색 실패", ex.getMessage(), Alert.AlertType.ERROR));
@@ -1017,6 +1149,176 @@ public class DashboardPcManagementModule {
         } catch (Exception ex) {
             return 0L;
         }
+    }
+
+    private boolean toBoolean(Object value, boolean defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        String s = String.valueOf(value).trim();
+        if (s.isBlank()) {
+            return defaultValue;
+        }
+        return "true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s);
+    }
+
+    private String snapshotDriveNames(List<RemoteBrowseEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return "";
+        }
+        return entries.stream()
+                .filter(RemoteBrowseEntry::isDrive)
+                .map(RemoteBrowseEntry::stableKey)
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .collect(Collectors.joining("\u001F"));
+    }
+
+    private String describeDriveChanges(String previousSnapshot, String currentSnapshot) {
+        Set<String> prev = parseSnapshot(previousSnapshot);
+        Set<String> now = parseSnapshot(currentSnapshot);
+        if (prev.equals(now)) {
+            return "";
+        }
+        Set<String> added = new LinkedHashSet<>(now);
+        added.removeAll(prev);
+        Set<String> removed = new LinkedHashSet<>(prev);
+        removed.removeAll(now);
+
+        List<String> parts = new ArrayList<>();
+        if (!added.isEmpty()) {
+            parts.add("+ " + String.join(", ", added));
+        }
+        if (!removed.isEmpty()) {
+            parts.add("- " + String.join(", ", removed));
+        }
+        return String.join(" / ", parts);
+    }
+
+    private Set<String> parseSnapshot(String snapshot) {
+        if (snapshot == null || snapshot.isBlank()) {
+            return new LinkedHashSet<>();
+        }
+        String[] parts = snapshot.split("\u001F");
+        Set<String> out = new LinkedHashSet<>();
+        for (String part : parts) {
+            if (part != null && !part.isBlank()) {
+                out.add(part);
+            }
+        }
+        return out;
+    }
+
+    private String buildDriveSummary(List<RemoteBrowseEntry> entries, boolean usbOnly) {
+        long driveCount = entries.stream().filter(RemoteBrowseEntry::isDrive).count();
+        long usbCount = entries.stream().filter(RemoteBrowseEntry::isUsbDrive).count();
+        long mountedCount = entries.stream().filter(RemoteBrowseEntry::isDrive).filter(e -> e.mounted).count();
+        if (driveCount == 0) {
+            return usbOnly ? "드라이브 상태: USB 드라이브가 없습니다." : "드라이브 상태: 드라이브가 없습니다.";
+        }
+        if (usbOnly) {
+            return String.format(Locale.ROOT, "드라이브 상태: USB %d개 / 연결됨 %d개", usbCount, mountedCount);
+        }
+        return String.format(Locale.ROOT, "드라이브 상태: 전체 %d개 (USB %d개) / 연결됨 %d개", driveCount, usbCount, mountedCount);
+    }
+
+    private SelectionEstimate estimateSelection(List<RemoteBrowseEntry> selected,
+                                                String currentPath,
+                                                Set<String> usbDriveRoots) {
+        if (selected == null || selected.isEmpty()) {
+            return new SelectionEstimate(0L, false, false);
+        }
+        long knownBytes = 0L;
+        boolean hasUnknownSize = false;
+        boolean usbContext = isPathUnderUsbRoot(currentPath, usbDriveRoots);
+        boolean hasUsbSelection = usbContext;
+
+        for (RemoteBrowseEntry entry : selected) {
+            if (entry == null) {
+                continue;
+            }
+            if (entry.isUsbDrive()) {
+                hasUsbSelection = true;
+            }
+            if ("file".equalsIgnoreCase(entry.type)) {
+                knownBytes += Math.max(0L, entry.size);
+            } else {
+                hasUnknownSize = true;
+            }
+        }
+        return new SelectionEstimate(knownBytes, hasUnknownSize, hasUsbSelection);
+    }
+
+    private boolean isPathUnderUsbRoot(String currentPath, Set<String> usbDriveRoots) {
+        if (currentPath == null || currentPath.isBlank() || usbDriveRoots == null || usbDriveRoots.isEmpty()) {
+            return false;
+        }
+        String normalized = currentPath.trim().toLowerCase(Locale.ROOT);
+        for (String root : usbDriveRoots) {
+            if (root == null || root.isBlank()) {
+                continue;
+            }
+            String rootNorm = root.trim().toLowerCase(Locale.ROOT);
+            if (normalized.startsWith(rootNorm)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String formatEstimateLabel(SelectionEstimate estimate) {
+        if (estimate == null || estimate.isEmpty()) {
+            return "선택 예상 전송량: -";
+        }
+        String sizeText = estimate.knownBytes > 0
+                ? formatFileSize(estimate.knownBytes)
+                : (estimate.hasUnknownSize ? "크기 계산 중" : "0 B");
+        String etaText = estimate.knownBytes > 0
+                ? estimateDurationLabel(estimate.knownBytes)
+                : (estimate.hasUnknownSize ? "대용량 가능(시간 미확정)" : "-");
+        String usbText = estimate.usbSelection ? "USB 경로" : "일반 경로";
+        return "선택 예상 전송량: " + sizeText + " / 예상 시간: " + etaText + " / " + usbText;
+    }
+
+    private String estimateDurationLabel(long bytes) {
+        if (bytes <= 0) {
+            return "-";
+        }
+        double seconds = bytes / (ESTIMATED_TRANSFER_MB_PER_SEC * 1024.0 * 1024.0);
+        if (seconds < 60) {
+            return String.format(Locale.ROOT, "%.0f초", seconds);
+        }
+        if (seconds < 3600) {
+            return String.format(Locale.ROOT, "%.1f분", seconds / 60.0);
+        }
+        return String.format(Locale.ROOT, "%.1f시간", seconds / 3600.0);
+    }
+
+    private boolean confirmLargeUsbSelection(SelectionEstimate estimate) {
+        if (estimate == null || !estimate.usbSelection) {
+            return true;
+        }
+        boolean largeByBytes = estimate.knownBytes >= LARGE_TRANSFER_WARNING_BYTES;
+        boolean uncertainLarge = estimate.hasUnknownSize;
+        if (!largeByBytes && !uncertainLarge) {
+            return true;
+        }
+
+        String sizeText = estimate.knownBytes > 0 ? formatFileSize(estimate.knownBytes) : "미확인";
+        String etaText = estimate.knownBytes > 0 ? estimateDurationLabel(estimate.knownBytes) : "미확인";
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("USB 대용량 전송 주의");
+        confirm.setHeaderText("선택한 USB 경로는 전송 시간이 길어질 수 있습니다.");
+        confirm.setContentText(
+                "예상 크기: " + sizeText + "\n"
+                        + "예상 전송 시간(약 " + ESTIMATED_TRANSFER_MB_PER_SEC + "MB/s): " + etaText + "\n"
+                        + "네트워크 상태에 따라 더 오래 걸릴 수 있습니다. 계속 진행할까요?"
+        );
+        Optional<ButtonType> result = confirm.showAndWait();
+        return result.isPresent() && result.get() == ButtonType.OK;
     }
 
     private String mapDestinationMode(String value) {
@@ -1345,20 +1647,71 @@ public class DashboardPcManagementModule {
         private final String name;
         private final String type;
         private final long size;
+        private final String displayName;
+        private final String driveType;
+        private final String label;
+        private final long totalBytes;
+        private final long freeBytes;
+        private final boolean mounted;
+        private final boolean usb;
 
-        private RemoteBrowseEntry(String name, String type, long size) {
+        private RemoteBrowseEntry(String name,
+                                  String type,
+                                  long size,
+                                  String displayName,
+                                  String driveType,
+                                  String label,
+                                  long totalBytes,
+                                  long freeBytes,
+                                  boolean mounted,
+                                  boolean usb) {
             this.name = name;
             this.type = type;
             this.size = size;
+            this.displayName = displayName;
+            this.driveType = driveType;
+            this.label = label;
+            this.totalBytes = totalBytes;
+            this.freeBytes = freeBytes;
+            this.mounted = mounted;
+            this.usb = usb;
+        }
+
+        private boolean isDrive() {
+            return "drive".equalsIgnoreCase(type);
+        }
+
+        private boolean isUsbDrive() {
+            return isDrive() && (usb || "USB".equalsIgnoreCase(driveType));
+        }
+
+        private String stableKey() {
+            String base = label == null || label.isBlank() ? name : label;
+            return base + "|" + (mounted ? "ON" : "OFF");
         }
 
         @Override
         public String toString() {
             String icon = switch (type == null ? "" : type.toLowerCase(Locale.ROOT)) {
-                case "drive" -> "💽";
+                case "drive" -> switch ((driveType == null ? "" : driveType).toUpperCase(Locale.ROOT)) {
+                    case "USB" -> "🔌";
+                    case "NETWORK" -> "🌐";
+                    default -> "💽";
+                };
                 case "dir" -> "📁";
                 default -> "📄";
             };
+            if ("drive".equalsIgnoreCase(type)) {
+                String nameText = (displayName != null && !displayName.isBlank())
+                        ? displayName
+                        : (label != null && !label.isBlank() ? label : name);
+                String kind = (driveType == null || driveType.isBlank()) ? "DRIVE" : driveType.toUpperCase(Locale.ROOT);
+                String mountedText = mounted ? "연결됨" : "분리됨";
+                String capText = totalBytes > 0
+                        ? " (" + formatSize(freeBytes) + " / " + formatSize(totalBytes) + ")"
+                        : "";
+                return icon + " " + nameText + " [" + kind + ", " + mountedText + "]" + capText;
+            }
             String sizeText = "file".equalsIgnoreCase(type) ? " (" + formatSize(size) + ")" : "";
             return icon + " " + name + sizeText;
         }
@@ -1370,6 +1723,22 @@ public class DashboardPcManagementModule {
             double mb = kb / 1024.0;
             if (mb < 1024) return String.format(Locale.ROOT, "%.1f MB", mb);
             return String.format(Locale.ROOT, "%.1f GB", mb / 1024.0);
+        }
+    }
+
+    private static class SelectionEstimate {
+        private final long knownBytes;
+        private final boolean hasUnknownSize;
+        private final boolean usbSelection;
+
+        private SelectionEstimate(long knownBytes, boolean hasUnknownSize, boolean usbSelection) {
+            this.knownBytes = Math.max(0L, knownBytes);
+            this.hasUnknownSize = hasUnknownSize;
+            this.usbSelection = usbSelection;
+        }
+
+        private boolean isEmpty() {
+            return knownBytes <= 0 && !hasUnknownSize;
         }
     }
 
