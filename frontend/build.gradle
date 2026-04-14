@@ -57,10 +57,39 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core:3.25.3'
+    testImplementation 'org.hamcrest:hamcrest:2.2'
+    testImplementation 'org.testfx:testfx-junit5:4.0.18'
 }
 
 test {
     useJUnitPlatform()
+    exclude '**/*UiSmokeTest.class'
+}
+
+tasks.register('unitTest', Test) {
+    description = 'Runs frontend unit tests (excluding JavaFX UI smoke tests).'
+    group = 'verification'
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    exclude '**/*UiSmokeTest.class'
+}
+
+tasks.register('uiSmokeTest', Test) {
+    description = 'Runs JavaFX TestFX smoke tests.'
+    group = 'verification'
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*UiSmokeTest.class'
+
+    // CI/Linux 환경에서 안정적인 JavaFX 렌더링 옵션
+    systemProperty 'testfx.robot', 'glass'
+    systemProperty 'java.awt.headless', 'false'
+    systemProperty 'prism.order', 'sw'
+    systemProperty 'prism.text', 't2k'
+
+    shouldRunAfter tasks.named('unitTest')
 }
 
 shadowJar {

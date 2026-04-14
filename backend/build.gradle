@@ -80,6 +80,28 @@ tasks.named('test') {
     useJUnitPlatform()
     // Java 25: byte-buddy-agent must be loaded via -javaagent (dynamic agent loading disallowed)
     jvmArgs '-XX:+EnableDynamicAgentLoading'
+    exclude '**/*IntegrationTest.class'
+}
+
+tasks.register('unitTest', Test) {
+    description = 'Runs backend unit tests (excluding integration tests).'
+    group = 'verification'
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs '-XX:+EnableDynamicAgentLoading'
+    exclude '**/*IntegrationTest.class'
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs backend integration/smoke tests.'
+    group = 'verification'
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs '-XX:+EnableDynamicAgentLoading'
+    include '**/*IntegrationTest.class'
+    shouldRunAfter tasks.named('unitTest')
 }
 
 springBoot {
