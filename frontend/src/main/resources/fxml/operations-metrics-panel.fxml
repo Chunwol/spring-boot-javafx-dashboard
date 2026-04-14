@@ -60,9 +60,9 @@
 
         <HBox spacing="10.0" alignment="CENTER_LEFT">
             <children>
-                <Label text="큐 압력" styleClass="ops-panel-pressure-title" />
+                <Label text="큐 부하" styleClass="ops-panel-pressure-title" />
                 <Label fx:id="queuePressureLabel" text="-" styleClass="ops-pressure-badge" />
-                <Label text="Stale 압력" styleClass="ops-panel-pressure-title" />
+                <Label text="지연 부하" styleClass="ops-panel-pressure-title" />
                 <Label fx:id="stalePressureLabel" text="-" styleClass="ops-pressure-badge" />
             </children>
         </HBox>

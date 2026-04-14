@@ -605,7 +605,7 @@ public class DashboardController {
         icon.setIconSize(15);
         icon.setIconColor(Color.WHITE);
         button.setGraphic(icon);
-        AccessibilityHelper.makeAccessible(button, "운영 알람", "운영 알람 목록을 확인합니다");
+        AccessibilityHelper.makeAccessible(button, "운영 경보", "운영 경보 목록을 확인합니다");
 
         alertContextMenu = new ContextMenu();
         alertContextMenu.setAutoHide(true);
@@ -1352,7 +1352,7 @@ public class DashboardController {
         container.getStyleClass().add("alerts-menu-container");
 
         HBox header = new HBox(8);
-        Label title = new Label("운영 알람");
+        Label title = new Label("운영 경보");
         title.getStyleClass().add("alerts-menu-title");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -1367,7 +1367,7 @@ public class DashboardController {
 
         VBox alertList = new VBox(6);
         if (alertItems.isEmpty()) {
-            Label emptyLabel = new Label("현재 표시할 알람이 없습니다.");
+            Label emptyLabel = new Label("현재 표시할 경보가 없습니다.");
             emptyLabel.getStyleClass().add("alerts-empty-label");
             alertList.getChildren().add(emptyLabel);
         } else {
@@ -1455,7 +1455,7 @@ public class DashboardController {
                     }
                 }))
                 .exceptionally(ex -> {
-                    log.debug("운영 알람 목록 조회 실패: {}", ex.getMessage());
+                    log.debug("운영 경보 목록 조회 실패: {}", ex.getMessage());
                     return null;
                 });
     }
@@ -1473,7 +1473,7 @@ public class DashboardController {
                     refreshAlertBadge();
                 }))
                 .exceptionally(ex -> {
-                    log.debug("미확인 알람 카운트 조회 실패: {}", ex.getMessage());
+                    log.debug("미확인 경보 카운트 조회 실패: {}", ex.getMessage());
                     return null;
                 });
     }
@@ -1483,7 +1483,7 @@ public class DashboardController {
             return;
         }
         if (isViewerMode()) {
-            safeShowToast(ApiClient.viewerWriteDeniedMessage("알람 확인 처리"), true);
+            safeShowToast(ApiClient.viewerWriteDeniedMessage("경보 확인 처리"), true);
             return;
         }
 
@@ -1499,11 +1499,11 @@ public class DashboardController {
                     if (alertContextMenu != null && alertContextMenu.isShowing()) {
                         renderAlertPopup();
                     }
-                    safeShowToast("알람을 확인 처리했습니다.", false);
+                    safeShowToast("경보를 확인 처리했습니다.", false);
                     refreshUnreadAlertCount();
                 }))
                 .exceptionally(ex -> {
-                    String message = ApiClient.userFacingErrorMessage(ex, "알람 확인 처리에 실패했습니다.");
+                    String message = ApiClient.userFacingErrorMessage(ex, "경보 확인 처리에 실패했습니다.");
                     Platform.runLater(() -> safeShowToast(message, true));
                     return null;
                 });
@@ -1538,7 +1538,7 @@ public class DashboardController {
             try {
                 return objectMapper.readValue(raw, DashboardAlertItem.class);
             } catch (Exception e) {
-                log.debug("알람 JSON 파싱 실패, plain-text로 처리: {}", e.getMessage());
+                log.debug("경보 JSON 파싱 실패, plain-text로 처리: {}", e.getMessage());
             }
         }
         DashboardAlertItem fallback = new DashboardAlertItem();

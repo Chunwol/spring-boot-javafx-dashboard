@@ -506,8 +506,9 @@
 }
 
 .dashboard-menu-button {
-    -fx-font-size: 10px;
-    -fx-padding: 5 10 5 10;
+    -fx-font-size: 12px;
+    -fx-padding: 8 14 8 14;
+    -fx-min-height: 34px;
     -fx-background-radius: 8;
     -fx-background-color: -fx-bg-input;
     -fx-text-fill: -fx-text-body;

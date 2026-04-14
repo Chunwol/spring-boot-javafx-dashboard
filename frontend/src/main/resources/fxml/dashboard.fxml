@@ -51,7 +51,7 @@
 				<Region HBox.hgrow="ALWAYS" />
 				<StackPane fx:id="alertsButtonStack" pickOnBounds="false">
 					<children>
-						<Button fx:id="alertsButton" text="알람" styleClass="btn-icon-action,btn-icon-alert" />
+						<Button fx:id="alertsButton" text="경보" styleClass="btn-icon-action,btn-icon-alert" />
 						<Label fx:id="alertsBadgeLabel"
 							   managed="false"
 							   text="0"

@@ -51,9 +51,9 @@
 
         <HBox spacing="10.0" alignment="CENTER_LEFT">
             <children>
-                <Label text="큐 압력" styleClass="mgmt-section-label" />
+                <Label text="큐 부하" styleClass="mgmt-section-label" />
                 <Label fx:id="perfQueuePressureLabel" text="-" styleClass="ops-pressure-badge" />
-                <Label text="Stale 압력" styleClass="mgmt-section-label" />
+                <Label text="지연 부하" styleClass="mgmt-section-label" />
                 <Label fx:id="perfStalePressureLabel" text="-" styleClass="ops-pressure-badge" />
             </children>
         </HBox>
