@@ -1,5 +1,8 @@
 package com.example.dto.dashboard;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class DashboardPanelDto {
     private Long id;
     private Long dashboardId;
@@ -10,6 +13,8 @@ public class DashboardPanelDto {
     private Double y;
     private Double width;
     private Double height;
+    @JsonProperty("zIndex")
+    @JsonAlias({"zindex", "z_index"})
     private Integer zIndex;
     private boolean visible;
     private String panelName;
@@ -88,10 +93,12 @@ public class DashboardPanelDto {
         this.height = height;
     }
 
+    @JsonProperty("zIndex")
     public Integer getZIndex() {
         return zIndex;
     }
 
+    @JsonProperty("zIndex")
     public void setZIndex(Integer zIndex) {
         this.zIndex = zIndex;
     }

@@ -262,11 +262,7 @@ public class DashboardResourcePanelModule {
 
     private void configureResourceDrag(HBox row, String dragKey) {
         row.setOnDragDetected(event -> {
-            if (dragKey == null || dragKey.isBlank()) {
-                return;
-            }
-            boolean canDrag = editModeSupplier.getAsBoolean() || dragKey.startsWith("GROUP_ADD:");
-            if (!canDrag) {
+            if (!editModeSupplier.getAsBoolean() || dragKey == null || dragKey.isBlank()) {
                 return;
             }
             if (isButtonTarget(event.getPickResult() == null ? null : event.getPickResult().getIntersectedNode())) {
@@ -281,10 +277,10 @@ public class DashboardResourcePanelModule {
     }
 
     private boolean canDragFromResource(ResourceRowModel model) {
-        if (model == null || model.dragKey() == null || model.dragKey().isBlank()) {
-            return false;
-        }
-        return editModeSupplier.getAsBoolean() || model.kind() == ResourceKind.CLASSROOM;
+        return editModeSupplier.getAsBoolean()
+                && model != null
+                && model.dragKey() != null
+                && !model.dragKey().isBlank();
     }
 
     private boolean isButtonTarget(Node node) {
