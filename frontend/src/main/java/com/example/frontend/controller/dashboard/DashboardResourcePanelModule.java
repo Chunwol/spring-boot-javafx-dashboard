@@ -52,7 +52,6 @@ public class DashboardResourcePanelModule {
 
     // 내부 UI 상태 (buildView 이후 유효)
     private ListView<Object> groupListView;
-    private ComboBox<ClassroomSummaryDto> panelClassroomCombo;
     private ComboBox<ClassroomSummaryDto> networkClassroomCombo;
     private VBox leftEditControls;
     private Node editControlsSection;
@@ -148,7 +147,8 @@ public class DashboardResourcePanelModule {
                 HBox.setHgrow(spacer, Priority.ALWAYS);
 
                 Button deleteBtn = buildDeleteButton(item, model);
-                Label dragHint = new Label(editModeSupplier.getAsBoolean() ? "추가" : "");
+                boolean canDrag = canDragFromResource(model);
+                Label dragHint = new Label(canDrag ? "드래그 추가" : "");
                 dragHint.getStyleClass().add("resource-item-drag-hint");
 
                 HBox row = deleteBtn == null
@@ -169,7 +169,6 @@ public class DashboardResourcePanelModule {
             }
         });
 
-        panelClassroomCombo = buildClassroomCombo("패널용 강의실 선택");
         networkClassroomCombo = buildClassroomCombo("네트워크 패널용 강의실 선택");
 
         leftEditControls.getChildren().setAll(
@@ -181,8 +180,6 @@ public class DashboardResourcePanelModule {
                 createBackupTextButton(),
                 createRestoreTextButton(),
                 new Separator(),
-                panelClassroomCombo,
-                createAddClassroomPanelButton(),
                 networkClassroomCombo,
                 createAddNetworkPanelButton()
         );
@@ -211,9 +208,6 @@ public class DashboardResourcePanelModule {
         if (widgetModule != null) {
             groupListView.getItems().addAll(widgetModule.getCachedTexts());
             groupListView.getItems().addAll(widgetModule.getCachedImages());
-        }
-        if (panelClassroomCombo != null) {
-            panelClassroomCombo.getItems().setAll(classrooms);
         }
         if (networkClassroomCombo != null) {
             networkClassroomCombo.getItems().setAll(classrooms);
@@ -268,7 +262,11 @@ public class DashboardResourcePanelModule {
 
     private void configureResourceDrag(HBox row, String dragKey) {
         row.setOnDragDetected(event -> {
-            if (!editModeSupplier.getAsBoolean() || dragKey == null || dragKey.isBlank()) {
+            if (dragKey == null || dragKey.isBlank()) {
+                return;
+            }
+            boolean canDrag = editModeSupplier.getAsBoolean() || dragKey.startsWith("GROUP_ADD:");
+            if (!canDrag) {
                 return;
             }
             if (isButtonTarget(event.getPickResult() == null ? null : event.getPickResult().getIntersectedNode())) {
@@ -280,6 +278,13 @@ public class DashboardResourcePanelModule {
             dragboard.setContent(content);
             event.consume();
         });
+    }
+
+    private boolean canDragFromResource(ResourceRowModel model) {
+        if (model == null || model.dragKey() == null || model.dragKey().isBlank()) {
+            return false;
+        }
+        return editModeSupplier.getAsBoolean() || model.kind() == ResourceKind.CLASSROOM;
     }
 
     private boolean isButtonTarget(Node node) {
@@ -328,27 +333,6 @@ public class DashboardResourcePanelModule {
         Button button = iconButton("강의실 추가", "mdi2s-school-outline", "#0ea5e9");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setOnAction(e -> classroomModule.handleAddClassroom());
-        return button;
-    }
-
-    private Button createAddClassroomPanelButton() {
-        Button button = actionButton("강의실 패널 추가", "#2563eb");
-        button.setMaxWidth(Double.MAX_VALUE);
-        button.setOnAction(e -> {
-            ClassroomSummaryDto selected = panelClassroomCombo.getValue();
-            if (selected == null) {
-                return;
-            }
-            List<DashboardPanelDto> panels = viewModel.getCachedDashboardPanels();
-            boolean exists = panels.stream().anyMatch(p ->
-                    "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
-                            && selected.getGroupId().equals(p.getRefGroupId()));
-            if (exists) {
-                return;
-            }
-            double[] size = responsiveSizeFn.apply("CLASSROOM");
-            classroomModule.addClassroomPanel(selected, 40.0, 40.0, size[0], size[1]);
-        });
         return button;
     }
 

@@ -227,18 +227,9 @@ public class DashboardClassroomModule {
         }
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0) {
-            Platform.runLater(() -> new Alert(Alert.AlertType.WARNING, "먼저 대시보드를 선택하세요.").showAndWait());
+            log.warn("Skip addClassroomPanel because dashboardId is not selected");
             return;
         }
-
-        TextInputDialog nameDialog = new TextInputDialog();
-        nameDialog.setTitle("패널 이름 설정");
-        nameDialog.setHeaderText("강의실 [" + group.getGroupName() + "] 패널의 표시 이름을 입력하세요.");
-        nameDialog.setContentText("이름 (비워두면 강의실명 사용):");
-        java.util.Optional<String> nameResult = nameDialog.showAndWait();
-        if (nameResult.isEmpty()) return; // 취소
-
-        String panelName = nameResult.get().trim();
 
         java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("panelType", "CLASSROOM_HEARTBEAT");
@@ -249,13 +240,11 @@ public class DashboardClassroomModule {
         payload.put("height", height);
         payload.put("visible", true);
         payload.put("zIndex", 0);
-        if (!panelName.isEmpty()) payload.put("panelName", panelName);
 
         apiClient.postJson("/dashboards/" + dashboardId + "/panels", payload)
                 .thenAccept(resp -> Platform.runLater(refreshPanelCallback))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            "강의실 패널 추가 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
+                    log.warn("강의실 패널 추가 실패: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
                     return null;
                 });
     }
