@@ -41,6 +41,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,6 +55,7 @@ import org.slf4j.LoggerFactory;
 
 public class DashboardManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardManagementModule.class);
+    private static final DateTimeFormatter PERF_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
     private final String apiBaseUrl;
     private final Supplier<javafx.scene.Scene> sceneSupplier;
     private final ApiClient apiClient;
@@ -65,6 +68,16 @@ public class DashboardManagementModule {
     private TableView<PcStatusDto> brokenPcTable;
     private TableView<Map<String, Object>> agentTable;
     private Label installKeyLabel;
+    private Label perfUpdatedAtLabel;
+    private Label perfPcOnlineLabel;
+    private Label perfPcRatioLabel;
+    private Label perfCommandQueueLabel;
+    private Label perfCommandFailureLabel;
+    private Label perfStaleLabel;
+    private Label perfTokenLabel;
+    private Label perfCacheLabel;
+    private Label perfQueuePressureLabel;
+    private Label perfStalePressureLabel;
     private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
     private List<PcStatusDto> cachedBrokenPcs = List.of();
 
@@ -77,10 +90,11 @@ public class DashboardManagementModule {
 
     public Node createView() {
         ScrollPane scrollPane;
-        StackPane agentSlot, ipRangeSlot, teacherSlot, brokenPcSlot, reportSlot;
+        StackPane metricsSlot, agentSlot, ipRangeSlot, teacherSlot, brokenPcSlot, reportSlot;
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-view.fxml"));
             scrollPane   = loader.load();
+            metricsSlot  = (StackPane) loader.getNamespace().get("metricsSlot");
             agentSlot    = (StackPane) loader.getNamespace().get("agentSlot");
             ipRangeSlot  = (StackPane) loader.getNamespace().get("ipRangeSlot");
             teacherSlot  = (StackPane) loader.getNamespace().get("teacherSlot");
@@ -90,6 +104,7 @@ public class DashboardManagementModule {
             throw new IllegalStateException("관리 뷰 FXML 로딩 실패", e);
         }
 
+        metricsSlot.getChildren().setAll(buildPerformanceBox());
         agentSlot.getChildren().setAll(buildAgentInstallBox());
         ipRangeSlot.getChildren().setAll(buildIpRangeBox());
         teacherSlot.getChildren().setAll(buildTeacherDeviceBox());
@@ -102,6 +117,7 @@ public class DashboardManagementModule {
     }
 
     public void reloadData() {
+        loadPerformanceSnapshot();
         loadIpRangesAndGroups();
         loadAgentList();
         loadInstallKey();
@@ -574,6 +590,181 @@ public class DashboardManagementModule {
         weekBtn.setOnAction(e -> showReportDateDialog("WEEKLY"));
         monthBtn.setOnAction(e -> showReportDateDialog("MONTHLY"));
         return reportBox;
+    }
+
+    private VBox buildPerformanceBox() {
+        VBox box;
+        Button refreshBtn;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-performance-section.fxml"));
+            box = loader.load();
+            perfUpdatedAtLabel = (Label) loader.getNamespace().get("perfUpdatedAtLabel");
+            perfPcOnlineLabel = (Label) loader.getNamespace().get("perfPcOnlineLabel");
+            perfPcRatioLabel = (Label) loader.getNamespace().get("perfPcRatioLabel");
+            perfCommandQueueLabel = (Label) loader.getNamespace().get("perfCommandQueueLabel");
+            perfCommandFailureLabel = (Label) loader.getNamespace().get("perfCommandFailureLabel");
+            perfStaleLabel = (Label) loader.getNamespace().get("perfStaleLabel");
+            perfTokenLabel = (Label) loader.getNamespace().get("perfTokenLabel");
+            perfCacheLabel = (Label) loader.getNamespace().get("perfCacheLabel");
+            perfQueuePressureLabel = (Label) loader.getNamespace().get("perfQueuePressureLabel");
+            perfStalePressureLabel = (Label) loader.getNamespace().get("perfStalePressureLabel");
+            refreshBtn = (Button) loader.getNamespace().get("perfRefreshBtn");
+        } catch (Exception e) {
+            throw new IllegalStateException("운영 메트릭 섹션 FXML 로딩 실패", e);
+        }
+
+        refreshBtn.setOnAction(e -> loadPerformanceSnapshot());
+        return box;
+    }
+
+    private void loadPerformanceSnapshot() {
+        apiClient.getJson("/status/performance", new TypeReference<Map<String, Object>>() {})
+                .thenAccept(snapshot -> Platform.runLater(() -> applyPerformanceSnapshot(snapshot)))
+                .exceptionally(ex -> {
+                    log.warn("운영 메트릭 조회 실패", ex);
+                    Platform.runLater(() -> {
+                        if (perfUpdatedAtLabel != null) {
+                            perfUpdatedAtLabel.setText("조회 실패");
+                        }
+                    });
+                    return null;
+                });
+    }
+
+    private void applyPerformanceSnapshot(Map<String, Object> snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+
+        Map<String, Object> pc = toMap(snapshot.get("pc"));
+        Map<String, Object> command = toMap(snapshot.get("command"));
+        Map<String, Object> token = toMap(snapshot.get("token"));
+        Map<String, Object> cache = toMap(snapshot.get("cache"));
+        Map<String, Object> pressure = toMap(snapshot.get("pressure"));
+
+        long totalPc = toLong(pc.get("total"));
+        long onlinePc = toLong(pc.get("online"));
+        double onlineRatio = toDouble(pc.get("onlineRatio"));
+        long queued = toLong(command.get("queued"));
+        long inFlight = toLong(command.get("inFlight"));
+        long completed = toLong(command.get("completed"));
+        long failed = toLong(command.get("failed"));
+        long staleDelivered = toLong(command.get("staleDelivered"));
+        long staleAcked = toLong(command.get("staleAcked"));
+        long activeToken = toLong(token.get("active"));
+        long revokedToken = toLong(token.get("revoked"));
+        long cacheSize = toLong(cache.get("estimatedSize"));
+        double hitRate = toDouble(cache.get("hitRate"));
+
+        if (perfUpdatedAtLabel != null) {
+            perfUpdatedAtLabel.setText(formatSnapshotTime(snapshot.get("timestamp")));
+        }
+        if (perfPcOnlineLabel != null) {
+            perfPcOnlineLabel.setText(onlinePc + " / " + totalPc);
+        }
+        if (perfPcRatioLabel != null) {
+            perfPcRatioLabel.setText(String.format("온라인 비율 %.1f%%", onlineRatio));
+        }
+        if (perfCommandQueueLabel != null) {
+            perfCommandQueueLabel.setText("대기 " + queued + " | 진행 " + inFlight);
+        }
+        if (perfCommandFailureLabel != null) {
+            perfCommandFailureLabel.setText("완료 " + completed + " | 실패 " + failed);
+        }
+        if (perfStaleLabel != null) {
+            perfStaleLabel.setText("전달지연 " + staleDelivered + " | ACK지연 " + staleAcked);
+        }
+        if (perfTokenLabel != null) {
+            perfTokenLabel.setText("활성 " + activeToken + " | 폐기 " + revokedToken);
+        }
+        if (perfCacheLabel != null) {
+            perfCacheLabel.setText(String.format("hit %.1f%% | size %d", hitRate * 100.0, cacheSize));
+        }
+
+        String queuePressure = normalizePressure(pressure.get("queuePressure"));
+        String stalePressure = normalizePressure(pressure.get("stalePressure"));
+        if (perfQueuePressureLabel != null) {
+            perfQueuePressureLabel.setText(queuePressure);
+            applyPressureStyle(perfQueuePressureLabel, queuePressure);
+        }
+        if (perfStalePressureLabel != null) {
+            perfStalePressureLabel.setText(stalePressure);
+            applyPressureStyle(perfStalePressureLabel, stalePressure);
+        }
+    }
+
+    private void applyPressureStyle(Label label, String pressure) {
+        if (label == null) {
+            return;
+        }
+        label.getStyleClass().removeAll("status-online", "status-warning", "status-failed");
+        switch (pressure) {
+            case "HIGH" -> label.getStyleClass().add("status-failed");
+            case "MEDIUM" -> label.getStyleClass().add("status-warning");
+            default -> label.getStyleClass().add("status-online");
+        }
+    }
+
+    private String normalizePressure(Object value) {
+        if (value == null) {
+            return "LOW";
+        }
+        String normalized = value.toString().trim().toUpperCase();
+        return switch (normalized) {
+            case "HIGH", "MEDIUM", "LOW" -> normalized;
+            default -> "LOW";
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
+    private long toLong(Object value) {
+        if (value instanceof Number num) {
+            return num.longValue();
+        }
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private double toDouble(Object value) {
+        if (value instanceof Number num) {
+            return num.doubleValue();
+        }
+        if (value == null) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException ex) {
+            return 0.0;
+        }
+    }
+
+    private String formatSnapshotTime(Object timestamp) {
+        if (timestamp == null) {
+            return "-";
+        }
+        if (timestamp instanceof LocalDateTime localDateTime) {
+            return localDateTime.format(PERF_TIME_FORMAT);
+        }
+        String raw = timestamp.toString();
+        try {
+            return LocalDateTime.parse(raw).format(PERF_TIME_FORMAT);
+        } catch (Exception ignore) {
+            return raw;
+        }
     }
 
 
@@ -1211,4 +1402,3 @@ public class DashboardManagementModule {
     }
 
 }
-
