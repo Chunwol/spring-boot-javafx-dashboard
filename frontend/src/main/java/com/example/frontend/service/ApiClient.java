@@ -25,6 +25,8 @@ import java.util.function.Consumer;
 
 public class ApiClient {
     private static final Logger log = LoggerFactory.getLogger(ApiClient.class);
+    public static final String UNAUTHORIZED_MESSAGE = "인증이 필요합니다. 다시 로그인해주세요.";
+    public static final String FORBIDDEN_MESSAGE = "권한이 없습니다. 관리자에게 권한을 요청해주세요.";
 
     public static final String DEFAULT_BASE_URL;
     public static final String DEFAULT_WS_URL;
@@ -137,6 +139,47 @@ public class ApiClient {
 
     public boolean isViewerRole() {
         return "VIEWER".equalsIgnoreCase(currentUserRole);
+    }
+
+    public static String viewerWriteDeniedMessage(String actionName) {
+        String target = actionName == null || actionName.isBlank() ? "이 작업" : actionName;
+        return "VIEWER 계정은 조회 전용입니다. " + target + " 권한이 없습니다.";
+    }
+
+    public static Throwable unwrapFailure(Throwable error) {
+        return error instanceof CompletionException && error.getCause() != null
+                ? error.getCause()
+                : error;
+    }
+
+    public static boolean isUnauthorized(Throwable error) {
+        Throwable cause = unwrapFailure(error);
+        return cause instanceof ApiClientException apiEx && apiEx.getStatusCode() == 401;
+    }
+
+    public static boolean isForbidden(Throwable error) {
+        Throwable cause = unwrapFailure(error);
+        return cause instanceof ApiClientException apiEx && apiEx.getStatusCode() == 403;
+    }
+
+    public static String userFacingErrorMessage(Throwable error, String fallback) {
+        Throwable cause = unwrapFailure(error);
+        if (cause instanceof ApiClientException apiEx) {
+            if (apiEx.getStatusCode() == 401) {
+                return UNAUTHORIZED_MESSAGE;
+            }
+            if (apiEx.getStatusCode() == 403) {
+                return FORBIDDEN_MESSAGE;
+            }
+            String apiMessage = apiEx.getMessage();
+            if (apiMessage != null && !apiMessage.isBlank()) {
+                return apiMessage;
+            }
+        }
+        if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
+            return cause.getMessage();
+        }
+        return fallback;
     }
 
     public void setConnectionFailureHandler(Consumer<Throwable> handler) {
@@ -356,7 +399,7 @@ public class ApiClient {
                     if (retriesLeft > 0) {
                         return sendWithRetry(request, retriesLeft - 1);
                     }
-                    Throwable unwrapped = unwrap(error);
+                    Throwable unwrapped = unwrapFailure(error);
                     notifyConnectionFailure(unwrapped);
                     return CompletableFuture.<HttpResponse<String>>failedFuture(unwrapped);
                 })
@@ -369,7 +412,7 @@ public class ApiClient {
                     if (error == null) {
                         return CompletableFuture.completedFuture(response);
                     }
-                    Throwable unwrapped = unwrap(error);
+                    Throwable unwrapped = unwrapFailure(error);
                     notifyConnectionFailure(unwrapped);
                     return CompletableFuture.<HttpResponse<byte[]>>failedFuture(unwrapped);
                 })
@@ -381,7 +424,7 @@ public class ApiClient {
         if (handler == null || error == null) {
             return;
         }
-        Throwable root = unwrap(error);
+        Throwable root = unwrapFailure(error);
         if (root instanceof java.net.ConnectException
                 || root instanceof java.net.UnknownHostException
                 || root instanceof java.net.SocketTimeoutException
@@ -407,14 +450,12 @@ public class ApiClient {
             return response;
         }
         if (code == 401) {
-            ApiClientException exception = new ApiClientException(code, "인증이 필요합니다. 다시 로그인해주세요.");
+            ApiClientException exception = new ApiClientException(code, UNAUTHORIZED_MESSAGE);
             notifyAuthFailure(exception);
             throw new CompletionException(exception);
         }
         if (code == 403) {
-            ApiClientException exception = new ApiClientException(code, "권한이 없거나 로그인 세션이 만료되었습니다.");
-            notifyAuthFailure(exception);
-            throw new CompletionException(exception);
+            throw new CompletionException(new ApiClientException(code, FORBIDDEN_MESSAGE));
         }
         throw new CompletionException(new ApiClientException(code, extractMessage(response.body())));
     }
@@ -423,6 +464,14 @@ public class ApiClient {
         int code = response.statusCode();
         if (code >= 200 && code < 300) {
             return response;
+        }
+        if (code == 401) {
+            ApiClientException exception = new ApiClientException(code, UNAUTHORIZED_MESSAGE);
+            notifyAuthFailure(exception);
+            throw new CompletionException(exception);
+        }
+        if (code == 403) {
+            throw new CompletionException(new ApiClientException(code, FORBIDDEN_MESSAGE));
         }
         throw new CompletionException(new ApiClientException(code, "HTTP " + code));
     }
@@ -457,12 +506,6 @@ public class ApiClient {
         } catch (IOException e) {
             throw new CompletionException(e);
         }
-    }
-
-    private static Throwable unwrap(Throwable error) {
-        return error instanceof CompletionException && error.getCause() != null
-                ? error.getCause()
-                : error;
     }
 
     private static String readSetting(java.util.Properties props, String propertyKey, String envKey, String defaultValue) {

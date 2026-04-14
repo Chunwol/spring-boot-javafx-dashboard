@@ -43,13 +43,17 @@ public class DashboardClassroomModule {
      * @param onComplete 완료 콜백
      */
     public void renameGroup(Long groupId, String newName, Runnable onComplete) {
+        if (!ensureWritePermission("강의실 이름 변경")) {
+            return;
+        }
         if (groupId == null || newName == null || newName.isBlank()) return;
         apiClient.putJson("/groups/" + groupId, java.util.Map.of("name", newName))
                 .thenAccept(resp -> Platform.runLater(() -> {
                     if (onComplete != null) onComplete.run();
                 }))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이름 변경 실패: " + ex.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "이름 변경 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
@@ -118,6 +122,19 @@ public class DashboardClassroomModule {
                 });
     }
 
+    private boolean ensureWritePermission(String actionName) {
+        if (!apiClient.isViewerRole()) {
+            return true;
+        }
+        Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
+                ApiClient.viewerWriteDeniedMessage(actionName)).show());
+        return false;
+    }
+
+    private String resolveErrorMessage(Throwable ex, String fallback) {
+        return ApiClient.userFacingErrorMessage(ex, fallback);
+    }
+
     // ─── 패널 갱신 (public) ────────────────────────────────────────────────
 
     /** 강의실 목록을 받아 대시보드 패널을 추가/업데이트/제거한다. */
@@ -178,6 +195,9 @@ public class DashboardClassroomModule {
     // ─── 강의실 CRUD API (public) ──────────────────────────────────────────
 
     public void handleAddClassroom() {
+        if (!ensureWritePermission("강의실 추가")) {
+            return;
+        }
         TextInputDialog dialog = new TextInputDialog();
         dialog.setTitle("새 강의실 추가");
         dialog.setHeaderText("새로운 강의실의 이름을 입력하세요.");
@@ -194,15 +214,17 @@ public class DashboardClassroomModule {
                         new Alert(Alert.AlertType.INFORMATION, "강의실이 성공적으로 추가되었습니다.").showAndWait();
                     }))
                     .exceptionally(ex -> {
-                        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                         Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                                "네트워크 오류 또는 서버 응답 실패: " + cause.getMessage()).showAndWait());
+                                "강의실 추가 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                         return null;
                     });
         });
     }
 
     public void addClassroomPanel(ClassroomSummaryDto group, double x, double y, double width, double height) {
+        if (!ensureWritePermission("강의실 패널 추가")) {
+            return;
+        }
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0) {
             Platform.runLater(() -> new Alert(Alert.AlertType.WARNING, "먼저 대시보드를 선택하세요.").showAndWait());
@@ -232,13 +254,16 @@ public class DashboardClassroomModule {
         apiClient.postJson("/dashboards/" + dashboardId + "/panels", payload)
                 .thenAccept(resp -> Platform.runLater(refreshPanelCallback))
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "강의실 패널 추가 실패: " + cause.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "강의실 패널 추가 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
 
     public void deleteClassroomPanel(Long panelId) {
+        if (!ensureWritePermission("강의실 패널 삭제")) {
+            return;
+        }
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0) {
             return;
@@ -246,13 +271,16 @@ public class DashboardClassroomModule {
         apiClient.delete("/dashboards/" + dashboardId + "/panels/" + panelId)
                 .thenAccept(resp -> Platform.runLater(refreshPanelCallback))
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "강의실 패널 삭제 실패: " + cause.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "강의실 패널 삭제 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
 
     public void handleDeleteGroup(ClassroomSummaryDto group) {
+        if (!ensureWritePermission("강의실 삭제")) {
+            return;
+        }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION,
                 "강의실 [" + group.getGroupName() + "]을(를) 정말 삭제하시겠습니까?\n연결된 IP 대역 설정도 함께 삭제됩니다.",
                 ButtonType.YES, ButtonType.NO);
@@ -266,6 +294,9 @@ public class DashboardClassroomModule {
     }
 
     public void toggleGroupVisibility(ClassroomSummaryDto group, boolean isVisible) {
+        if (!ensureWritePermission("강의실 표시 변경")) {
+            return;
+        }
         apiClient.putJson("/groups/" + group.getGroupId(), new LinkedHashMap<>() {{
             put("name", group.getGroupName());
             put("description", "");
@@ -275,7 +306,10 @@ public class DashboardClassroomModule {
                     Platform.runLater(refreshCallback::run);
                 })
                 .exceptionally(ex -> {
-                    log.warn("강의실 표시설정 변경 실패: groupId={}", group.getGroupId(), ex);
+                    log.warn("강의실 표시설정 변경 실패: groupId={}, message={}",
+                            group.getGroupId(),
+                            resolveErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                            ex);
                     return null;
                 });
     }
@@ -326,6 +360,7 @@ public class DashboardClassroomModule {
         GridPane pcGrid = (GridPane) namespace.get("pcGrid");
         Button shutdownAllBtn = (Button) namespace.get("shutdownAllBtn");
         Button wolAllBtn = (Button) namespace.get("wolAllBtn");
+        HBox buttonBox = (HBox) namespace.get("buttonBox");
         StackPane panelNameSlot = (StackPane) namespace.get("panelNameSlot");
         HBox resizeHandleBox = (HBox) namespace.get("resizeHandleBox");
         Label resizeHandleLabel = (Label) namespace.get("resizeHandleLabel");
@@ -423,6 +458,18 @@ public class DashboardClassroomModule {
         shutdownAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "SHUTDOWN"));
 
         wolAllBtn.setOnAction(e -> sendGroupCommand(summary.getGroupId(), summary.getGroupName(), "WOL"));
+
+        if (apiClient.isViewerRole()) {
+            shutdownAllBtn.setManaged(false);
+            shutdownAllBtn.setVisible(false);
+            wolAllBtn.setManaged(false);
+            wolAllBtn.setVisible(false);
+            if (buttonBox != null) {
+                Label readOnlyLabel = new Label("읽기 전용");
+                readOnlyLabel.getStyleClass().add("viewer-readonly-badge");
+                buttonBox.getChildren().setAll(readOnlyLabel);
+            }
+        }
 
         // 사용자 지정 패널 이름이 있으면 부제목으로 표시
         String customPanelName = panelDto.getPanelName();
@@ -745,6 +792,9 @@ public class DashboardClassroomModule {
     }
 
     private void updateDashboardPanelPosition(Long dashboardPanelId, double x, double y, double width, double height, boolean visible) {
+        if (!ensureWritePermission("패널 위치 변경")) {
+            return;
+        }
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0 || dashboardPanelId == null) {
             return;
@@ -759,8 +809,8 @@ public class DashboardClassroomModule {
             put("height", height);
             put("visible", visible);
         }}).exceptionally(ex -> {
-            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "패널 위치 저장 실패: " + cause.getMessage()).show());
+            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                    "패널 위치 저장 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).show());
             return null;
         });
     }
@@ -804,6 +854,9 @@ public class DashboardClassroomModule {
     }
 
     private void sendGroupCommand(Long groupId, String groupName, String type) {
+        if (!ensureWritePermission("전체 명령 전송")) {
+            return;
+        }
         if (!confirmGroupCommand(groupName, type)) {
             return;
         }
@@ -817,10 +870,13 @@ public class DashboardClassroomModule {
                     log.info("Group command sent successfully: {} for groupId={}", type, groupId);
                 })
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    log.warn("Failed to send group command {} for groupId={}", type, groupId, cause);
+                    log.warn("Failed to send group command {} for groupId={}, message={}",
+                            type,
+                            groupId,
+                            resolveErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                            ex);
                     Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                            type + " 명령 전송 실패: " + cause.getMessage()).show());
+                            type + " 명령 전송 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).show());
                     return null;
                 });
     }

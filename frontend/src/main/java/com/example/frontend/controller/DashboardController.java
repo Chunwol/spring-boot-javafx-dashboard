@@ -105,6 +105,9 @@ public class DashboardController {
     private Label dashboardSubtitleLabel;
 
     @FXML
+    private Label viewerModeBadgeLabel;
+
+    @FXML
     private MenuButton dashboardSettingsMenu;
 
     @FXML
@@ -219,6 +222,8 @@ public class DashboardController {
     private Label clockLabel;
     private Label statusSummaryLabel;
     private Label connectivityLabel;
+    private Label statusRoleLabel;
+    private String dashboardSubtitleBaseText;
     private SplitPane mainSplitPane;
     private VBox leftToolPane;
     private Node leftEditControls;
@@ -280,13 +285,43 @@ public class DashboardController {
         if (!isViewerMode()) {
             return true;
         }
-        String message = "뷰어 계정은 " + actionName + " 권한이 없습니다.";
+        String message = ApiClient.viewerWriteDeniedMessage(actionName);
         if (dashboardUIService != null) {
             dashboardUIService.showToast(message, true);
         } else {
             log.info(message);
         }
         return false;
+    }
+
+    private void applyRoleUiState() {
+        String role = ApiClient.getInstance().getCurrentUserRole();
+        if (role == null || role.isBlank()) {
+            role = "USER";
+        }
+        boolean viewer = isViewerMode();
+
+        if (dashboardSubtitleLabel != null) {
+            if (dashboardSubtitleBaseText == null || dashboardSubtitleBaseText.isBlank()) {
+                dashboardSubtitleBaseText = dashboardSubtitleLabel.getText();
+            }
+            String base = dashboardSubtitleBaseText == null ? "" : dashboardSubtitleBaseText;
+            dashboardSubtitleLabel.setText(viewer ? base + " | 읽기 전용" : base);
+        }
+
+        if (viewerModeBadgeLabel != null) {
+            viewerModeBadgeLabel.setText("VIEWER | 읽기 전용");
+            viewerModeBadgeLabel.setVisible(viewer);
+            viewerModeBadgeLabel.setManaged(viewer);
+        }
+
+        if (statusRoleLabel != null) {
+            statusRoleLabel.getStyleClass().remove("statusbar-role-readonly");
+            statusRoleLabel.setText(viewer ? "역할 VIEWER | 읽기 전용" : "역할 " + role.toUpperCase(java.util.Locale.ROOT));
+            if (viewer) {
+                statusRoleLabel.getStyleClass().add("statusbar-role-readonly");
+            }
+        }
     }
 
     private void removeTabIfPresent(Tab tab) {
@@ -302,13 +337,7 @@ public class DashboardController {
         }
 
         dashboardViewModel.setEditMode(false);
-
-        if (dashboardSubtitleLabel != null) {
-            String subtitle = dashboardSubtitleLabel.getText();
-            if (subtitle != null && !subtitle.contains("읽기 전용")) {
-                dashboardSubtitleLabel.setText(subtitle + " | 읽기 전용");
-            }
-        }
+        applyRoleUiState();
 
         if (dashboardSettingsMenu != null) {
             dashboardSettingsMenu.setDisable(true);
@@ -362,6 +391,7 @@ public class DashboardController {
         initializeTopBar();
         initializeTabs();
         applyViewerUiRestrictions();
+        applyRoleUiState();
 
         // Bind zoom property to UI updates
         dashboardViewModel.zoomScaleProperty().addListener((obs, oldV, newV) -> {
@@ -445,11 +475,26 @@ public class DashboardController {
             statusSummaryLabel = (Label) ns.get("statusSummaryLabel");
             connectivityLabel = (Label) ns.get("connectivityLabel");
             clockLabel = (Label) ns.get("clockLabel");
+            statusRoleLabel = (Label) ns.get("statusRoleLabel");
         } catch (Exception e) {
             // fallback: use simple labels
             statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
             connectivityLabel = new Label("연결 대기 중");
             clockLabel = new Label();
+            statusRoleLabel = new Label("역할 USER");
+        }
+    }
+
+    private void attachStatusBarIfNeeded() {
+        if (rootVBox == null || statusSummaryLabel == null) {
+            return;
+        }
+        if (!(statusSummaryLabel.getParent() instanceof HBox statusBar)) {
+            return;
+        }
+        if (!rootVBox.getChildren().contains(statusBar)) {
+            rootVBox.getChildren().add(statusBar);
+            VBox.setVgrow(statusBar, Priority.NEVER);
         }
     }
 
@@ -458,6 +503,7 @@ public class DashboardController {
             AccessibilityHelper.makeAccessible(dashboardTitleLabel, "통합 강의실 관제");
         }
         if (dashboardSubtitleLabel != null) {
+            dashboardSubtitleBaseText = dashboardSubtitleLabel.getText();
             AccessibilityHelper.makeAccessible(dashboardSubtitleLabel, "실시간 모니터링, 원격 제어, 리포팅");
         }
         if (dashboardSelector == null) {
@@ -503,7 +549,10 @@ public class DashboardController {
         statusSummaryLabel = new Label();
         connectivityLabel = new Label();
         clockLabel = new Label();
+        statusRoleLabel = new Label();
         loadStatusBarFromFxml();
+        attachStatusBarIfNeeded();
+        applyRoleUiState();
 
         // 설정 메뉴의 삭제 항목 초기화 및 리스너 등록
         MenuItem deleteMenuItem = dashboardSettingsMenu == null
@@ -588,7 +637,9 @@ public class DashboardController {
                             loadDashboards();
                         }))
                         .exceptionally(ex -> {
-                            Platform.runLater(() -> dashboardUIService.showToast("대시보드 삭제 실패: " + ex.getMessage(), true));
+                            Platform.runLater(() -> dashboardUIService.showToast(
+                                    "대시보드 삭제 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                                    true));
                             return null;
                         });
             }
@@ -608,10 +659,7 @@ public class DashboardController {
                 moveToLoginScreen(null, false);
                 // 상태바 재생성
                 loadStatusBarFromFxml();
-
-                // 하단 상태바 고정
-                HBox statusBar = (HBox) statusSummaryLabel.getParent();
-                rootVBox.getChildren().add(statusBar);
+                attachStatusBarIfNeeded();
             } catch (Exception ex) {
                 dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
             }
@@ -701,7 +749,9 @@ public class DashboardController {
                     dashboardUIService.showToast("백업 완료: " + new java.io.File(path).getName(), false);
                 }))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> dashboardUIService.showToast("백업 실패: " + ex.getMessage(), true));
+                    Platform.runLater(() -> dashboardUIService.showToast(
+                            "백업 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                            true));
                     return null;
                 });
         });
@@ -729,7 +779,9 @@ public class DashboardController {
                 });
             })
             .exceptionally(ex -> {
-                Platform.runLater(() -> dashboardUIService.showToast("복원 실패: " + ex.getMessage(), true));
+                Platform.runLater(() -> dashboardUIService.showToast(
+                        "복원 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                        true));
                 return null;
             });
     }

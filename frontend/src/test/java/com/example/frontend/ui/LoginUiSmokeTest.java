@@ -10,6 +10,9 @@ import javafx.stage.Stage;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
+import org.testfx.util.WaitForAsyncUtils;
+
+import java.util.concurrent.TimeUnit;
 
 class LoginUiSmokeTest extends ApplicationTest {
 
@@ -27,7 +30,7 @@ class LoginUiSmokeTest extends ApplicationTest {
     }
 
     @Test
-    void showsValidationMessageWhenUsernameOrPasswordMissing() {
+    void showsValidationMessageWhenUsernameOrPasswordMissing() throws Exception {
         TextField hostField = lookup("#hostField").queryAs(TextField.class);
         TextField portField = lookup("#portField").queryAs(TextField.class);
         TextField usernameField = lookup("#usernameField").queryAs(TextField.class);
@@ -50,6 +53,7 @@ class LoginUiSmokeTest extends ApplicationTest {
         clickOn("로그인");
 
         Label messageLabel = lookup("#messageLabel").queryAs(Label.class);
+        WaitForAsyncUtils.waitFor(2, TimeUnit.SECONDS, messageLabel::isVisible);
         Assertions.assertTrue(messageLabel.isVisible(), "검증 실패 메시지가 표시되어야 합니다.");
         Assertions.assertTrue(messageLabel.getText().contains("사용자명"), "메시지에 사용자명 안내가 포함되어야 합니다.");
         Assertions.assertTrue(messageLabel.getText().contains("비밀번호"), "메시지에 비밀번호 안내가 포함되어야 합니다.");

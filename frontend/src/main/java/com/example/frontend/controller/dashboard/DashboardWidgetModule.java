@@ -48,6 +48,9 @@ public class DashboardWidgetModule {
      * 텍스트 위젯 이름 인라인 변경 (id, 새 이름, 완료 콜백)
      */
     public void renameTextItem(Long id, String newName, Runnable onComplete) {
+        if (!ensureWritePermission("텍스트 이름 변경")) {
+            return;
+        }
         if (id == null || newName == null || newName.isBlank()) return;
         long dashboardId = dashboardIdSupplier.getAsLong();
         String path = "/dashboard/texts/" + id + "/rename";
@@ -60,7 +63,8 @@ public class DashboardWidgetModule {
                     if (onComplete != null) onComplete.run();
                 }))
                 .exceptionally(ex -> {
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이름 변경 실패: " + ex.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "이름 변경 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
@@ -112,6 +116,19 @@ public class DashboardWidgetModule {
 
     public void setDashboardIdSupplier(LongSupplier supplier) {
         this.dashboardIdSupplier = supplier != null ? supplier : () -> -1L;
+    }
+
+    private boolean ensureWritePermission(String actionName) {
+        if (!apiClient.isViewerRole()) {
+            return true;
+        }
+        Platform.runLater(() -> new Alert(Alert.AlertType.INFORMATION,
+                ApiClient.viewerWriteDeniedMessage(actionName)).show());
+        return false;
+    }
+
+    private String resolveErrorMessage(Throwable ex, String fallback) {
+        return ApiClient.userFacingErrorMessage(ex, fallback);
     }
 
     public List<Map<String, Object>> getCachedTexts() { return cachedTexts; }
@@ -179,6 +196,9 @@ public class DashboardWidgetModule {
     // ─────────── 텍스트 아이템 ───────────
 
     public void handleAddTextItem() {
+        if (!ensureWritePermission("텍스트 패널 추가")) {
+            return;
+        }
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("텍스트 위젯 추가");
         dialog.setHeaderText("표시할 텍스트를 입력하세요");
@@ -246,8 +266,8 @@ public class DashboardWidgetModule {
                     new Alert(Alert.AlertType.INFORMATION, "텍스트 패널이 추가되었습니다.").showAndWait();
                 }))
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "네트워크 오류 또는 서버 응답 실패: " + cause.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "텍스트 패널 추가 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
@@ -499,6 +519,9 @@ public class DashboardWidgetModule {
     }
 
     public void updateTextItemPosition(Long id, double x, double y, double w, double h, boolean visible) {
+        if (!ensureWritePermission("텍스트 패널 위치 변경")) {
+            return;
+        }
         apiClient.putJson("/dashboard/texts/" + id, Map.of(
             "x", x,
             "y", y,
@@ -506,12 +529,15 @@ public class DashboardWidgetModule {
             "height", h,
             "visible", visible
         )).exceptionally(ex -> {
-            log.warn("Failed to update text position", ex);
+            log.warn("Failed to update text position: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
             return null;
         });
     }
 
     private void updateTextItem(Long id, String text, double x, double y, double w, double h) {
+        if (!ensureWritePermission("텍스트 패널 수정")) {
+            return;
+        }
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("text", text);
         payload.put("x", x);
@@ -528,7 +554,7 @@ public class DashboardWidgetModule {
         }
 
         apiClient.putJson("/dashboard/texts/" + id, payload).exceptionally(ex -> {
-            log.warn("Failed to update text widget", ex);
+            log.warn("Failed to update text widget: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
             return null;
         });
     }
@@ -571,14 +597,18 @@ public class DashboardWidgetModule {
     }
 
     public void handleDeleteTextItem(Long id) {
+        if (!ensureWritePermission("텍스트 패널 삭제")) {
+            return;
+        }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "텍스트를 삭제하시겠습니까?", ButtonType.YES, ButtonType.NO);
         alert.showAndWait().ifPresent(type -> {
             if (type == ButtonType.YES) {
             apiClient.delete("/dashboard/texts/" + id)
                         .thenAccept(resp -> Platform.runLater(this::loadTextItems))
                         .exceptionally(ex -> {
-                            log.warn("텍스트 삭제 실패", ex);
-                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "텍스트 삭제에 실패했습니다.").showAndWait());
+                            log.warn("텍스트 삭제 실패: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                    "텍스트 삭제 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                             return null;
                         });
             }
@@ -586,8 +616,11 @@ public class DashboardWidgetModule {
     }
 
     public void toggleTextVisibility(Long id, Map<String, Object> map, boolean isVisible) {
+        if (!ensureWritePermission("텍스트 표시 변경")) {
+            return;
+        }
         apiClient.putJson("/dashboard/texts/" + id, Map.of("visible", isVisible)).exceptionally(ex -> {
-            log.warn("Failed to toggle text widget visibility", ex);
+            log.warn("Failed to toggle text widget visibility: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
             return null;
         });
     }
@@ -595,6 +628,9 @@ public class DashboardWidgetModule {
     // ─────────── 이미지 아이템 ───────────
 
     public void handleAddImageItem() {
+        if (!ensureWritePermission("이미지 패널 추가")) {
+            return;
+        }
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("이미지 파일 선택");
         fileChooser.getExtensionFilters().addAll(
@@ -616,8 +652,8 @@ public class DashboardWidgetModule {
                     new Alert(Alert.AlertType.INFORMATION, "이미지 파일이 대시보드에 추가되었습니다.").showAndWait();
                 }))
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이미지 업로드 실패: " + cause.getMessage()).showAndWait());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "이미지 업로드 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                     return null;
                 });
     }
@@ -751,6 +787,9 @@ public class DashboardWidgetModule {
     }
 
     public void updateImageItemPosition(Long id, double x, double y, double w, double h, boolean visible) {
+        if (!ensureWritePermission("이미지 패널 위치 변경")) {
+            return;
+        }
         apiClient.putJson("/dashboard/images/" + id, Map.of(
             "x", x,
             "y", y,
@@ -758,20 +797,24 @@ public class DashboardWidgetModule {
             "height", h,
             "visible", visible
         )).exceptionally(ex -> {
-            log.warn("Failed to update image position", ex);
+            log.warn("Failed to update image position: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
             return null;
         });
     }
 
     public void handleDeleteImageItem(Long id) {
+        if (!ensureWritePermission("이미지 패널 삭제")) {
+            return;
+        }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "이미지를 삭제하시겠습니까?", ButtonType.YES, ButtonType.NO);
         alert.showAndWait().ifPresent(type -> {
             if (type == ButtonType.YES) {
             apiClient.delete("/dashboard/images/" + id)
                         .thenAccept(resp -> Platform.runLater(this::loadImageItems))
                         .exceptionally(ex -> {
-                            log.warn("이미지 삭제 실패", ex);
-                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "이미지 삭제에 실패했습니다.").showAndWait());
+                            log.warn("이미지 삭제 실패: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
+                            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                                    "이미지 삭제 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).showAndWait());
                             return null;
                         });
             }
@@ -779,8 +822,11 @@ public class DashboardWidgetModule {
     }
 
     public void toggleImageVisibility(Long id, Map<String, Object> map, boolean isVisible) {
+        if (!ensureWritePermission("이미지 표시 변경")) {
+            return;
+        }
         apiClient.putJson("/dashboard/images/" + id, Map.of("visible", isVisible)).exceptionally(ex -> {
-            log.warn("Failed to toggle image visibility", ex);
+            log.warn("Failed to toggle image visibility: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
             return null;
         });
     }
@@ -813,6 +859,9 @@ public class DashboardWidgetModule {
     }
 
     public void handleRestoreTextItems() {
+        if (!ensureWritePermission("텍스트 백업 복원")) {
+            return;
+        }
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("텍스트 아이템 백업 파일 열기");
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON Files", "*.json"));
@@ -837,8 +886,8 @@ public class DashboardWidgetModule {
                     new Alert(Alert.AlertType.INFORMATION, "복원 완료").show();
                 }))
                 .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR, "네트워크 오류 또는 서버 응답 실패: " + cause.getMessage()).show());
+                    Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
+                            "복원 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).show());
                     return null;
                 });
     }

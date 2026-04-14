@@ -1076,21 +1076,11 @@ public class DashboardManagementModule {
     // ─── 보고서 ────────────────────────────────────────────────
 
     private String errorMessage(Throwable ex) {
-        Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
-                ? ex.getCause() : ex;
-        if (cause == null) return "알 수 없는 오류";
-        String msg = cause.getMessage();
-        return msg == null || msg.isBlank() ? cause.toString() : msg;
+        return ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다.");
     }
 
     private boolean isAuthExpired(Throwable ex) {
-        Throwable cause = (ex instanceof CompletionException && ex.getCause() != null)
-                ? ex.getCause()
-                : ex;
-        if (cause instanceof com.example.frontend.service.ApiClientException apiEx) {
-            return apiEx.getStatusCode() == 401 || apiEx.getStatusCode() == 403;
-        }
-        return false;
+        return ApiClient.isUnauthorized(ex);
     }
 
     private void showReportDateDialog(String defaultType) {
@@ -1221,5 +1211,4 @@ public class DashboardManagementModule {
     }
 
 }
-
 

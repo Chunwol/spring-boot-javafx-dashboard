@@ -13,6 +13,7 @@
     <children>
         <Label fx:id="statusSummaryLabel" text="강의실 0, 온라인 0/0" styleClass="statusbar-summary" />
         <Label fx:id="connectivityLabel" text="연결 대기 중" styleClass="statusbar-connectivity" />
+        <Label fx:id="statusRoleLabel" text="역할 USER" styleClass="statusbar-role" />
         <Region HBox.hgrow="ALWAYS" />
         <Label fx:id="clockLabel" styleClass="statusbar-clock" />
     </children>

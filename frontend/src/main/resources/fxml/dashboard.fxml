@@ -37,6 +37,11 @@
 						<Label fx:id="dashboardSubtitleLabel" text="실시간 모니터링, 원격 제어, 리포팅" styleClass="dashboard-topbar-subtitle" />
 					</children>
 				</VBox>
+				<Label fx:id="viewerModeBadgeLabel"
+					   managed="false"
+					   text="VIEWER | 읽기 전용"
+					   visible="false"
+					   styleClass="viewer-readonly-badge" />
 				<HBox alignment="CENTER_LEFT" spacing="6">
 					<children>
 						<ComboBox fx:id="dashboardSelector" prefWidth="200.0" promptText="대시보드 선택" />
@@ -133,4 +138,3 @@
 		</TabPane>
 	</children>
 </VBox>
-
