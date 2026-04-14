@@ -25,6 +25,7 @@ import org.kordamp.ikonli.javafx.FontIcon;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -49,6 +50,7 @@ public class DashboardResourcePanelModule {
     private final Supplier<Long> currentDashboardId;
     private final Function<String, double[]> responsiveSizeFn;
     private final Runnable onLoadDashboardPanels;
+    private final BiConsumer<String, Boolean> showToast;
 
     // 내부 UI 상태 (buildView 이후 유효)
     private ListView<Object> groupListView;
@@ -65,7 +67,8 @@ public class DashboardResourcePanelModule {
             BooleanSupplier editModeSupplier,
             Supplier<Long> currentDashboardId,
             Function<String, double[]> responsiveSizeFn,
-            Runnable onLoadDashboardPanels) {
+            Runnable onLoadDashboardPanels,
+            BiConsumer<String, Boolean> showToast) {
         this.viewModel = viewModel;
         this.classroomModule = classroomModule;
         this.widgetModule = widgetModule;
@@ -74,6 +77,7 @@ public class DashboardResourcePanelModule {
         this.currentDashboardId = currentDashboardId;
         this.responsiveSizeFn = responsiveSizeFn;
         this.onLoadDashboardPanels = onLoadDashboardPanels;
+        this.showToast = showToast;
     }
 
     /**
@@ -359,7 +363,12 @@ public class DashboardResourcePanelModule {
                     "DISCONNECT_STATUS",
                     null,
                     80.0, 80.0, size[0], size[1],
-                    dto -> Platform.runLater(onLoadDashboardPanels::run)
+                    dto -> Platform.runLater(() -> {
+                        if (dto != null) {
+                            showPanelAddedToast("접속현황");
+                        }
+                        onLoadDashboardPanels.run();
+                    })
             );
         });
         return button;
@@ -378,7 +387,12 @@ public class DashboardResourcePanelModule {
                     "OPERATIONS_METRICS",
                     null,
                     100.0, 100.0, size[0], size[1],
-                    dto -> Platform.runLater(onLoadDashboardPanels::run)
+                    dto -> Platform.runLater(() -> {
+                        if (dto != null) {
+                            showPanelAddedToast("운영 메트릭");
+                        }
+                        onLoadDashboardPanels.run();
+                    })
             );
         });
         return button;
@@ -415,10 +429,26 @@ public class DashboardResourcePanelModule {
                     "NETWORK_TRAFFIC",
                     selected.getGroupId(),
                     60.0, 60.0, size[0], size[1],
-                    dto -> Platform.runLater(onLoadDashboardPanels::run)
+                    dto -> Platform.runLater(() -> {
+                        if (dto != null) {
+                            String label = selected.getGroupName() == null || selected.getGroupName().isBlank()
+                                    ? "네트워크"
+                                    : selected.getGroupName() + " 네트워크";
+                            showPanelAddedToast(label);
+                        }
+                        onLoadDashboardPanels.run();
+                    })
             );
         });
         return button;
+    }
+
+    private void showPanelAddedToast(String panelLabel) {
+        if (showToast == null) {
+            return;
+        }
+        String label = panelLabel == null || panelLabel.isBlank() ? "패널" : panelLabel + " 패널";
+        showToast.accept(label + " 추가됨", false);
     }
 
     private ComboBox<ClassroomSummaryDto> buildClassroomCombo(String prompt) {

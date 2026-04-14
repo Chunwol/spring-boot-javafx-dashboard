@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -70,6 +71,7 @@ public class DashboardClassroomModule {
     private final Runnable refreshCallback;
     private final LongSupplier dashboardIdSupplier;
     private final Runnable refreshPanelCallback;
+    private final BiConsumer<String, Boolean> showToast;
     private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final BooleanSupplier snapModeSupplier;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
@@ -95,6 +97,7 @@ public class DashboardClassroomModule {
             Runnable refreshCallback,
             LongSupplier dashboardIdSupplier,
             Runnable refreshPanelCallback,
+            BiConsumer<String, Boolean> showToast,
             PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             BooleanSupplier snapModeSupplier) {
         this.apiClient = ApiClient.getInstance();
@@ -106,6 +109,7 @@ public class DashboardClassroomModule {
         this.refreshCallback = refreshCallback;
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.refreshPanelCallback = refreshPanelCallback;
+        this.showToast = showToast;
         this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.snapModeSupplier = snapModeSupplier;
 
@@ -242,7 +246,15 @@ public class DashboardClassroomModule {
         payload.put("zIndex", 0);
 
         apiClient.postJson("/dashboards/" + dashboardId + "/panels", payload)
-                .thenAccept(resp -> Platform.runLater(refreshPanelCallback))
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    refreshPanelCallback.run();
+                    if (showToast != null) {
+                        String label = group.getGroupName() == null || group.getGroupName().isBlank()
+                                ? "강의실 패널"
+                                : group.getGroupName() + " 패널";
+                        showToast.accept(label + " 추가됨", false);
+                    }
+                }))
                 .exceptionally(ex -> {
                     log.warn("강의실 패널 추가 실패: {}", resolveErrorMessage(ex, "요청을 처리하지 못했습니다."), ex);
                     return null;

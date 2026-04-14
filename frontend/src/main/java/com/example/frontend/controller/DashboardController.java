@@ -1000,6 +1000,7 @@ public class DashboardController {
             this::refreshDashboardSnapshot,
             () -> currentDashboardId() == null ? -1L : currentDashboardId(),
                 this::loadDashboardPanels,
+            this::safeShowToast,
             this::updateCachedPanelPosition,
             this::isSnapToGridEnabled
         );
@@ -1012,7 +1013,8 @@ public class DashboardController {
             this::isEditModeActive,
             this::currentDashboardId,
             this::getResponsiveDefaultSize,
-            this::loadDashboardPanels
+            this::loadDashboardPanels,
+            this::safeShowToast
         );
 
         VBox leftPane = buildLeftPane();
