@@ -18,6 +18,7 @@ import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
 import com.example.frontend.controller.dashboard.DashboardNetworkPanelModule;
 import com.example.frontend.controller.dashboard.DashboardPcManagementModule;
+import com.example.frontend.model.dashboard.DashboardAlertItem;
 import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
 import com.example.frontend.service.ApiClient;
@@ -26,6 +27,7 @@ import com.example.frontend.service.DashboardLayoutService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.example.frontend.util.AccessibilityHelper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import javafx.beans.value.ChangeListener;
@@ -45,6 +47,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuButton;
@@ -67,6 +71,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.PopupWindow;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.stage.WindowEvent;
@@ -76,12 +81,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.http.HttpClient;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +97,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DashboardController {
 
     private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter ALERT_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
+    private static final int ALERT_FETCH_LIMIT = 30;
     private static final Logger log = LoggerFactory.getLogger(DashboardController.class);
 
     @FXML
@@ -109,6 +118,15 @@ public class DashboardController {
 
     @FXML
     private MenuButton dashboardSettingsMenu;
+
+    @FXML
+    private StackPane alertsButtonStack;
+
+    @FXML
+    private Button alertsButton;
+
+    @FXML
+    private Label alertsBadgeLabel;
 
     @FXML
     private Button logoutButton;
@@ -263,6 +281,9 @@ public class DashboardController {
     private final DashboardPanelManager panelManager = new DashboardPanelManager();
     private final Map<Long, VBox> textItemMap = new HashMap<>();
     private final Map<Long, VBox> imageItemMap = new HashMap<>();
+    private final List<DashboardAlertItem> alertItems = new ArrayList<>();
+    private ContextMenu alertContextMenu;
+    private long unreadAlertCount = 0L;
     private DashboardNetworkPanelModule networkPanelModule;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -464,6 +485,8 @@ public class DashboardController {
         scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::refreshDashboardSnapshot), 0, 30, TimeUnit.SECONDS);
 
         connectWebSocket();
+        loadAlertSnapshot();
+        refreshUnreadAlertCount();
         loadDashboards();
     }
 
@@ -536,6 +559,10 @@ public class DashboardController {
 
         configureDashboardSettingsMenu(dashboardSettingsMenu);
 
+        if (alertsButton != null) {
+            configureAlertButton(alertsButton);
+        }
+
         if (logoutButton != null) {
             logoutButton.getStyleClass().add("btn-icon-logout");
             logoutButton.setOnAction(e -> handleLogout());
@@ -567,6 +594,22 @@ public class DashboardController {
                 updateDashboardMenuState(deleteMenuItem);
             });
         }
+    }
+
+    private void configureAlertButton(Button button) {
+        button.getStyleClass().add("btn-icon-alert");
+        button.setOnAction(event -> toggleAlertPopup());
+        FontIcon icon = new FontIcon("mdi2b-bell-outline");
+        icon.setIconSize(15);
+        icon.setIconColor(Color.WHITE);
+        button.setGraphic(icon);
+        AccessibilityHelper.makeAccessible(button, "운영 알람", "운영 알람 목록을 확인합니다");
+
+        alertContextMenu = new ContextMenu();
+        alertContextMenu.setAutoHide(true);
+        alertContextMenu.setHideOnEscape(true);
+        alertContextMenu.setAnchorLocation(PopupWindow.AnchorLocation.CONTENT_TOP_LEFT);
+        refreshAlertBadge();
     }
 
     // 설정 메뉴 초기화
@@ -1263,13 +1306,311 @@ public class DashboardController {
         }
     }
 
+    private void toggleAlertPopup() {
+        if (alertContextMenu == null || alertsButton == null) {
+            return;
+        }
+        if (alertContextMenu.isShowing()) {
+            alertContextMenu.hide();
+            return;
+        }
+        renderAlertPopup();
+        javafx.geometry.Bounds screenBounds = alertsButton.localToScreen(alertsButton.getBoundsInLocal());
+        if (screenBounds == null) {
+            alertContextMenu.show(alertsButton, 0, 0);
+            return;
+        }
+        double popupX = screenBounds.getMaxX() - 440;
+        double popupY = screenBounds.getMaxY() + 8;
+        alertContextMenu.show(alertsButton, popupX, popupY);
+    }
+
+    private void renderAlertPopup() {
+        if (alertContextMenu == null) {
+            return;
+        }
+
+        VBox container = new VBox(8);
+        container.getStyleClass().add("alerts-menu-container");
+
+        HBox header = new HBox(8);
+        Label title = new Label("운영 알람");
+        title.getStyleClass().add("alerts-menu-title");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Button refreshButton = new Button("새로고침");
+        refreshButton.getStyleClass().add("alerts-menu-refresh-btn");
+        refreshButton.setOnAction(event -> {
+            event.consume();
+            loadAlertSnapshot();
+            refreshUnreadAlertCount();
+        });
+        header.getChildren().addAll(title, spacer, refreshButton);
+
+        VBox alertList = new VBox(6);
+        if (alertItems.isEmpty()) {
+            Label emptyLabel = new Label("현재 표시할 알람이 없습니다.");
+            emptyLabel.getStyleClass().add("alerts-empty-label");
+            alertList.getChildren().add(emptyLabel);
+        } else {
+            for (DashboardAlertItem item : alertItems) {
+                alertList.getChildren().add(buildAlertCard(item));
+            }
+        }
+
+        ScrollPane scrollPane = new ScrollPane(alertList);
+        scrollPane.getStyleClass().add("alerts-list-scroll");
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPrefViewportHeight(330);
+        scrollPane.setPrefWidth(420);
+
+        container.getChildren().addAll(header, scrollPane);
+        CustomMenuItem rootItem = new CustomMenuItem(container, false);
+        alertContextMenu.getItems().setAll(rootItem);
+    }
+
+    private VBox buildAlertCard(DashboardAlertItem item) {
+        VBox card = new VBox(6);
+        card.getStyleClass().add("alerts-item");
+        if (item.isCritical()) {
+            card.getStyleClass().add("alerts-item-critical");
+        }
+
+        Label messageLabel = new Label(item.getMessage() == null ? "(내용 없음)" : item.getMessage());
+        messageLabel.getStyleClass().add("alerts-item-message");
+        messageLabel.setWrapText(true);
+
+        HBox metaRow = new HBox(8);
+        Label severityLabel = new Label(severityDisplayText(item.getSeverity()));
+        severityLabel.getStyleClass().add(severityStyleClass(item.getSeverity()));
+
+        String source = item.getSourceMac();
+        if (source == null || source.isBlank()) {
+            source = "SYSTEM";
+        }
+        Label sourceLabel = new Label(source);
+        sourceLabel.getStyleClass().add("alerts-item-meta");
+
+        Label timeLabel = new Label(formatAlertTime(item.getCreatedAt()));
+        timeLabel.getStyleClass().add("alerts-item-meta");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        metaRow.getChildren().addAll(severityLabel, sourceLabel, timeLabel, spacer);
+
+        if (!item.isAcknowledged()) {
+            if (isViewerMode()) {
+                Label pendingLabel = new Label("미확인");
+                pendingLabel.getStyleClass().add("alerts-item-meta");
+                metaRow.getChildren().add(pendingLabel);
+            } else {
+                Button ackButton = new Button("확인");
+                ackButton.getStyleClass().add("alerts-ack-button");
+                ackButton.setOnAction(event -> {
+                    event.consume();
+                    acknowledgeAlert(item);
+                });
+                metaRow.getChildren().add(ackButton);
+            }
+        } else {
+            Label acknowledgedLabel = new Label("확인됨");
+            acknowledgedLabel.getStyleClass().add("alerts-acknowledged");
+            metaRow.getChildren().add(acknowledgedLabel);
+        }
+
+        card.getChildren().addAll(messageLabel, metaRow);
+        return card;
+    }
+
+    private void loadAlertSnapshot() {
+        ApiClient.getInstance()
+                .getJson("/alerts?limit=" + ALERT_FETCH_LIMIT, new TypeReference<List<DashboardAlertItem>>() {})
+                .thenAccept(items -> Platform.runLater(() -> {
+                    alertItems.clear();
+                    if (items != null) {
+                        alertItems.addAll(items);
+                    }
+                    if (alertContextMenu != null && alertContextMenu.isShowing()) {
+                        renderAlertPopup();
+                    }
+                }))
+                .exceptionally(ex -> {
+                    log.debug("운영 알람 목록 조회 실패: {}", ex.getMessage());
+                    return null;
+                });
+    }
+
+    private void refreshUnreadAlertCount() {
+        ApiClient.getInstance()
+                .getJson("/alerts/unread-count", new TypeReference<Map<String, Object>>() {})
+                .thenAccept(payload -> Platform.runLater(() -> {
+                    Object unread = payload == null ? null : payload.get("unread");
+                    if (unread instanceof Number number) {
+                        unreadAlertCount = Math.max(0L, number.longValue());
+                    } else {
+                        unreadAlertCount = 0L;
+                    }
+                    refreshAlertBadge();
+                }))
+                .exceptionally(ex -> {
+                    log.debug("미확인 알람 카운트 조회 실패: {}", ex.getMessage());
+                    return null;
+                });
+    }
+
+    private void acknowledgeAlert(DashboardAlertItem item) {
+        if (item == null || item.getId() == null) {
+            return;
+        }
+        if (isViewerMode()) {
+            safeShowToast(ApiClient.viewerWriteDeniedMessage("알람 확인 처리"), true);
+            return;
+        }
+
+        ApiClient.getInstance()
+                .postJson("/alerts/" + item.getId() + "/ack", Map.of())
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    item.setAcknowledged(true);
+                    item.setAcknowledgedAt(LocalDateTime.now());
+                    if (unreadAlertCount > 0) {
+                        unreadAlertCount--;
+                    }
+                    refreshAlertBadge();
+                    if (alertContextMenu != null && alertContextMenu.isShowing()) {
+                        renderAlertPopup();
+                    }
+                    safeShowToast("알람을 확인 처리했습니다.", false);
+                    refreshUnreadAlertCount();
+                }))
+                .exceptionally(ex -> {
+                    String message = ApiClient.userFacingErrorMessage(ex, "알람 확인 처리에 실패했습니다.");
+                    Platform.runLater(() -> safeShowToast(message, true));
+                    return null;
+                });
+    }
+
+    private void handleRealtimeAlertPayload(String alertPayload) {
+        DashboardAlertItem alertItem = parseAlertPayload(alertPayload);
+        if (alertItem == null || alertItem.getMessage() == null || alertItem.getMessage().isBlank()) {
+            return;
+        }
+
+        Platform.runLater(() -> {
+            boolean addedUnread = upsertAlert(alertItem);
+            if (addedUnread) {
+                unreadAlertCount++;
+            }
+            refreshAlertBadge();
+            if (alertContextMenu != null && alertContextMenu.isShowing()) {
+                renderAlertPopup();
+            }
+            safeShowToast("실시간 알림: " + alertItem.getMessage(), alertItem.isCritical());
+            refreshUnreadAlertCount();
+        });
+    }
+
+    private DashboardAlertItem parseAlertPayload(String alertPayload) {
+        if (alertPayload == null || alertPayload.isBlank()) {
+            return null;
+        }
+        String raw = alertPayload.trim();
+        if (raw.startsWith("{")) {
+            try {
+                return objectMapper.readValue(raw, DashboardAlertItem.class);
+            } catch (Exception e) {
+                log.debug("알람 JSON 파싱 실패, plain-text로 처리: {}", e.getMessage());
+            }
+        }
+        DashboardAlertItem fallback = new DashboardAlertItem();
+        fallback.setMessage(raw);
+        fallback.setSeverity("WARNING");
+        fallback.setAlertType("SYSTEM");
+        fallback.setSourceMac("SYSTEM");
+        fallback.setCreatedAt(LocalDateTime.now());
+        fallback.setAcknowledged(false);
+        return fallback;
+    }
+
+    private boolean upsertAlert(DashboardAlertItem incoming) {
+        Long incomingId = incoming.getId();
+        if (incomingId != null) {
+            for (int i = 0; i < alertItems.size(); i++) {
+                DashboardAlertItem existing = alertItems.get(i);
+                if (Objects.equals(existing.getId(), incomingId)) {
+                    boolean wasUnread = !existing.isAcknowledged();
+                    alertItems.remove(i);
+                    alertItems.add(0, incoming);
+                    return !incoming.isAcknowledged() && !wasUnread;
+                }
+            }
+        }
+        alertItems.add(0, incoming);
+        while (alertItems.size() > ALERT_FETCH_LIMIT) {
+            alertItems.remove(alertItems.size() - 1);
+        }
+        return !incoming.isAcknowledged();
+    }
+
+    private void refreshAlertBadge() {
+        if (alertsBadgeLabel == null) {
+            return;
+        }
+        long count = Math.max(0, unreadAlertCount);
+        if (count <= 0) {
+            alertsBadgeLabel.setVisible(false);
+            alertsBadgeLabel.setManaged(false);
+            return;
+        }
+        alertsBadgeLabel.setText(count > 99 ? "99+" : String.valueOf(count));
+        alertsBadgeLabel.setVisible(true);
+        alertsBadgeLabel.setManaged(true);
+    }
+
+    private String formatAlertTime(LocalDateTime dateTime) {
+        if (dateTime == null) {
+            return "-";
+        }
+        return dateTime.format(ALERT_TIME_FORMAT);
+    }
+
+    private String severityDisplayText(String severity) {
+        if (severity == null || severity.isBlank()) {
+            return "WARNING";
+        }
+        String normalized = severity.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "INFO" -> "INFO";
+            case "CRITICAL" -> "CRITICAL";
+            default -> "WARNING";
+        };
+    }
+
+    private String severityStyleClass(String severity) {
+        String normalized = severity == null ? "" : severity.trim().toUpperCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "INFO" -> "alerts-severity-info";
+            case "CRITICAL" -> "alerts-severity-critical";
+            default -> "alerts-severity-warning";
+        };
+    }
+
+    private void safeShowToast(String message, boolean isError) {
+        if (dashboardUIService != null) {
+            dashboardUIService.showToast(message, isError);
+            return;
+        }
+        log.info("toast({}): {}", isError ? "error" : "info", message);
+    }
+
     private void connectWebSocket() {
         if (realtimeModule == null) {
             realtimeModule = new DashboardRealtimeModule(ApiClient.getInstance().getWsUrl());
         }
         realtimeModule.start(
                 () -> Platform.runLater(this::refreshDashboardSnapshot),
-                alertPayload -> dashboardUIService.showToast("실시간 알림 수신", false),
+                this::handleRealtimeAlertPayload,
                 () -> handleServerConnectionLost(new RuntimeException("WebSocket disconnected"))
         );
     }

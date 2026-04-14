@@ -257,6 +257,23 @@
     -fx-text-fill: white;
 }
 .btn-icon-refresh:hover { -fx-background-color: -fx-accent-teal-hover; }
+.btn-icon-alert {
+    -fx-background-color: #f59e0b;
+    -fx-text-fill: white;
+}
+.btn-icon-alert:hover { -fx-background-color: #d97706; }
+
+.alert-badge-label {
+    -fx-background-color: #dc2626;
+    -fx-text-fill: white;
+    -fx-background-radius: 999;
+    -fx-padding: 1 6 1 6;
+    -fx-font-size: 10px;
+    -fx-font-weight: 800;
+    -fx-border-color: rgba(255,255,255,0.8);
+    -fx-border-width: 1;
+    -fx-border-radius: 999;
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    Buttons — Tiny Delete (resource panel)
@@ -1215,6 +1232,108 @@
     -fx-padding: 10 18 10 18;
     -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.3), 12, 0, 0, 4);
     -fx-font-weight: bold;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Alert Popup Menu
+   ═══════════════════════════════════════════════════════════════════ */
+
+.alerts-menu-container {
+    -fx-background-color: white;
+    -fx-background-radius: 10;
+    -fx-border-color: #d1d5db;
+    -fx-border-radius: 10;
+    -fx-padding: 10;
+    -fx-spacing: 8;
+    -fx-min-width: 420;
+}
+
+.alerts-menu-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: 800;
+    -fx-text-fill: -fx-text-heading;
+}
+
+.alerts-menu-refresh-btn {
+    -fx-background-color: #e2e8f0;
+    -fx-text-fill: -fx-text-body;
+    -fx-background-radius: 8;
+    -fx-padding: 4 10 4 10;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+}
+.alerts-menu-refresh-btn:hover {
+    -fx-background-color: #cbd5e1;
+}
+
+.alerts-list-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+.alerts-list-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.alerts-item {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 8;
+    -fx-spacing: 6;
+}
+.alerts-item-critical {
+    -fx-background-color: #fef2f2;
+    -fx-border-color: #fecaca;
+}
+
+.alerts-item-message {
+    -fx-text-fill: -fx-text-body;
+    -fx-font-size: 12px;
+}
+
+.alerts-item-meta {
+    -fx-text-fill: -fx-text-muted;
+    -fx-font-size: 11px;
+}
+
+.alerts-severity-info {
+    -fx-text-fill: #1d4ed8;
+    -fx-font-weight: 800;
+}
+
+.alerts-severity-warning {
+    -fx-text-fill: #b45309;
+    -fx-font-weight: 800;
+}
+
+.alerts-severity-critical {
+    -fx-text-fill: #b91c1c;
+    -fx-font-weight: 800;
+}
+
+.alerts-ack-button {
+    -fx-background-color: #dbeafe;
+    -fx-text-fill: #1e3a8a;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-background-radius: 8;
+    -fx-padding: 3 10 3 10;
+}
+.alerts-ack-button:hover {
+    -fx-background-color: #bfdbfe;
+}
+
+.alerts-acknowledged {
+    -fx-text-fill: -fx-text-muted;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+}
+
+.alerts-empty-label {
+    -fx-text-fill: -fx-text-muted;
+    -fx-font-size: 12px;
+    -fx-padding: 12 4 12 4;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

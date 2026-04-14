@@ -49,6 +49,21 @@
 					</children>
 				</HBox>
 				<Region HBox.hgrow="ALWAYS" />
+				<StackPane fx:id="alertsButtonStack" pickOnBounds="false">
+					<children>
+						<Button fx:id="alertsButton" text="알람" styleClass="btn-icon-action,btn-icon-alert" />
+						<Label fx:id="alertsBadgeLabel"
+							   managed="false"
+							   text="0"
+							   visible="false"
+							   styleClass="alert-badge-label">
+							<StackPane.alignment>TOP_RIGHT</StackPane.alignment>
+							<StackPane.margin>
+								<Insets top="-6" right="-8" bottom="0" left="0" />
+							</StackPane.margin>
+						</Label>
+					</children>
+				</StackPane>
 				<Button fx:id="logoutButton" text="로그아웃" styleClass="btn-icon-action,btn-icon-logout" />
 			</children>
 		</HBox>
