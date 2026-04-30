@@ -11,8 +11,13 @@ echo === Build All Modules (Windows)
 echo ============================================================
 echo.
 
+REM 0. Clean up stale processes
+echo [0/6] Cleaning up stale database/cache processes...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$redisProcs = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue; if ($redisProcs) { $redisProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }; $postgresProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue; if ($postgresProcs) { $postgresProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"
+echo.
+
 REM 1. Common module
-echo [1/4] Building Common Module...
+echo [1/6] Building Common Module...
 call gradlew.bat :common:build -x test
 if !errorlevel! equ 0 (
     echo [OK] Common module built successfully
@@ -23,7 +28,7 @@ if !errorlevel! equ 0 (
 echo.
 
 REM 2. Backend module
-echo [2/4] Building Backend Module...
+echo [2/6] Building Backend Module...
 call gradlew.bat :backend:bootJar -x test
 if !errorlevel! equ 0 (
     echo [OK] Backend JAR: backend\build\libs\backend-0.0.1-SNAPSHOT.jar
@@ -34,7 +39,7 @@ if !errorlevel! equ 0 (
 echo.
 
 REM 3. Agent module
-echo [3/4] Building Agent Module...
+echo [3/6] Building Agent Module...
 call gradlew.bat :agent:build -x test
 if !errorlevel! equ 0 (
     echo [OK] Agent JAR: agent\build\libs\agent-1.0.0.jar
@@ -45,7 +50,7 @@ if !errorlevel! equ 0 (
 echo.
 
 REM 4. Frontend module
-echo [4/4] Building Frontend Module...
+echo [4/6] Building Frontend Module...
 call gradlew.bat :frontend:shadowJar -x test
 if !errorlevel! equ 0 (
     echo [OK] Frontend JAR: frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
@@ -55,7 +60,7 @@ if !errorlevel! equ 0 (
 )
 
 echo.
-echo [EXTRA] Packaging Frontend EXE (app-image)...
+echo [5/6] Packaging Frontend EXE (app-image)...
 call gradlew.bat :frontend:packageExe
 if !errorlevel! equ 0 (
     echo [OK] Frontend EXE: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe
@@ -65,7 +70,7 @@ if !errorlevel! equ 0 (
 )
 
 echo.
-echo [EXTRA] Packaging Frontend MSI installer...
+echo [5.5/6] Packaging Frontend MSI installer...
 call gradlew.bat :frontend:packageMsi
 if !errorlevel! equ 0 (
     echo [OK] Frontend MSI generated in frontend\build\package\
@@ -74,7 +79,7 @@ if !errorlevel! equ 0 (
 )
 
 echo.
-echo [EXTRA] Collecting release artifacts to dist\
+echo [6/6] Collecting release artifacts to dist\
 if not exist dist mkdir dist
 if not exist dist\backend mkdir dist\backend
 if not exist dist\agent mkdir dist\agent

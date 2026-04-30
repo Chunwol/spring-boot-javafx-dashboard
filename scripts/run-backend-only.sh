@@ -19,8 +19,14 @@ if [ ! -f "gradlew" ]; then
     exit 1
 fi
 
+# Clean up stale processes
+echo "[0/2] Cleaning up stale database/cache processes..."
+pkill -f "postgres" -9 2>/dev/null || true
+pkill -f "redis-server" -9 2>/dev/null || true
+sleep 1
+
 # Build
-echo "Building..."
+echo "[1/2] Building..."
 ./gradlew clean :backend:build -x test
 
 if [ $? -ne 0 ]; then
@@ -29,7 +35,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "[OK] Build successful. Starting Backend..."
+echo "[2/2] Build successful. Starting Backend..."
 echo "Backend: http://localhost:8888"
 echo "Press Ctrl+C to stop"
 echo ""

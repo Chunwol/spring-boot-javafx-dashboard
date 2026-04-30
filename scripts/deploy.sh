@@ -27,6 +27,21 @@ failure() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+# 0. Clean up existing Docker containers and processes
+step "STEP 0: Cleaning up existing deployment..."
+
+# Kill any local postgres/redis processes
+pkill -f "postgres" -9 2>/dev/null || true
+pkill -f "redis-server" -9 2>/dev/null || true
+
+# Stop docker-compose stack if running
+if [ -f "docker-compose.yml" ]; then
+    docker-compose down -v 2>/dev/null || true
+fi
+
+sleep 1
+success "Cleanup complete"
+
 # 1. Java 모듈 빌드
 step "STEP 1: Building Java modules..."
 

@@ -22,8 +22,15 @@ echo -e "${GREEN}=== Build All Modules (Mac/Linux/Git Bash)===${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
 
+# 0. Clean up stale processes before build
+echo -e "${YELLOW}[0/5] Cleaning up stale database/cache processes...${NC}"
+pkill -f "postgres" -9 2>/dev/null || true
+pkill -f "redis-server" -9 2>/dev/null || true
+sleep 1
+echo ""
+
 # 1. Common module
-echo -e "${YELLOW}[1/4] Building Common Module...${NC}"
+echo -e "${YELLOW}[1/5] Building Common Module...${NC}"
 if ./gradlew :common:build -x test; then
     echo -e "${GREEN}✓ Common module built successfully${NC}"
 else
@@ -33,7 +40,7 @@ fi
 echo ""
 
 # 2. Backend module
-echo -e "${YELLOW}[2/4] Building Backend Module...${NC}"
+echo -e "${YELLOW}[2/5] Building Backend Module...${NC}"
 if ./gradlew :backend:bootJar -x test; then
     echo -e "${GREEN}✓ Backend JAR: backend/build/libs/backend-0.0.1-SNAPSHOT.jar${NC}"
 else
@@ -43,7 +50,7 @@ fi
 echo ""
 
 # 3. Agent module
-echo -e "${YELLOW}[3/4] Building Agent Module...${NC}"
+echo -e "${YELLOW}[3/5] Building Agent Module...${NC}"
 if ./gradlew :agent:build -x test; then
     echo -e "${GREEN}✓ Agent JAR: agent/build/libs/agent-1.0.0.jar${NC}"
 else
@@ -53,7 +60,7 @@ fi
 echo ""
 
 # 4. Frontend module
-echo -e "${YELLOW}[4/4] Building Frontend Module...${NC}"
+echo -e "${YELLOW}[4/5] Building Frontend Module...${NC}"
 if ./gradlew :frontend:shadowJar -x test; then
     echo -e "${GREEN}✓ Frontend JAR: frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar${NC}"
 else
@@ -62,7 +69,7 @@ else
 fi
 
 echo ""
-echo -e "${YELLOW}[EXTRA] Collecting release artifacts to dist/${NC}"
+echo -e "${YELLOW}[5/5] Collecting release artifacts to dist/${NC}"
 mkdir -p dist/backend dist/agent dist/frontend
 cp -f backend/build/libs/backend-0.0.1-SNAPSHOT.jar dist/backend/backend.jar
 cp -f agent/build/libs/agent-1.0.0.jar dist/agent/agent.jar

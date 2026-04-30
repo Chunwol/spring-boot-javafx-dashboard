@@ -19,13 +19,19 @@ if [ ! -f "gradlew" ]; then
     exit 1
 fi
 
+# Clean up stale processes (optional for agent, but good practice)
+echo "[0/2] Cleaning up any stale database/cache processes..."
+pkill -f "postgres" -9 2>/dev/null || true
+pkill -f "redis-server" -9 2>/dev/null || true
+sleep 1
+
 # Check if JAR exists
 if [ ! -f "agent/build/libs/agent-1.0.0.jar" ]; then
-    echo "Building Agent JAR first..."
+    echo "[1/2] Building Agent JAR first..."
     ./gradlew :agent:build -x test
 fi
 
-echo "Starting Agent service..."
+echo "[2/2] Starting Agent service..."
 echo "Config dir: $SCRIPT_DIR"
 echo "Press Ctrl+C to stop"
 echo ""

@@ -22,8 +22,23 @@ if not exist "gradlew.bat" (
     exit /b 1
 )
 
+if not exist "scripts\backend-bootstrap.ps1" (
+    echo ERROR: scripts\backend-bootstrap.ps1 not found
+    exit /b 1
+)
+
+echo [0/5] Cleaning up stale database/cache processes...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$redisProcs = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue; if ($redisProcs) { $redisProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }; $postgresProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue; if ($postgresProcs) { $postgresProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"
+
+echo [1/5] Bootstrap PostgreSQL/Redis and backup settings...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\backend-bootstrap.ps1"
+if errorlevel 1 (
+    echo Bootstrap failed!
+    exit /b 1
+)
+
 REM Build the project
-echo [1/4] Building project...
+echo [2/5] Building project...
 call gradlew.bat clean build -x test
 if errorlevel 1 (
     echo Build failed!
@@ -35,14 +50,14 @@ echo [OK] Build successful
 echo.
 
 REM Start backend in new terminal window
-echo [2/4] Starting Backend in new window (port 8888)...
+echo [3/5] Starting Backend in new window (port 8888)...
 start "Backend - http://localhost:8888" cmd /c "cd /d "%PROJECT_ROOT%" && gradlew.bat :backend:bootRun"
 timeout /t 6 /nobreak
 
 echo.
 
 REM Start frontend in new terminal window
-echo [3/4] Starting Frontend in new window...
+echo [4/5] Starting Frontend in new window...
 start "Frontend - JavaFX GUI" cmd /c "cd /d "%PROJECT_ROOT%" && gradlew.bat :frontend:run"
 
 echo.

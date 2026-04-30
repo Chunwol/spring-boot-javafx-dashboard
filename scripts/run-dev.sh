@@ -27,8 +27,21 @@ if [ ! -f "gradlew" ]; then
     exit 1
 fi
 
+# Clean up stale processes before starting
+echo -e "${YELLOW}[0/4] Cleaning up stale database/cache processes...${NC}"
+pkill -f "postgres" -9 2>/dev/null || true
+pkill -f "redis-server" -9 2>/dev/null || true
+sleep 1
+
+# Bootstrap PostgreSQL/Redis if available
+if [ -f "scripts/backend-bootstrap.ps1" ]; then
+    echo -e "${YELLOW}[1/4] Bootstrap PostgreSQL/Redis...${NC}"
+    # For non-Windows: PostgreSQL/Redis should already be running via system package manager
+    # This is optional and may not apply on Mac/Linux
+fi
+
 # Build the project
-echo -e "${YELLOW}[1/4] Building project...${NC}"
+echo -e "${YELLOW}[2/4] Building project...${NC}"
 ./gradlew clean build -x test
 
 # Check build status
@@ -52,7 +65,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start backend
-echo -e "${YELLOW}[2/4] Starting Backend (port 8888)...${NC}"
+echo -e "${YELLOW}[3/4] Starting Backend (port 8888)...${NC}"
 ./gradlew :backend:bootRun > backend.log 2>&1 &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
@@ -72,7 +85,7 @@ echo -e "${GREEN}✓ Backend started${NC}"
 echo ""
 
 # Start frontend
-echo -e "${YELLOW}[3/4] Starting Frontend...${NC}"
+echo -e "${YELLOW}[4/4] Starting Frontend...${NC}"
 ./gradlew :frontend:run > frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo "Frontend PID: $FRONTEND_PID"
