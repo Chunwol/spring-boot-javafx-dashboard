@@ -68,6 +68,15 @@ spring-boot-javafx-dashboard
 **Windows:**
 ```batch
 scripts\run-dev.bat
+
+REM 빠른 통합 실행(부트스트랩 + 백엔드 + 프론트엔드 분리 실행)
+scripts\run-dashboard-stack.bat
+
+REM 재부팅 후 자동 실행(로그온 시 자동 시작)
+scripts\enable-dashboard-autostart.bat
+
+REM 자동 실행 해제
+scripts\disable-dashboard-autostart.bat
 ```
 
 **Mac/Linux/Git Bash:**
@@ -76,6 +85,8 @@ scripts/run-dev.sh
 ```
 
 이 명령은 자동으로:
+- PostgreSQL/Redis 설치/실행 상태 점검 및 자동 부트스트랩
+- 백엔드 내장 DB 백업 스케줄러(기본 매일 01:00) 설정 확인
 - 전체 프로젝트를 빌드
 - 백엔드를 포트 8888에서 시작
 - 프론트엔드를 시작
@@ -123,7 +134,21 @@ RATELIMIT_REQUESTS_PER_HOUR=300000
 ### 주요 설정값
 ```env
 # 데이터베이스
-DB_URL=jdbc:sqlite:db/mydatabase.db
+DB_URL=jdbc:postgresql://localhost:5432/dashboard_db
+DB_DRIVER=org.postgresql.Driver
+DB_USERNAME=dashboard
+DB_PASSWORD=dashboard
+POSTGRES_SUPERUSER=postgres
+POSTGRES_SUPER_PASSWORD=dashboard
+DB_BACKUP_DIR=./backups/postgres
+DB_BACKUP_KEEP_DAYS=14
+DB_BACKUP_TIME=01:00
+DB_BACKUP_ENABLED=true
+DB_BACKUP_CRON=0 0 1 * * *
+DB_BACKUP_ZONE=Asia/Seoul
+DB_BACKUP_TIMEOUT_MINUTES=30
+DB_BACKUP_LOCK_KEY=94503177
+FLYWAY_LOCATIONS=classpath:db/pgmigration
 
 # 서버
 SERVER_PORT=8888
@@ -135,6 +160,9 @@ MAIL_USERNAME=your-email@gmail.com
 # JWT (프로덕션에서는 강력한 키 설정)
 JWT_SECRET=your-secret-key
 ```
+- `DB_BACKUP_TIME=HH:mm`만 바꿔도 자동으로 크론으로 변환됩니다.
+- `DB_BACKUP_TIME`이 유효하면 `DB_BACKUP_CRON`보다 우선 적용됩니다.
+- `DB_BACKUP_TIME` 형식이 잘못되면 `DB_BACKUP_CRON`으로 fallback 됩니다.
 
 ### 주의사항
 - `.env` 파일은 Git에 커밋되지 않습니다 (`.gitignore`에 등록)
@@ -165,7 +193,7 @@ REM 통합 개발모드 (권장) - 별도 창에서 자동 실행
 scripts\run-dev.bat
 
 REM 또는 개별 실행
-scripts\run-backend-only.bat        REM 터미널 1
+scripts\run-backend-only.bat        REM 터미널 1 (자동 설치/복구/백업 등록 포함)
 scripts\run-frontend-dev.bat        REM 터미널 2
 ```
 
@@ -210,6 +238,33 @@ Windows PowerShell:
 - 비연속 IP 대역 등록
 - 중복 대역 충돌(409) 확인
 - 텍스트/이미지 위젯 API 조회
+
+## 문제 해결 (Troubleshooting)
+
+### 백엔드 재시작 시 "포트 이미 사용 중" 또는 "데이터베이스 잠금" 에러
+
+**증상**: 첫 실행은 잘 되지만 백엔드를 껐다가 다시 켜면 PostgreSQL/Redis 연결 에러가 발생
+
+**원인**:
+- 이전 PostgreSQL/Redis 프로세스가 완전히 종료되지 않음
+- 스테일(stale) PID 파일이 정리되지 않음
+- 포트 바인딩 충돌
+
+**해결방법**:
+1. 백엔드 스크립트(`run-backend.bat`)를 사용하여 시작하면 자동으로 기존 프로세스가 정리됩니다
+2. 수동으로 정리하려면 PowerShell에서 다음 실행:
+   ```powershell
+   # PostgreSQL 프로세스 종료
+   Get-Process -Name "postgres" -ErrorAction SilentlyContinue | ForEach-Object { taskkill /PID $_.Id /F }
+   
+   # Redis 프로세스 종료
+   Get-Process -Name "redis-server" -ErrorAction SilentlyContinue | ForEach-Object { taskkill /PID $_.Id /F }
+   
+   # PID 파일 정리
+   Remove-Item ".runtime\redis\redis-runtime.pid" -Force -ErrorAction SilentlyContinue
+   Remove-Item ".runtime\postgres\data\postmaster.pid" -Force -ErrorAction SilentlyContinue
+   ```
+3. 이후 `run-backend.bat`로 다시 시작
 
 ## 기여
 
@@ -370,3 +425,4 @@ java -jar dist/frontend/frontend-all.jar
 # Agent 실행 (모니터링)
 java -jar dist/agent/agent.jar
 ```
+
