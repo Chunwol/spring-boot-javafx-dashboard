@@ -14,6 +14,7 @@ import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -1679,83 +1680,136 @@ public class DashboardPcManagementModule {
             return null;
         }
 
+        // ─── 다이얼로그 ──────────────────────────────────────────────
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("원격 파일 탐색기");
-        dialog.setHeaderText("탐색 대상: " + (browsePc.getPcName() == null ? browsePc.getMacAddress() : browsePc.getPcName()));
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        dialog.getDialogPane().setPrefWidth(1000);
-        dialog.getDialogPane().setPrefHeight(780);
+        dialog.getDialogPane().setPrefWidth(1040);
+        dialog.getDialogPane().setPrefHeight(700);
 
-        VBox root = new VBox(8);
-        root.setPadding(new Insets(12));
-
-        Label info = new Label("폴더/드라이브 클릭 시 이동, [선택 추가]로 수집 목록에 담아주세요.");
-        info.getStyleClass().add("pcmgmt-dialog-caption");
-
-        CheckBox usbOnlyCheck = new CheckBox("USB만 보기 (루트 드라이브 목록)");
-        Label driveStatusLabel = new Label("드라이브 상태: 로딩 중...");
-        driveStatusLabel.getStyleClass().add("pcmgmt-dialog-caption");
-        Label estimateLabel = new Label("선택 예상 전송량: -");
-        estimateLabel.getStyleClass().add("pcmgmt-dialog-caption");
-
+        // ─── 경로 툴바 ────────────────────────────────────────────
         TextField currentPathField = new TextField();
         currentPathField.setEditable(false);
         currentPathField.setPromptText("(드라이브 목록)");
+        currentPathField.getStyleClass().add("rfe-path-field");
+        HBox.setHgrow(currentPathField, Priority.ALWAYS);
+
+        Button upButton      = new Button("↑ 상위");
+        Button rootButton    = new Button("⌂ 루트");
+        Button refreshButton = new Button("↻ 새로고침");
+        for (Button b : new Button[]{upButton, rootButton, refreshButton}) {
+            b.getStyleClass().add("rfe-nav-btn");
+        }
+
+        CheckBox usbOnlyCheck = new CheckBox("USB만");
+        usbOnlyCheck.setStyle("-fx-font-size: 12px;");
 
         TextField pathInputField = new TextField();
-        pathInputField.setPromptText("직접 경로 입력 (예: D:\\USB)");
-        Button goButton = new Button("이동");
-        Button rootButton = new Button("루트");
-        Button upButton = new Button("상위");
-        Button refreshButton = new Button("새로고침");
-        Button loadMoreButton = new Button("더 불러오기");
-        Button addSelectedButton = new Button("선택 추가");
-        Button removeSelectedButton = new Button("선택 제거");
-        loadMoreButton.setVisible(false);
-        loadMoreButton.setManaged(false);
-        loadMoreButton.getStyleClass().add("btn-sm");
+        pathInputField.setPromptText("직접 경로 입력 (예: D:\\Folder)");
+        pathInputField.setStyle("-fx-font-size: 12px;");
+        HBox.setHgrow(pathInputField, Priority.ALWAYS);
 
-        ListView<RemoteBrowseEntry> remoteList = new ListView<>();
-        remoteList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        VBox.setVgrow(remoteList, Priority.ALWAYS);
-        Label pagingStatusLabel = new Label("목록 로딩 중...");
-        pagingStatusLabel.getStyleClass().add("pcmgmt-dialog-caption");
+        Button goButton = new Button("이동");
+        goButton.getStyleClass().add("rfe-go-btn");
+
+        HBox pathBar = new HBox(6, currentPathField, upButton, rootButton, refreshButton, usbOnlyCheck);
+        pathBar.setAlignment(Pos.CENTER_LEFT);
+        HBox navBar  = new HBox(6, pathInputField, goButton);
+        navBar.setAlignment(Pos.CENTER_LEFT);
+
+        VBox toolbar = new VBox(6, pathBar, navBar);
+        toolbar.getStyleClass().add("rfe-toolbar");
+        toolbar.setPadding(new Insets(10, 12, 10, 12));
+
+        // ─── 왼쪽: 원격 파일 목록 ────────────────────────────────
         Label loadingLabel = new Label("⏳ 탐색 중...");
-        loadingLabel.getStyleClass().add("pcmgmt-dialog-caption");
+        loadingLabel.getStyleClass().add("rfe-loading");
+        loadingLabel.setMaxWidth(Double.MAX_VALUE);
         loadingLabel.setVisible(false);
         loadingLabel.setManaged(false);
 
-        ListView<String> selectedPathList = new ListView<>();
-        selectedPathList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        selectedPathList.setPrefHeight(160);
+        ListView<RemoteBrowseEntry> remoteList = new ListView<>();
+        remoteList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        remoteList.getStyleClass().add("rfe-file-list");
+        VBox.setVgrow(remoteList, Priority.ALWAYS);
 
-        TextField outputField = new TextField("collected-bundle.zip");
-        outputField.setPromptText("묶음 파일명(zip)");
+        Button loadMoreButton = new Button("↓ 더 불러오기");
+        loadMoreButton.getStyleClass().add("rfe-nav-btn");
+        loadMoreButton.setVisible(false);
+        loadMoreButton.setManaged(false);
 
-        HBox pathRow = new HBox(6, currentPathField, upButton, refreshButton, rootButton);
-        HBox.setHgrow(currentPathField, Priority.ALWAYS);
-        HBox navRow = new HBox(6, pathInputField, goButton, addSelectedButton, removeSelectedButton);
-        HBox.setHgrow(pathInputField, Priority.ALWAYS);
+        Label pagingStatusLabel = new Label();
+        pagingStatusLabel.getStyleClass().add("rfe-status-text");
+
         HBox pagingRow = new HBox(8, loadMoreButton, pagingStatusLabel);
         pagingRow.setAlignment(Pos.CENTER_LEFT);
+        pagingRow.setPadding(new Insets(5, 10, 5, 10));
+        pagingRow.getStyleClass().add("rfe-paging-row");
 
-        root.getChildren().addAll(
-                info,
-                usbOnlyCheck,
-                driveStatusLabel,
-                estimateLabel,
-                pathRow,
-                navRow,
-                loadingLabel,
-                new Label("원격 항목"),
-                remoteList,
-                pagingRow,
-                new Label("수집 대상 경로"),
-                selectedPathList,
-                new Label("묶음 파일명(zip)"),
-                outputField
+        VBox leftPanel = new VBox(0, loadingLabel, remoteList, pagingRow);
+        VBox.setVgrow(leftPanel, Priority.ALWAYS);
+        HBox.setHgrow(leftPanel, Priority.ALWAYS);
+
+        // ─── 오른쪽: 수집 경로 목록 + 설정 ─────────────────────
+        Label collTitle = new Label("수집 경로 목록");
+        collTitle.getStyleClass().add("rfe-panel-title");
+
+        ListView<String> selectedPathList = new ListView<>();
+        selectedPathList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        selectedPathList.getStyleClass().add("rfe-file-list");
+        VBox.setVgrow(selectedPathList, Priority.ALWAYS);
+
+        Button addSelectedButton    = new Button("+ 추가");
+        Button removeSelectedButton = new Button("− 제거");
+        addSelectedButton.getStyleClass().add("rfe-add-btn");
+        removeSelectedButton.getStyleClass().add("rfe-remove-btn");
+
+        HBox collBtnRow = new HBox(6, addSelectedButton, removeSelectedButton);
+        collBtnRow.setAlignment(Pos.CENTER_LEFT);
+
+        Separator collSep = new Separator();
+        VBox.setMargin(collSep, new Insets(8, 0, 8, 0));
+
+        Label outputLabel = new Label("묶음 파일명 (zip)");
+        outputLabel.getStyleClass().add("rfe-panel-title");
+
+        TextField outputField = new TextField("collected-bundle.zip");
+        outputField.setPromptText("파일명.zip");
+
+        VBox rightPanel = new VBox(6);
+        rightPanel.getStyleClass().add("rfe-right-panel");
+        rightPanel.setPadding(new Insets(12));
+        rightPanel.setMinWidth(260);
+        rightPanel.setPrefWidth(290);
+        rightPanel.getChildren().addAll(
+                collTitle, selectedPathList, collBtnRow, collSep, outputLabel, outputField
         );
+
+        // ─── 메인 수평 분할 영역 ─────────────────────────────────
+        Separator vertDivider = new Separator(Orientation.VERTICAL);
+        HBox mainArea = new HBox(0, leftPanel, vertDivider, rightPanel);
+        VBox.setVgrow(mainArea, Priority.ALWAYS);
+
+        // ─── 하단 상태바 ─────────────────────────────────────────
+        Label driveStatusLabel = new Label("로딩 중...");
+        driveStatusLabel.getStyleClass().add("rfe-status-text");
+        Label estimateLabel = new Label("선택 예상 전송량: -");
+        estimateLabel.getStyleClass().add("rfe-status-text");
+
+        Separator statSep = new Separator(Orientation.VERTICAL);
+        HBox statusBar = new HBox(12, driveStatusLabel, statSep, estimateLabel);
+        statusBar.setAlignment(Pos.CENTER_LEFT);
+        statusBar.getStyleClass().add("rfe-status-bar");
+        statusBar.setPadding(new Insets(5, 12, 5, 12));
+
+        // ─── 최상위 레이아웃 ─────────────────────────────────────
+        VBox root = new VBox(0, toolbar, new Separator(), mainArea, statusBar);
+        VBox.setVgrow(mainArea, Priority.ALWAYS);
         dialog.getDialogPane().setContent(root);
+        dialog.setHeaderText("탐색 대상: " + (browsePc.getPcName() == null ? browsePc.getMacAddress() : browsePc.getPcName()));
+
+        Button okBtn = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        if (okBtn != null) okBtn.setText("수집 실행");
 
         final String[] currentPath = {""};
         final String[] driveSnapshotRef = {""};

@@ -257,6 +257,16 @@
     -fx-text-fill: white;
 }
 .btn-icon-refresh:hover { -fx-background-color: -fx-accent-teal-hover; }
+.btn-icon-undo {
+    -fx-background-color: #6366f1;
+    -fx-text-fill: white;
+}
+.btn-icon-undo:hover { -fx-background-color: #4f46e5; }
+.btn-icon-redo {
+    -fx-background-color: #7c3aed;
+    -fx-text-fill: white;
+}
+.btn-icon-redo:hover { -fx-background-color: #6d28d9; }
 .btn-icon-alert {
     -fx-background-color: #f59e0b;
     -fx-text-fill: white;
@@ -506,17 +516,69 @@
 }
 
 .dashboard-menu-button {
-    -fx-font-size: 12px;
-    -fx-padding: 8 14 8 14;
-    -fx-min-height: 34px;
+    -fx-font-size: 13px;
+    -fx-font-family: "Malgun Gothic", "Segoe UI";
+    -fx-padding: 8 16 8 16;
+    -fx-min-width: 118px;
+    -fx-pref-width: 118px;
+    -fx-min-height: 36px;
+    -fx-pref-height: 36px;
     -fx-background-radius: 8;
     -fx-background-color: -fx-bg-input;
-    -fx-text-fill: -fx-text-body;
-    -fx-font-weight: 700;
+    -fx-text-fill: #0f172a;
+    -fx-font-weight: 800;
     -fx-cursor: hand;
+    -fx-content-display: left;
+    -fx-alignment: CENTER_LEFT;
 }
 .dashboard-menu-button:hover {
     -fx-background-color: #cbd5e0;
+}
+.dashboard-menu-button:disabled {
+    -fx-text-fill: #0f172a;
+    -fx-opacity: 0.75;
+}
+.dashboard-menu-button > .arrow-button {
+    -fx-padding: 0 8 0 8;
+}
+.dashboard-topbar .dashboard-menu-button {
+    -fx-background-color: rgba(255,255,255,0.16);
+    -fx-border-color: rgba(255,255,255,0.35);
+    -fx-border-width: 1;
+    -fx-text-fill: #ffffff;
+}
+.dashboard-topbar .dashboard-menu-button:hover {
+    -fx-background-color: rgba(255,255,255,0.24);
+}
+.dashboard-topbar .dashboard-menu-button > .label,
+.dashboard-topbar .dashboard-menu-button .label,
+.dashboard-topbar .dashboard-menu-button .text,
+.dashboard-topbar .dashboard-menu-button:disabled > .label,
+.dashboard-topbar .dashboard-menu-button:disabled .label,
+.dashboard-topbar .dashboard-menu-button:disabled .text {
+    -fx-text-fill: #ffffff;
+    -fx-fill: #ffffff;
+    -fx-opacity: 1;
+}
+.dashboard-topbar .dashboard-menu-button > .arrow-button .arrow {
+    -fx-background-color: #ffffff;
+}
+.context-menu .menu-item.dashboard-settings-menu-item > .label,
+.context-menu .menu-item.dashboard-settings-menu-item .label,
+.context-menu .menu-item.dashboard-settings-menu-item:focused > .label,
+.context-menu .menu-item.dashboard-settings-menu-item:focused .label,
+.context-menu .menu-item.dashboard-settings-menu-item:hover > .label,
+.context-menu .menu-item.dashboard-settings-menu-item:hover .label {
+    -fx-text-fill: #0f172a;
+    -fx-fill: #0f172a;
+}
+.dashboard-menu-button-text {
+    -fx-text-fill: -fx-text-body;
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+}
+.dashboard-topbar .dashboard-menu-button .dashboard-menu-button-text {
+    -fx-text-fill: #ffffff;
 }
 
 .dashboard-zoom-btn {
@@ -665,6 +727,12 @@
 .pc-cell-offline {
     -fx-background-color: #7a8aa0;
     -fx-background-radius: 4;
+}
+.pc-cell-offline-attention {
+    -fx-background-color: #b48b92;
+}
+.pc-cell-update-attention {
+    -fx-background-color: #d09a5b;
 }
 .pc-cell-broken {
     -fx-background-color: #d55f74;
@@ -1269,6 +1337,18 @@
     -fx-background-color: #cbd5e1;
 }
 
+.alerts-menu-ackall-btn {
+    -fx-background-color: #dbeafe;
+    -fx-text-fill: #1e3a8a;
+    -fx-background-radius: 8;
+    -fx-padding: 4 10 4 10;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+}
+.alerts-menu-ackall-btn:hover {
+    -fx-background-color: #bfdbfe;
+}
+
 .alerts-list-scroll {
     -fx-background-color: transparent;
     -fx-background: transparent;
@@ -1502,4 +1582,165 @@
 .scroll-transparent {
     -fx-background-color: transparent;
     -fx-background: transparent;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Remote File Explorer Dialog (rfe-*)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* 경로 툴바 */
+.rfe-toolbar {
+    -fx-background-color: -fx-bg-subtle;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* 현재 경로 표시 필드 */
+.rfe-path-field {
+    -fx-background-color: -fx-bg-white;
+    -fx-border-color: -fx-border-default;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-font-size: 12px;
+    -fx-font-family: "Consolas", "Malgun Gothic";
+    -fx-text-fill: -fx-text-body;
+    -fx-padding: 5 8;
+}
+
+/* 내비게이션 소형 버튼 (상위 / 루트 / 새로고침 / 더 불러오기) */
+.rfe-nav-btn {
+    -fx-font-size: 12px;
+    -fx-padding: 5 11;
+    -fx-background-color: -fx-bg-white;
+    -fx-border-color: -fx-border-default;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+    -fx-text-fill: -fx-text-body;
+}
+.rfe-nav-btn:hover {
+    -fx-background-color: -fx-bg-input;
+}
+.rfe-nav-btn:disabled {
+    -fx-opacity: 0.45;
+    -fx-cursor: default;
+}
+
+/* 이동 버튼 (강조) */
+.rfe-go-btn {
+    -fx-font-size: 12px;
+    -fx-padding: 5 16;
+    -fx-font-weight: bold;
+    -fx-background-color: -fx-primary;
+    -fx-text-fill: white;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+.rfe-go-btn:hover {
+    -fx-background-color: -fx-primary-hover;
+}
+
+/* 파일 목록 ListView */
+.rfe-file-list {
+    -fx-background-color: -fx-bg-white;
+    -fx-border-color: transparent;
+    -fx-font-size: 13px;
+}
+.rfe-file-list .list-cell {
+    -fx-padding: 5 12;
+    -fx-font-size: 13px;
+    -fx-background-color: transparent;
+}
+.rfe-file-list .list-cell:odd {
+    -fx-background-color: #fafbfc;
+}
+.rfe-file-list .list-cell:hover {
+    -fx-background-color: #eff6ff;
+    -fx-cursor: hand;
+}
+.rfe-file-list .list-cell:selected {
+    -fx-background-color: #dbeafe;
+    -fx-text-fill: #1e3a8a;
+}
+.rfe-file-list .list-cell:selected:hover {
+    -fx-background-color: #bfdbfe;
+}
+
+/* 페이징 행 */
+.rfe-paging-row {
+    -fx-background-color: -fx-bg-subtle;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 1 0 0 0;
+    -fx-min-height: 30;
+}
+
+/* 로딩 표시 */
+.rfe-loading {
+    -fx-font-size: 12px;
+    -fx-text-fill: -fx-primary;
+    -fx-padding: 5 12;
+    -fx-background-color: #eff6ff;
+    -fx-border-color: #bfdbfe;
+    -fx-border-width: 0 0 1 0;
+    -fx-alignment: CENTER_LEFT;
+}
+
+/* 오른쪽 패널 배경 */
+.rfe-right-panel {
+    -fx-background-color: -fx-bg-light;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 0 0 0 0;
+}
+
+/* 패널 섹션 타이틀 */
+.rfe-panel-title {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-text-muted;
+    -fx-text-transform: uppercase;
+}
+
+/* 추가 버튼 */
+.rfe-add-btn {
+    -fx-font-size: 12px;
+    -fx-padding: 5 14;
+    -fx-font-weight: bold;
+    -fx-background-color: #16a34a;
+    -fx-text-fill: white;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+.rfe-add-btn:hover {
+    -fx-background-color: #15803d;
+}
+
+/* 제거 버튼 */
+.rfe-remove-btn {
+    -fx-font-size: 12px;
+    -fx-padding: 5 14;
+    -fx-background-color: -fx-bg-input;
+    -fx-text-fill: -fx-text-body;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+.rfe-remove-btn:hover {
+    -fx-background-color: #fee2e2;
+    -fx-text-fill: #dc2626;
+}
+
+/* 하단 상태바 */
+.rfe-status-bar {
+    -fx-background-color: -fx-bg-subtle;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 1 0 0 0;
+    -fx-min-height: 30;
+}
+
+/* 상태바 텍스트 */
+.rfe-status-text {
+    -fx-font-size: 11px;
+    -fx-text-fill: -fx-text-muted;
 }
