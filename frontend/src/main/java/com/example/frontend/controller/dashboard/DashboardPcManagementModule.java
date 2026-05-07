@@ -1683,8 +1683,8 @@ public class DashboardPcManagementModule {
         dialog.setTitle("원격 파일 탐색기");
         dialog.setHeaderText("탐색 대상: " + (browsePc.getPcName() == null ? browsePc.getMacAddress() : browsePc.getPcName()));
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        dialog.getDialogPane().setPrefWidth(860);
-        dialog.getDialogPane().setPrefHeight(620);
+        dialog.getDialogPane().setPrefWidth(1000);
+        dialog.getDialogPane().setPrefHeight(780);
 
         VBox root = new VBox(8);
         root.setPadding(new Insets(12));
@@ -1727,7 +1727,7 @@ public class DashboardPcManagementModule {
 
         ListView<String> selectedPathList = new ListView<>();
         selectedPathList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        selectedPathList.setPrefHeight(130);
+        selectedPathList.setPrefHeight(160);
 
         TextField outputField = new TextField("collected-bundle.zip");
         outputField.setPromptText("묶음 파일명(zip)");
@@ -1876,14 +1876,19 @@ public class DashboardPcManagementModule {
         });
 
         remoteList.setOnMouseClicked(ev -> {
-            RemoteBrowseEntry entry = remoteList.getSelectionModel().getSelectedItem();
+            // 셀에서 직접 item 취득 — getSelectedItem()은 MOUSE_PRESSED~CLICKED 사이에
+            // setItems()가 끼어들면 null이 될 수 있어 셀 기반으로 우회
+            javafx.scene.Node n = (javafx.scene.Node) ev.getTarget();
+            while (n != null && !(n instanceof javafx.scene.control.ListCell)) n = n.getParent();
+            if (!(n instanceof javafx.scene.control.ListCell)) return;
+            @SuppressWarnings("unchecked")
+            RemoteBrowseEntry entry = (RemoteBrowseEntry) ((javafx.scene.control.ListCell<?>) n).getItem();
             if (entry == null) return;
             if (!"dir".equalsIgnoreCase(entry.type) && !"drive".equalsIgnoreCase(entry.type)) return;
             String nextPath = resolveEntryAbsolutePath(currentPath[0], entry);
-            // 낙관적 경로 업데이트: 자동새로고침이 빈 경로 조건을 더 이상 만족하지 않음
             currentPath[0] = nextPath;
-            int epoch = ++browseEpoch[0]; // stale 이전 응답 폐기
-            remoteBrowseLoading.set(false); // 자동새로고침이 점유 중이어도 강제 진행
+            int epoch = ++browseEpoch[0];
+            remoteBrowseLoading.set(false);
             loadRemoteEntriesAsync(
                     browsePc, nextPath, 0, REMOTE_LIST_PAGE_SIZE, false,
                     currentPathField, remoteList, currentPath, usbOnlyCheck,
