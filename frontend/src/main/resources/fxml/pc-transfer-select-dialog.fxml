@@ -5,7 +5,6 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.ScrollPane?>
-<?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
@@ -16,7 +15,7 @@
         <Insets top="15.0" right="15.0" bottom="15.0" left="15.0" />
     </padding>
     <children>
-        <Label text="전송할 파일 또는 폴더를 선택하세요. 항목별 또는 전체 실행 여부를 제어할 수 있습니다." styleClass="pcmgmt-transfer-info" wrapText="true" />
+        <Label text="전송할 파일 또는 폴더를 선택하세요. 항목별 실행 여부는 각 항목 체크로 제어할 수 있습니다." styleClass="pcmgmt-transfer-info" wrapText="true" />
 
         <HBox spacing="15.0" prefHeight="300.0">
             <children>
@@ -39,10 +38,7 @@
                     <children>
                         <Button fx:id="addFileBtn" text="+ 파일" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-file" />
                         <Button fx:id="addFolderBtn" text="+ 폴더" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-folder" />
-                        <Button fx:id="removeBtn" text="- 제거" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-remove" />
-                        <Separator />
-                        <Button fx:id="runAllBtn" text="전체&#10;실행" prefWidth="100.0" wrapText="true" styleClass="pcmgmt-transfer-btn-all-run" />
-                        <Button fx:id="runNoneBtn" text="전체&#10;미실행" prefWidth="100.0" wrapText="true" styleClass="pcmgmt-transfer-btn-all-stop" />
+                        <Button fx:id="removeBtn" text="전체 제거" prefWidth="100.0" styleClass="pcmgmt-transfer-btn-remove" />
                     </children>
                 </VBox>
             </children>

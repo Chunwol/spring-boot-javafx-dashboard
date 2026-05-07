@@ -1,7 +1,9 @@
 package com.example.frontend.controller.dashboard;
 
 import com.example.dto.dashboard.PcStatusDto;
+import com.example.frontend.config.FrontendEnvConfig;
 import com.example.frontend.service.ApiClient;
+import com.example.frontend.service.ApiClientException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -14,13 +16,19 @@ import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.DirectoryChooser;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,9 +36,17 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -47,6 +63,11 @@ public class DashboardPcManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardPcManagementModule.class);
     private static final long LARGE_TRANSFER_WARNING_BYTES = 8L * 1024L * 1024L * 1024L; // 8GB+
     private static final double ESTIMATED_TRANSFER_MB_PER_SEC = 30.0;
+    private static final int REMOTE_LIST_PAGE_SIZE = 200;
+    private static final int REMOTE_LIST_POLL_INTERVAL_MS = 500;
+    private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
+    private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
+    private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final ObjectMapper objectMapper;
@@ -73,6 +94,7 @@ public class DashboardPcManagementModule {
     private ComboBox<String> targetClassroomCombo; // 선택 강의실 전송 시 표시
     private Label selectionHintLabel;
     private ComboBox<String> commandCombo;
+    private Button rolloutBtn;
 
     // 데이터 (동기화된 컬렉션 - 백그라운드 스레드와 FX 스레드 간 동기화)
     private final List<PcStatusDto> allPcs = Collections.synchronizedList(new ArrayList<>());
@@ -81,6 +103,13 @@ public class DashboardPcManagementModule {
 
     public DashboardPcManagementModule(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+    }
+
+    private static int resolveRemoteListTimeoutSeconds() {
+        int heartbeatIntervalSec = FrontendEnvConfig.getIntProperty("AGENT_HEARTBEAT_INTERVAL_SEC", 30);
+        int calculatedByHeartbeat = Math.max(90, (heartbeatIntervalSec * 2) + 30);
+        int envOverride = FrontendEnvConfig.getIntProperty("REMOTE_LIST_TIMEOUT_SECONDS", calculatedByHeartbeat);
+        return Math.max(30, envOverride);
     }
 
     // ─────────────────────────────────────────
@@ -215,6 +244,7 @@ public class DashboardPcManagementModule {
     private Node buildCommandSection() {
         VBox vbox;
         Button sendBtn;
+        FlowPane commandControlsFlow;
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pcmgmt-command-section.fxml"));
             vbox                 = loader.load();
@@ -222,7 +252,9 @@ public class DashboardPcManagementModule {
             targetClassroomCombo = (ComboBox<String>) loader.getNamespace().get("targetClassroomCombo");
             commandCombo         = (ComboBox<String>) loader.getNamespace().get("commandCombo");
             sendBtn              = (Button)           loader.getNamespace().get("sendBtn");
+            rolloutBtn           = (Button)           loader.getNamespace().get("rolloutBtn");
             selectionHintLabel   = (Label)            loader.getNamespace().get("selectionHintLabel");
+            commandControlsFlow  = (FlowPane)         loader.getNamespace().get("commandControlsFlow");
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load pcmgmt-command-section.fxml", e);
         }
@@ -242,7 +274,589 @@ public class DashboardPcManagementModule {
         commandCombo.setValue("재시작");
 
         sendBtn.setOnAction(e -> handleSendCommand());
+        if (rolloutBtn != null) {
+            rolloutBtn.setOnAction(e -> openAgentRolloutDialog());
+        }
+        if (commandControlsFlow != null) {
+            Runnable updateWrap = () -> {
+                double width = vbox.getWidth();
+                if (width <= 1) {
+                    return;
+                }
+                commandControlsFlow.setPrefWrapLength(Math.max(340.0, width - 20.0));
+            };
+            vbox.widthProperty().addListener((obs, oldW, newW) -> updateWrap.run());
+            Platform.runLater(updateWrap);
+        }
         return vbox;
+    }
+
+    private void openAgentRolloutDialog() {
+        if (apiClient.isViewerRole()) {
+            showAlert("권한 없음", ApiClient.viewerWriteDeniedMessage("에이전트 업데이트 배포"), Alert.AlertType.INFORMATION);
+            return;
+        }
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("에이전트 업데이트 배포");
+        dialog.setResizable(true);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.getDialogPane().setPrefWidth(860);
+        dialog.getDialogPane().setPrefHeight(700);
+        dialog.getDialogPane().setMinWidth(700);
+        dialog.getDialogPane().setMinHeight(560);
+
+        VBox root = new VBox(10);
+        root.setPadding(new Insets(8));
+        root.setFillWidth(true);
+        root.setMaxWidth(Double.MAX_VALUE);
+
+        GridPane form = new GridPane();
+        form.setHgap(10);
+        form.setVgap(8);
+        form.setMaxWidth(Double.MAX_VALUE);
+
+        ColumnConstraints labelCol1 = new ColumnConstraints();
+        labelCol1.setMinWidth(96);
+        ColumnConstraints inputCol1 = new ColumnConstraints();
+        inputCol1.setHgrow(Priority.ALWAYS);
+        inputCol1.setFillWidth(true);
+        inputCol1.setMinWidth(220);
+        ColumnConstraints labelCol2 = new ColumnConstraints();
+        labelCol2.setMinWidth(96);
+        ColumnConstraints inputCol2 = new ColumnConstraints();
+        inputCol2.setHgrow(Priority.ALWAYS);
+        inputCol2.setFillWidth(true);
+        inputCol2.setMinWidth(220);
+        form.getColumnConstraints().setAll(labelCol1, inputCol1, labelCol2, inputCol2);
+
+        TextField artifactIdField = new TextField();
+        artifactIdField.setPromptText("예: 42");
+        artifactIdField.setMaxWidth(Double.MAX_VALUE);
+        Button uploadArtifactButton = new Button("파일 업로드");
+        uploadArtifactButton.getStyleClass().add("pcmgmt-refresh-btn");
+        uploadArtifactButton.setMinWidth(104);
+        HBox artifactInputBox = new HBox(6, artifactIdField, uploadArtifactButton);
+        HBox.setHgrow(artifactIdField, Priority.ALWAYS);
+        artifactInputBox.setMaxWidth(Double.MAX_VALUE);
+
+        TextField targetVersionField = new TextField();
+        targetVersionField.setPromptText("예: 1.2.0");
+        targetVersionField.setMaxWidth(Double.MAX_VALUE);
+
+        Spinner<Integer> waveSizeSpinner = new Spinner<>(1, 400, 20, 1);
+        waveSizeSpinner.setEditable(true);
+        waveSizeSpinner.setMaxWidth(Double.MAX_VALUE);
+
+        TextField rampUpField = new TextField("1.8");
+        rampUpField.setMaxWidth(Double.MAX_VALUE);
+
+        ComboBox<String> sourceModeCombo = new ComboBox<>(
+                FXCollections.observableArrayList(SOURCE_MODE_SERVER_LABEL, SOURCE_MODE_HYBRID_LABEL));
+        sourceModeCombo.setValue(SOURCE_MODE_HYBRID_LABEL);
+        sourceModeCombo.setPrefWidth(220);
+        sourceModeCombo.setMaxWidth(Double.MAX_VALUE);
+
+        CheckBox canaryOnlyCheck = new CheckBox("검증 배포(1개 웨이브)");
+        canaryOnlyCheck.setSelected(false);
+
+        List<String> classChoices = new ArrayList<>();
+        classChoices.add("전체");
+        synchronized (classroomMap) {
+            classChoices.addAll(classroomMap.keySet());
+        }
+        ComboBox<String> targetClassroomCombo = new ComboBox<>(FXCollections.observableArrayList(classChoices));
+        targetClassroomCombo.setValue("전체");
+        targetClassroomCombo.setMaxWidth(Double.MAX_VALUE);
+
+        TextField uploadIdField = new TextField();
+        uploadIdField.setPromptText("비워두면 자동 생성");
+        uploadIdField.setMaxWidth(Double.MAX_VALUE);
+
+        TextField fileNameField = new TextField("agent-update-package");
+        fileNameField.setMaxWidth(Double.MAX_VALUE);
+
+        TextField rollbackStableJobIdField = new TextField();
+        rollbackStableJobIdField.setPromptText("안정 버전 Job ID");
+        rollbackStableJobIdField.setMaxWidth(Double.MAX_VALUE);
+
+        int row = 0;
+        form.add(new Label("아티팩트 ID"), 0, row);
+        form.add(artifactInputBox, 1, row);
+        form.add(new Label("타깃 버전"), 2, row);
+        form.add(targetVersionField, 3, row);
+        row++;
+        form.add(new Label("초기 웨이브 크기"), 0, row);
+        form.add(waveSizeSpinner, 1, row);
+        form.add(new Label("증가 계수"), 2, row);
+        form.add(rampUpField, 3, row);
+        row++;
+        form.add(new Label("소스 모드"), 0, row);
+        form.add(sourceModeCombo, 1, row);
+        form.add(new Label("대상 강의실"), 2, row);
+        form.add(targetClassroomCombo, 3, row);
+        row++;
+        form.add(new Label("업로드 식별자"), 0, row);
+        form.add(uploadIdField, 1, row);
+        form.add(new Label("원본 파일명"), 2, row);
+        form.add(fileNameField, 3, row);
+        row++;
+        form.add(canaryOnlyCheck, 1, row);
+        form.add(new Label("롤백 기준 Job ID"), 2, row);
+        form.add(rollbackStableJobIdField, 3, row);
+
+        GridPane.setHgrow(artifactInputBox, Priority.ALWAYS);
+        GridPane.setHgrow(targetVersionField, Priority.ALWAYS);
+        GridPane.setHgrow(waveSizeSpinner, Priority.ALWAYS);
+        GridPane.setHgrow(rampUpField, Priority.ALWAYS);
+        GridPane.setHgrow(sourceModeCombo, Priority.ALWAYS);
+        GridPane.setHgrow(targetClassroomCombo, Priority.ALWAYS);
+        GridPane.setHgrow(uploadIdField, Priority.ALWAYS);
+        GridPane.setHgrow(fileNameField, Priority.ALWAYS);
+        GridPane.setHgrow(rollbackStableJobIdField, Priority.ALWAYS);
+
+        Button createJobButton = new Button("배포 시작");
+        createJobButton.getStyleClass().add("pcmgmt-send-btn");
+        Button verifyCanaryButton = new Button("검증 배포 시작");
+        verifyCanaryButton.getStyleClass().add("pcmgmt-refresh-btn");
+        Button refreshJobsButton = new Button("작업 목록 새로고침");
+        refreshJobsButton.getStyleClass().add("pcmgmt-refresh-btn");
+        Button loadDetailButton = new Button("선택 작업 상세");
+        loadDetailButton.getStyleClass().add("pcmgmt-refresh-btn");
+        Button rollbackButton = new Button("선택 작업 롤백");
+        rollbackButton.getStyleClass().add("pcmgmt-refresh-btn");
+        createJobButton.setMinWidth(108);
+        verifyCanaryButton.setMinWidth(120);
+        refreshJobsButton.setMinWidth(134);
+        loadDetailButton.setMinWidth(122);
+        rollbackButton.setMinWidth(118);
+
+        FlowPane actions = new FlowPane(8, 8, createJobButton, verifyCanaryButton, refreshJobsButton, loadDetailButton, rollbackButton);
+        actions.setAlignment(Pos.CENTER_LEFT);
+        actions.setPrefWrapLength(780);
+        actions.setMaxWidth(Double.MAX_VALUE);
+
+        ListView<Map<String, Object>> jobsListView = new ListView<>();
+        jobsListView.setPrefHeight(220);
+        jobsListView.setFixedCellSize(-1);
+        jobsListView.setCellFactory(list -> new ListCell<>() {
+            private final Label summaryLabel = new Label();
+            private final Tooltip summaryTooltip = new Tooltip();
+
+            {
+                summaryLabel.setWrapText(true);
+                summaryLabel.setTextOverrun(OverrunStyle.CLIP);
+                summaryLabel.setMaxWidth(Double.MAX_VALUE);
+                summaryLabel.maxWidthProperty().bind(widthProperty().subtract(24));
+                setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+                setGraphic(summaryLabel);
+            }
+
+            @Override
+            protected void updateItem(Map<String, Object> item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    summaryLabel.setText(null);
+                    setTooltip(null);
+                    return;
+                }
+                long jobId = toLong(item.get("jobId"));
+                String status = String.valueOf(item.getOrDefault("status", "-"));
+                String version = String.valueOf(item.getOrDefault("targetVersion", "-"));
+                String createdAt = formatCreatedAtDisplay(item.get("createdAt"));
+                String sourceModeLabel = sourceModeLabel(item.get("sourceMode"));
+                String summary = "#" + jobId + " | " + status + " | v" + version + " | " + sourceModeLabel + " | " + createdAt;
+                summaryLabel.setText(summary);
+                summaryTooltip.setText(summary);
+                setTooltip(summaryTooltip);
+            }
+        });
+
+        TextArea detailArea = new TextArea();
+        detailArea.setEditable(false);
+        detailArea.setWrapText(true);
+        detailArea.setPrefHeight(280);
+        detailArea.setPromptText("작업 상세/이벤트가 여기에 표시됩니다.");
+
+        uploadArtifactButton.setOnAction(e -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("에이전트 업데이트 파일 선택");
+            chooser.getExtensionFilters().addAll(
+                    new FileChooser.ExtensionFilter("Agent Binary", "*.jar", "*.exe", "*.zip"),
+                    new FileChooser.ExtensionFilter("All Files", "*.*")
+            );
+            File selected = chooser.showOpenDialog(dialog.getDialogPane().getScene() == null
+                    ? null
+                    : dialog.getDialogPane().getScene().getWindow());
+            if (selected == null) {
+                return;
+            }
+
+            uploadArtifactButton.setDisable(true);
+            detailArea.setText("아티팩트 업로드 중...\n파일: " + selected.getName());
+
+            apiClient.uploadFile("/scripts", selected)
+                    .thenAccept(resp -> {
+                        try {
+                            Map<String, Object> uploadBody = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+                            long artifactId = toLong(uploadBody.get("id"));
+                            String guessedVersion = guessVersionFromFilename(selected.getName());
+                            Platform.runLater(() -> {
+                                if (artifactId > 0) {
+                                    artifactIdField.setText(String.valueOf(artifactId));
+                                }
+                                fileNameField.setText(selected.getName());
+                                if ((targetVersionField.getText() == null || targetVersionField.getText().isBlank())
+                                        && guessedVersion != null && !guessedVersion.isBlank()) {
+                                    targetVersionField.setText(guessedVersion);
+                                }
+                                detailArea.setText("아티팩트 업로드 완료\nartifactId: " + artifactId
+                                        + "\n파일: " + selected.getName());
+                                uploadArtifactButton.setDisable(false);
+                            });
+                        } catch (Exception ex) {
+                            Platform.runLater(() -> {
+                                detailArea.setText("업로드 응답 파싱 실패: " + ex.getMessage());
+                                uploadArtifactButton.setDisable(false);
+                            });
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            String msg = ApiClient.userFacingErrorMessage(ex, "아티팩트 업로드 실패");
+                            detailArea.setText(msg);
+                            showAlert("실패", msg, Alert.AlertType.ERROR);
+                            uploadArtifactButton.setDisable(false);
+                        });
+                        return null;
+                    });
+        });
+
+        createJobButton.setOnAction(e -> {
+            Long artifactId = parsePositiveLong(artifactIdField.getText());
+            if (artifactId == null) {
+                showAlert("입력 오류", "아티팩트 ID를 숫자로 입력하세요.", Alert.AlertType.WARNING);
+                return;
+            }
+            int waveSize = waveSizeSpinner.getValue() == null ? 20 : waveSizeSpinner.getValue();
+            double rampUp = parseDoubleOrDefault(rampUpField.getText(), 1.8d);
+            String sourceMode = sourceModeCode(sourceModeCombo.getValue());
+            String selectedClassroom = targetClassroomCombo.getValue();
+            Long groupId = null;
+            if (selectedClassroom != null && !"전체".equals(selectedClassroom)) {
+                groupId = classroomMap.get(selectedClassroom);
+            }
+
+            String version = targetVersionField.getText() == null ? "" : targetVersionField.getText().trim();
+            String uploadId = uploadIdField.getText() == null ? "" : uploadIdField.getText().trim();
+            if (uploadId.isBlank()) {
+                uploadId = "agent-update-" + artifactId + "-" + System.currentTimeMillis();
+            }
+            String originalFilename = fileNameField.getText() == null ? "" : fileNameField.getText().trim();
+            if (originalFilename.isBlank()) {
+                originalFilename = "agent-update-package";
+            }
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("uploadId", uploadId);
+            body.put("originalFilename", originalFilename);
+            body.put("totalChunks", 1);
+            body.put("artifactId", artifactId);
+            body.put("targetVersion", version);
+            body.put("waveSize", waveSize);
+            body.put("canaryOnly", canaryOnlyCheck.isSelected());
+            body.put("sourceMode", sourceMode);
+            body.put("rampUpFactor", rampUp);
+            if (groupId != null) {
+                body.put("groupId", groupId);
+            }
+
+            createJobButton.setDisable(true);
+            apiClient.postJson("/file-distribution/jobs", body)
+                    .thenAccept(resp -> {
+                        try {
+                            Map<String, Object> created = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+                            Platform.runLater(() -> {
+                                long createdJobId = toLong(created.get("jobId"));
+                                detailArea.setText("배포 작업 생성 완료\nJob ID: " + createdJobId + "\n상태: "
+                                        + created.getOrDefault("status", "-"));
+                                loadRolloutJobsIntoList(jobsListView, detailArea);
+                                if (createdJobId > 0) {
+                                    loadRolloutDetail(createdJobId, detailArea);
+                                }
+                                createJobButton.setDisable(false);
+                            });
+                        } catch (Exception ex) {
+                            Platform.runLater(() -> {
+                                detailArea.setText("배포 작업 생성 응답 파싱 실패: " + ex.getMessage());
+                                createJobButton.setDisable(false);
+                            });
+                        }
+                    })
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            String msg = ApiClient.userFacingErrorMessage(ex, "배포 작업 생성 실패");
+                            detailArea.setText(msg);
+                            showAlert("실패", msg, Alert.AlertType.ERROR);
+                            createJobButton.setDisable(false);
+                        });
+                        return null;
+                    });
+        });
+
+        verifyCanaryButton.setOnAction(e -> {
+            Integer previousWaveSize = waveSizeSpinner.getValue();
+            boolean previousCanary = canaryOnlyCheck.isSelected();
+            waveSizeSpinner.getValueFactory().setValue(1);
+            canaryOnlyCheck.setSelected(true);
+            createJobButton.fire();
+            Platform.runLater(() -> {
+                if (previousWaveSize != null && previousWaveSize > 0) {
+                    waveSizeSpinner.getValueFactory().setValue(previousWaveSize);
+                }
+                canaryOnlyCheck.setSelected(previousCanary);
+            });
+        });
+
+        refreshJobsButton.setOnAction(e -> loadRolloutJobsIntoList(jobsListView, detailArea));
+
+        loadDetailButton.setOnAction(e -> {
+            Map<String, Object> selected = jobsListView.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                showAlert("선택 필요", "상세를 볼 작업을 선택하세요.", Alert.AlertType.INFORMATION);
+                return;
+            }
+            long jobId = toLong(selected.get("jobId"));
+            if (jobId <= 0) {
+                showAlert("선택 오류", "유효한 Job ID가 아닙니다.", Alert.AlertType.WARNING);
+                return;
+            }
+            loadRolloutDetail(jobId, detailArea);
+        });
+
+        rollbackButton.setOnAction(e -> {
+            Map<String, Object> selected = jobsListView.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                showAlert("선택 필요", "롤백할 작업을 선택하세요.", Alert.AlertType.INFORMATION);
+                return;
+            }
+            long sourceJobId = toLong(selected.get("jobId"));
+            Long stableJobId = parsePositiveLong(rollbackStableJobIdField.getText());
+            if (sourceJobId <= 0 || stableJobId == null) {
+                showAlert("입력 오류", "선택 작업 + 롤백 기준 Job ID를 확인하세요.", Alert.AlertType.WARNING);
+                return;
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("rollbackFromJobId", stableJobId);
+            body.put("waveSize", waveSizeSpinner.getValue() == null ? 20 : waveSizeSpinner.getValue());
+            body.put("canaryOnly", canaryOnlyCheck.isSelected());
+            String selectedClassroom = targetClassroomCombo.getValue();
+            if (selectedClassroom != null && !"전체".equals(selectedClassroom)) {
+                Long groupId = classroomMap.get(selectedClassroom);
+                if (groupId != null) {
+                    body.put("groupId", groupId);
+                }
+            }
+
+            rollbackButton.setDisable(true);
+            apiClient.postJson("/file-distribution/jobs/" + sourceJobId + "/rollback", body)
+                    .thenAccept(resp -> {
+                        Platform.runLater(() -> {
+                            detailArea.setText("롤백 작업 생성 완료\n" + resp);
+                            loadRolloutJobsIntoList(jobsListView, detailArea);
+                            rollbackButton.setDisable(false);
+                        });
+                    })
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            String msg = ApiClient.userFacingErrorMessage(ex, "롤백 작업 생성 실패");
+                            detailArea.setText(msg);
+                            showAlert("실패", msg, Alert.AlertType.ERROR);
+                            rollbackButton.setDisable(false);
+                        });
+                        return null;
+                    });
+        });
+
+        jobsListView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue == null) {
+                return;
+            }
+            long jobId = toLong(newValue.get("jobId"));
+            if (jobId > 0) {
+                loadRolloutDetail(jobId, detailArea);
+            }
+        });
+
+        root.getChildren().addAll(
+                new Label("에이전트 업데이트 배포"),
+                form,
+                actions,
+                new Label("최근 작업"),
+                jobsListView,
+                new Label("상세 / 이벤트"),
+                detailArea
+        );
+        for (Node node : root.getChildren()) {
+            if (node != null) {
+                node.setManaged(true);
+            }
+        }
+        VBox.setVgrow(jobsListView, Priority.ALWAYS);
+        VBox.setVgrow(detailArea, Priority.ALWAYS);
+
+        ScrollPane scrollPane = new ScrollPane(root);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setPrefViewportHeight(640);
+        dialog.getDialogPane().widthProperty().addListener((obs, oldW, newW) -> {
+            double wrap = Math.max(360.0, newW.doubleValue() - 56.0);
+            actions.setPrefWrapLength(wrap);
+        });
+        Platform.runLater(() -> {
+            double paneWidth = dialog.getDialogPane().getWidth();
+            actions.setPrefWrapLength(Math.max(360.0, paneWidth - 56.0));
+        });
+
+        dialog.getDialogPane().setContent(scrollPane);
+        loadRolloutJobsIntoList(jobsListView, detailArea);
+        dialog.showAndWait();
+    }
+
+    private void loadRolloutJobsIntoList(ListView<Map<String, Object>> jobsListView, TextArea detailArea) {
+        apiClient.getJson("/file-distribution/jobs", new TypeReference<List<Map<String, Object>>>() {})
+                .thenAccept(rows -> Platform.runLater(() -> {
+                    jobsListView.setItems(FXCollections.observableArrayList(rows == null ? List.of() : rows));
+                    if (rows == null || rows.isEmpty()) {
+                        detailArea.setText("최근 배포 작업이 없습니다.");
+                    }
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        String msg = ApiClient.userFacingErrorMessage(ex, "최근 작업 조회 실패");
+                        detailArea.setText(msg);
+                    });
+                    return null;
+                });
+    }
+
+    private void loadRolloutDetail(long jobId, TextArea detailArea) {
+        apiClient.getJson("/file-distribution/jobs/" + jobId, new TypeReference<Map<String, Object>>() {})
+                .thenAccept(status -> apiClient.getJson(
+                                "/file-distribution/jobs/" + jobId + "/events",
+                                new TypeReference<List<Map<String, Object>>>() {})
+                        .thenAccept(events -> Platform.runLater(() -> {
+                            StringBuilder sb = new StringBuilder();
+                            sb.append("[작업 상태]\n");
+                            sb.append("Job ID: ").append(toLong(status.get("jobId"))).append('\n');
+                            sb.append("상태: ").append(status.getOrDefault("status", "-")).append('\n');
+                            sb.append("진행: ").append(status.getOrDefault("completed", 0)).append("/")
+                                    .append(status.getOrDefault("totalAgents", 0)).append('\n');
+                            sb.append("실패: ").append(status.getOrDefault("failed", 0)).append('\n');
+                            sb.append("배포 모드: ").append(sourceModeLabel(status.get("sourceMode"))).append('\n');
+                            sb.append("타깃버전: ").append(status.getOrDefault("targetVersion", "-")).append("\n\n");
+
+                            sb.append("[최근 이벤트]\n");
+                            if (events == null || events.isEmpty()) {
+                                sb.append("- 이벤트 없음\n");
+                            } else {
+                                int max = Math.min(20, events.size());
+                                for (int i = 0; i < max; i++) {
+                                    Map<String, Object> event = events.get(i);
+                                    sb.append("- ")
+                                            .append(event.getOrDefault("createdAt", "-"))
+                                            .append(" | ")
+                                            .append(event.getOrDefault("eventType", "-"))
+                                            .append(" | ")
+                                            .append(event.getOrDefault("detailJson", "{}"))
+                                            .append('\n');
+                                }
+                            }
+                            detailArea.setText(sb.toString());
+                        }))
+                        .exceptionally(ex -> {
+                            Platform.runLater(() -> detailArea.setText(ApiClient.userFacingErrorMessage(ex, "이벤트 조회 실패")));
+                            return null;
+                        }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> detailArea.setText(ApiClient.userFacingErrorMessage(ex, "작업 상세 조회 실패")));
+                    return null;
+                });
+    }
+
+    private String sourceModeCode(String selectedLabel) {
+        if (SOURCE_MODE_SERVER_LABEL.equals(selectedLabel)) {
+            return "SERVER_ONLY";
+        }
+        return "HYBRID_PEER";
+    }
+
+    private String sourceModeLabel(Object sourceModeCode) {
+        if (sourceModeCode == null) {
+            return "-";
+        }
+        String normalized = String.valueOf(sourceModeCode).trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "SERVER_ONLY" -> SOURCE_MODE_SERVER_LABEL;
+            case "HYBRID_PEER" -> SOURCE_MODE_HYBRID_LABEL;
+            default -> normalized;
+        };
+    }
+
+    private String formatCreatedAtDisplay(Object createdAtRaw) {
+        if (createdAtRaw == null) {
+            return "-";
+        }
+        String text = String.valueOf(createdAtRaw).trim();
+        if (text.isBlank()) {
+            return "-";
+        }
+        String normalized = text.replace('T', ' ');
+        if (normalized.length() > 19) {
+            return normalized.substring(0, 19);
+        }
+        return normalized;
+    }
+
+    private Long parsePositiveLong(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            long value = Long.parseLong(raw.trim());
+            return value > 0 ? value : null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private double parseDoubleOrDefault(String raw, double defaultValue) {
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            double parsed = Double.parseDouble(raw.trim());
+            if (Double.isNaN(parsed) || Double.isInfinite(parsed)) {
+                return defaultValue;
+            }
+            return Math.max(1.0d, Math.min(3.0d, parsed));
+        } catch (Exception ex) {
+            return defaultValue;
+        }
+    }
+
+    private String guessVersionFromFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return "";
+        }
+        Pattern pattern = Pattern.compile("(?i)v?(\\d+\\.\\d+(?:\\.\\d+){0,2}(?:[-._]?[a-z0-9]+)*)");
+        Matcher matcher = pattern.matcher(filename);
+        if (!matcher.find()) {
+            return "";
+        }
+        String value = matcher.group(1);
+        return value == null ? "" : value.trim();
     }
 
     // ─────────────────────────────────────────
@@ -650,6 +1264,7 @@ public class DashboardPcManagementModule {
                     destinationCombo != null && destinationCombo.getValue() != null ? mapDestinationMode(destinationCombo.getValue()) : "DOWNLOADS",
                     destinationPathField != null ? destinationPathField.getText() : "",
                     runAfterTransferCheck != null && runAfterTransferCheck.isSelected(),
+                    transferSource != null && transferSource.zipped(),
                     transferSource != null && transferSource.temporaryArtifact()
                 )
                 : ScriptExecutionOptions.none();
@@ -663,6 +1278,10 @@ public class DashboardPcManagementModule {
 
     private void executeCommand(String commandType, List<PcStatusDto> targetPcs, ScriptExecutionOptions scriptOptions,
                                 String collectPayloadJson) {
+        if ("COLLECT_FILES".equals(commandType) && collectPayloadJson != null && !collectPayloadJson.isBlank()) {
+            executeCollectAndDownload(targetPcs, collectPayloadJson);
+            return;
+        }
         // PC 켜기(PCON)는 오프라인 대상까지 포함해서 서버의 WOL 릴레이 로직으로 전달
         List<PcStatusDto> onlinePcs = "PCON".equals(commandType)
                 ? new ArrayList<>(targetPcs)
@@ -747,6 +1366,289 @@ public class DashboardPcManagementModule {
     }
 
     // ─────────────────────────────────────────
+    // 파일 수집 (에이전트 → 대시보드 PC 자동 저장)
+    // ─────────────────────────────────────────
+
+    private static final int COLLECT_POLL_INTERVAL_MS = 1500;
+    private static final int COLLECT_TIMEOUT_SECONDS = 600; // 10분
+
+    // ── 진행 상태 레코드 ─────────────────────────
+    private record CollectProgress(
+            Stage stage,
+            ProgressBar overallBar,
+            Label overallLabel,
+            Label currentAgentLabel,
+            ProgressBar fileBar,
+            Label fileLabel,
+            Label etaLabel,
+            AtomicBoolean cancelled
+    ) {}
+
+    private CollectProgress buildCollectProgressStage(int totalPcs, Path baseDir) {
+        ProgressBar overallBar = new ProgressBar(0);
+        overallBar.setPrefWidth(440);
+        Label overallLabel = new Label("0 / " + totalPcs + " 완료");
+        Label currentAgentLabel = new Label("대기 중...");
+        currentAgentLabel.setStyle("-fx-font-weight: bold;");
+        ProgressBar fileBar = new ProgressBar(-1); // indeterminate
+        fileBar.setPrefWidth(440);
+        Label fileLabel = new Label("명령 전송 준비 중...");
+        Label etaLabel = new Label("남은 시간: 계산 중...");
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+
+        Button cancelBtn = new Button("취소");
+
+        VBox box = new VBox(8,
+                new Label("수집 대상: " + totalPcs + "대  |  저장 위치: " + baseDir),
+                new Separator(),
+                new Label("전체 진행"),
+                overallBar,
+                overallLabel,
+                etaLabel,
+                new Separator(),
+                new Label("현재 에이전트"),
+                currentAgentLabel,
+                fileBar,
+                fileLabel,
+                cancelBtn
+        );
+        box.setPadding(new Insets(16));
+        box.setPrefWidth(480);
+
+        Stage stage = new Stage();
+        stage.initModality(Modality.NONE);
+        stage.setTitle("파일 수집 진행 중");
+        stage.setScene(new javafx.scene.Scene(box));
+        stage.setResizable(false);
+        stage.setOnCloseRequest(ev -> cancelled.set(true));
+        cancelBtn.setOnAction(e -> { cancelled.set(true); stage.close(); });
+
+        Platform.runLater(stage::show);
+        return new CollectProgress(stage, overallBar, overallLabel, currentAgentLabel,
+                fileBar, fileLabel, etaLabel, cancelled);
+    }
+
+    private void executeCollectAndDownload(List<PcStatusDto> targetPcs, String collectPayloadJson) {
+        List<PcStatusDto> onlinePcs = targetPcs.stream()
+                .filter(PcStatusDto::isOnline)
+                .collect(Collectors.toList());
+        if (onlinePcs.isEmpty()) {
+            showAlert("알림", "온라인 PC가 없어 수집을 취소합니다.", Alert.AlertType.INFORMATION);
+            return;
+        }
+
+        String configuredDir = FrontendEnvConfig.getProperty("COLLECT_DOWNLOAD_DIR", "");
+        Path baseDir = configuredDir.isBlank()
+                ? Path.of(System.getProperty("user.home"), "qsync-downloads")
+                : Path.of(configuredDir);
+
+        String outputName;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pl = objectMapper.readValue(collectPayloadJson, Map.class);
+            outputName = String.valueOf(pl.getOrDefault("outputName", "collected.zip"));
+        } catch (Exception ex) {
+            outputName = "collected.zip";
+        }
+        final String finalOutputName = outputName.endsWith(".zip") ? outputName : outputName + ".zip";
+        final int total = onlinePcs.size();
+
+        // 진행 다이얼로그 생성 (FX 스레드에서 열기)
+        CollectProgress[] progressHolder = {null};
+        CountDownLatch uiReady = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            progressHolder[0] = buildCollectProgressStage(total, baseDir);
+            uiReady.countDown();
+        });
+
+        Thread t = new Thread(() -> {
+            try { uiReady.await(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            CollectProgress progress = progressHolder[0];
+
+            int parallelism = Math.min(total, FrontendEnvConfig.getIntProperty("COLLECT_PARALLELISM", 8));
+            ExecutorService pool = Executors.newFixedThreadPool(parallelism);
+            AtomicInteger done = new AtomicInteger(0);
+            AtomicInteger failed = new AtomicInteger(0);
+            List<String> savedPaths = Collections.synchronizedList(new ArrayList<>());
+            long startMs = System.currentTimeMillis();
+
+            CountDownLatch allDone = new CountDownLatch(total);
+
+            for (PcStatusDto pc : onlinePcs) {
+                pool.submit(() -> {
+                    if (progress != null && progress.cancelled().get()) {
+                        allDone.countDown();
+                        failed.incrementAndGet();
+                        return;
+                    }
+                    String agentLabel = pc.getPcName() != null && !pc.getPcName().isBlank()
+                            ? pc.getPcName() : pc.getMacAddress();
+                    try {
+                        updateProgress(progress, agentLabel, "명령 전송 중...", -1, -1, done.get(), total, startMs);
+
+                        // 1. 명령 전송
+                        Map<String, Object> body = new LinkedHashMap<>();
+                        body.put("scope", "SINGLE");
+                        body.put("macAddress", pc.getMacAddress());
+                        body.put("type", "COLLECT_FILES");
+                        body.put("payloadJson", collectPayloadJson);
+                        String enqueueResp = apiClient.postJson("/commands", body).join();
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> enqueueBody = objectMapper.readValue(enqueueResp,
+                                new TypeReference<Map<String, Object>>() {});
+                        @SuppressWarnings("unchecked")
+                        List<Object> taskIds = (List<Object>) enqueueBody.getOrDefault("taskIds", List.of());
+                        if (taskIds.isEmpty()) throw new IllegalStateException("명령 큐 등록 실패");
+                        long taskId = Long.parseLong(String.valueOf(taskIds.get(0)));
+
+                        // 2. 완료 대기 폴링
+                        updateProgress(progress, agentLabel, "에이전트 수집 중...", -1, -1, done.get(), total, startMs);
+                        int maxPoll = (COLLECT_TIMEOUT_SECONDS * 1000) / COLLECT_POLL_INTERVAL_MS;
+                        String stdout = null;
+                        for (int i = 0; i < maxPoll; i++) {
+                            if (progress != null && progress.cancelled().get()) break;
+                            Thread.sleep(COLLECT_POLL_INTERVAL_MS);
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> row = apiClient.getJson("/commands?taskId=" + taskId,
+                                    new TypeReference<Map<String, Object>>() {}).join();
+                            String status = String.valueOf(row.getOrDefault("status", ""));
+                            if ("COMPLETED".equalsIgnoreCase(status)) {
+                                stdout = row.get("stdout") instanceof String s ? s : "";
+                                break;
+                            }
+                            if ("FAILED".equalsIgnoreCase(status)) {
+                                String err = row.get("stderr") instanceof String s ? s : "수집 실패";
+                                throw new IllegalStateException(err);
+                            }
+                        }
+                        if (stdout == null) throw new IllegalStateException("수집 타임아웃 (10분)");
+
+                        // 3. downloadUrl 추출
+                        String downloadUrl = extractDownloadUrl(stdout);
+                        if (downloadUrl.isBlank()) throw new IllegalStateException("downloadUrl 없음");
+
+                        // 4. 스트리밍 다운로드 (대용량 파일 지원)
+                        String safeName = agentLabel.replaceAll("[\\\\/:*?\"<>|]", "_");
+                        Path agentDir = baseDir.resolve(safeName);
+                        Files.createDirectories(agentDir);
+                        Path savePath = agentDir.resolve(finalOutputName);
+
+                        AtomicLong lastUpdate = new AtomicLong(0);
+                        updateProgress(progress, agentLabel, "다운로드 시작...", 0, -1, done.get(), total, startMs);
+                        apiClient.downloadToFile(downloadUrl, savePath, (received, totalBytes) -> {
+                            long now = System.currentTimeMillis();
+                            if (now - lastUpdate.get() > 200) { // 200ms 마다 UI 업데이트
+                                lastUpdate.set(now);
+                                updateProgress(progress, agentLabel,
+                                        formatSize(received) + (totalBytes > 0 ? " / " + formatSize(totalBytes) : ""),
+                                        received, totalBytes, done.get(), total, startMs);
+                            }
+                        });
+
+                        savedPaths.add(savePath.toString());
+                        int d = done.incrementAndGet();
+                        updateProgress(progress, agentLabel, "✓ 저장 완료: " + savePath.getFileName(), 1, 1, d, total, startMs);
+                        log.info("수집 완료: {} → {}", agentLabel, savePath);
+
+                    } catch (Exception ex) {
+                        failed.incrementAndGet();
+                        log.warn("수집 실패 [{}]: {}", agentLabel, ex.getMessage());
+                        updateProgress(progress, agentLabel, "✗ 실패: " + ex.getMessage(), 0, 0,
+                                done.get(), total, startMs);
+                    } finally {
+                        allDone.countDown();
+                    }
+                });
+            }
+
+            try { allDone.await(COLLECT_TIMEOUT_SECONDS * 2L, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            pool.shutdownNow();
+
+            int finalDone = done.get();
+            int finalFailed = failed.get();
+            String detail = savedPaths.stream().map(p -> "  • " + p).collect(Collectors.joining("\n"));
+            Platform.runLater(() -> {
+                if (progress != null) {
+                    // 진행 창을 Stage로 찾아 닫기
+                    overallBarStageClose(progress);
+                }
+                showAlert(
+                        finalFailed == 0 ? "수집 완료" : "수집 부분 완료",
+                        String.format("성공: %d대%s\n\n저장된 파일:\n%s",
+                                finalDone,
+                                finalFailed > 0 ? " / 실패: " + finalFailed + "대" : "",
+                                detail.isBlank() ? "(없음)" : detail),
+                        finalFailed == 0 ? Alert.AlertType.INFORMATION : Alert.AlertType.WARNING
+                );
+            });
+        }, "pcmgmt-collect-main");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void updateProgress(CollectProgress p, String agentLabel, String fileStatus,
+                                long bytesReceived, long totalBytes,
+                                int done, int total, long startMs) {
+        if (p == null) return;
+        double overallFraction = total > 0 ? (double) done / total : 0;
+        String etaText = computeEta(done, total, startMs);
+        String fileFraction = totalBytes > 0
+                ? String.format("%.0f%%", 100.0 * bytesReceived / totalBytes)
+                : "";
+        double fileProg = totalBytes > 0 ? (double) bytesReceived / totalBytes : -1;
+        Platform.runLater(() -> {
+            p.overallBar().setProgress(overallFraction);
+            p.overallLabel().setText(done + " / " + total + " 완료" + (fileFraction.isBlank() ? "" : "  |  현재 " + fileFraction));
+            p.currentAgentLabel().setText(agentLabel);
+            p.fileBar().setProgress(fileProg);
+            p.fileLabel().setText(fileStatus);
+            p.etaLabel().setText(etaText);
+        });
+    }
+
+    private void overallBarStageClose(CollectProgress p) {
+        if (p != null && p.stage() != null) p.stage().close();
+    }
+
+    private String computeEta(int done, int total, long startMs) {
+        if (done <= 0) return "남은 시간: 계산 중...";
+        long elapsed = System.currentTimeMillis() - startMs;
+        long perUnit = elapsed / done;
+        long remaining = perUnit * (total - done);
+        if (remaining < 60_000) return String.format("남은 시간: 약 %d초", remaining / 1000);
+        return String.format("남은 시간: 약 %d분 %d초", remaining / 60_000, (remaining % 60_000) / 1000);
+    }
+
+    private String formatSize(long bytes) {
+        if (bytes < 0) return "?";
+        if (bytes < 1024) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024) return String.format("%.1f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024) return String.format("%.1f MB", mb);
+        return String.format("%.2f GB", mb / 1024.0);
+    }
+
+    private String extractDownloadUrl(String stdout) {
+        if (stdout == null || stdout.isBlank()) return "";
+        // 1순위: URL 경로 직접 검색 (언어에 무관하게 안정적)
+        int idx = stdout.indexOf("/api/v1/agent/uploads/");
+        if (idx >= 0) {
+            String after = stdout.substring(idx);
+            int end = after.indexOf('\n');
+            return (end >= 0 ? after.substring(0, end) : after).trim();
+        }
+        // 2순위: "다운로드:" 레이블 파싱 (폴백)
+        idx = stdout.indexOf("다운로드:");
+        if (idx >= 0) {
+            String after = stdout.substring(idx + 5).trim();
+            int end = after.indexOf('\n');
+            return end >= 0 ? after.substring(0, end).trim() : after.trim();
+        }
+        return "";
+    }
+
+    // ─────────────────────────────────────────
     // 유틸
     // ─────────────────────────────────────────
 
@@ -787,7 +1689,7 @@ public class DashboardPcManagementModule {
         VBox root = new VBox(8);
         root.setPadding(new Insets(12));
 
-        Label info = new Label("더블클릭으로 폴더 이동, [선택 추가]로 수집 목록에 담아주세요.");
+        Label info = new Label("폴더/드라이브 클릭 시 이동, [선택 추가]로 수집 목록에 담아주세요.");
         info.getStyleClass().add("pcmgmt-dialog-caption");
 
         CheckBox usbOnlyCheck = new CheckBox("USB만 보기 (루트 드라이브 목록)");
@@ -806,12 +1708,22 @@ public class DashboardPcManagementModule {
         Button rootButton = new Button("루트");
         Button upButton = new Button("상위");
         Button refreshButton = new Button("새로고침");
+        Button loadMoreButton = new Button("더 불러오기");
         Button addSelectedButton = new Button("선택 추가");
         Button removeSelectedButton = new Button("선택 제거");
+        loadMoreButton.setVisible(false);
+        loadMoreButton.setManaged(false);
+        loadMoreButton.getStyleClass().add("btn-sm");
 
         ListView<RemoteBrowseEntry> remoteList = new ListView<>();
         remoteList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         VBox.setVgrow(remoteList, Priority.ALWAYS);
+        Label pagingStatusLabel = new Label("목록 로딩 중...");
+        pagingStatusLabel.getStyleClass().add("pcmgmt-dialog-caption");
+        Label loadingLabel = new Label("⏳ 탐색 중...");
+        loadingLabel.getStyleClass().add("pcmgmt-dialog-caption");
+        loadingLabel.setVisible(false);
+        loadingLabel.setManaged(false);
 
         ListView<String> selectedPathList = new ListView<>();
         selectedPathList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
@@ -824,6 +1736,8 @@ public class DashboardPcManagementModule {
         HBox.setHgrow(currentPathField, Priority.ALWAYS);
         HBox navRow = new HBox(6, pathInputField, goButton, addSelectedButton, removeSelectedButton);
         HBox.setHgrow(pathInputField, Priority.ALWAYS);
+        HBox pagingRow = new HBox(8, loadMoreButton, pagingStatusLabel);
+        pagingRow.setAlignment(Pos.CENTER_LEFT);
 
         root.getChildren().addAll(
                 info,
@@ -832,8 +1746,10 @@ public class DashboardPcManagementModule {
                 estimateLabel,
                 pathRow,
                 navRow,
+                loadingLabel,
                 new Label("원격 항목"),
                 remoteList,
+                pagingRow,
                 new Label("수집 대상 경로"),
                 selectedPathList,
                 new Label("묶음 파일명(zip)"),
@@ -844,60 +1760,77 @@ public class DashboardPcManagementModule {
         final String[] currentPath = {""};
         final String[] driveSnapshotRef = {""};
         final Set<String> usbDriveRoots = Collections.synchronizedSet(new LinkedHashSet<>());
+        final AtomicBoolean remoteBrowseLoading = new AtomicBoolean(false);
+        final int[] nextOffsetRef = {0};
+        final boolean[] hasMoreRef = {false};
+        // epoch: 사용자 명시적 이동 시 증가 → 이전 자동새로고침 응답을 stale로 폐기
+        final int[] browseEpoch = {0};
 
         Runnable loadRoot = () -> loadRemoteEntriesAsync(
-                browsePc,
-                "",
-                currentPathField,
-                remoteList,
-                currentPath,
-                usbOnlyCheck,
-                driveStatusLabel,
-                driveSnapshotRef,
-                usbDriveRoots
+                browsePc, "", 0, REMOTE_LIST_PAGE_SIZE, false,
+                currentPathField, remoteList, currentPath, usbOnlyCheck,
+                driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                loadMoreButton, pagingStatusLabel, loadingLabel,
+                nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, browseEpoch[0]
         );
         Runnable refresh = () -> loadRemoteEntriesAsync(
-                browsePc,
-                currentPath[0],
-                currentPathField,
-                remoteList,
-                currentPath,
-                usbOnlyCheck,
-                driveStatusLabel,
-                driveSnapshotRef,
-                usbDriveRoots
+                browsePc, currentPath[0], 0, REMOTE_LIST_PAGE_SIZE, false,
+                currentPathField, remoteList, currentPath, usbOnlyCheck,
+                driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                loadMoreButton, pagingStatusLabel, loadingLabel,
+                nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, browseEpoch[0]
         );
+        Runnable loadMore = () -> {
+            if (!hasMoreRef[0]) return;
+            loadRemoteEntriesAsync(
+                    browsePc, currentPath[0], nextOffsetRef[0], REMOTE_LIST_PAGE_SIZE, true,
+                    currentPathField, remoteList, currentPath, usbOnlyCheck,
+                    driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                    loadMoreButton, pagingStatusLabel, loadingLabel,
+                    nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, browseEpoch[0]
+            );
+        };
         loadRoot.run();
 
         goButton.setOnAction(e -> {
             String p = pathInputField.getText() == null ? "" : pathInputField.getText().trim();
+            currentPath[0] = p;
+            int epoch = ++browseEpoch[0];
+            remoteBrowseLoading.set(false);
             loadRemoteEntriesAsync(
-                    browsePc,
-                    p,
-                    currentPathField,
-                    remoteList,
-                    currentPath,
-                    usbOnlyCheck,
-                    driveStatusLabel,
-                    driveSnapshotRef,
-                    usbDriveRoots
+                    browsePc, p, 0, REMOTE_LIST_PAGE_SIZE, false,
+                    currentPathField, remoteList, currentPath, usbOnlyCheck,
+                    driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                    loadMoreButton, pagingStatusLabel, loadingLabel,
+                    nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
             );
         });
-        rootButton.setOnAction(e -> loadRoot.run());
+        rootButton.setOnAction(e -> {
+            currentPath[0] = "";
+            int epoch = ++browseEpoch[0];
+            remoteBrowseLoading.set(false);
+            loadRemoteEntriesAsync(
+                    browsePc, "", 0, REMOTE_LIST_PAGE_SIZE, false,
+                    currentPathField, remoteList, currentPath, usbOnlyCheck,
+                    driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                    loadMoreButton, pagingStatusLabel, loadingLabel,
+                    nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
+            );
+        });
         upButton.setOnAction(e -> {
             String parent = parentPath(currentPath[0]);
+            currentPath[0] = parent;
+            int epoch = ++browseEpoch[0];
+            remoteBrowseLoading.set(false);
             loadRemoteEntriesAsync(
-                    browsePc,
-                    parent,
-                    currentPathField,
-                    remoteList,
-                    currentPath,
-                    usbOnlyCheck,
-                    driveStatusLabel,
-                    driveSnapshotRef,
-                    usbDriveRoots
+                    browsePc, parent, 0, REMOTE_LIST_PAGE_SIZE, false,
+                    currentPathField, remoteList, currentPath, usbOnlyCheck,
+                    driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                    loadMoreButton, pagingStatusLabel, loadingLabel,
+                    nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
             );
         });
+        loadMoreButton.setOnAction(e -> loadMore.run());
         refreshButton.setOnAction(e -> refresh.run());
         usbOnlyCheck.selectedProperty().addListener((obs, oldV, newV) -> refresh.run());
 
@@ -908,6 +1841,9 @@ public class DashboardPcManagementModule {
         });
         refreshScheduler.scheduleAtFixedRate(() -> {
             if (dialog.getDialogPane() == null || dialog.getDialogPane().getScene() == null) {
+                return;
+            }
+            if (currentPath[0] != null && !currentPath[0].isBlank()) {
                 return;
             }
             Platform.runLater(refresh);
@@ -940,24 +1876,20 @@ public class DashboardPcManagementModule {
         });
 
         remoteList.setOnMouseClicked(ev -> {
-            if (ev.getClickCount() != 2) {
-                return;
-            }
             RemoteBrowseEntry entry = remoteList.getSelectionModel().getSelectedItem();
-            if (entry == null || !"dir".equalsIgnoreCase(entry.type) && !"drive".equalsIgnoreCase(entry.type)) {
-                return;
-            }
+            if (entry == null) return;
+            if (!"dir".equalsIgnoreCase(entry.type) && !"drive".equalsIgnoreCase(entry.type)) return;
             String nextPath = resolveEntryAbsolutePath(currentPath[0], entry);
+            // 낙관적 경로 업데이트: 자동새로고침이 빈 경로 조건을 더 이상 만족하지 않음
+            currentPath[0] = nextPath;
+            int epoch = ++browseEpoch[0]; // stale 이전 응답 폐기
+            remoteBrowseLoading.set(false); // 자동새로고침이 점유 중이어도 강제 진행
             loadRemoteEntriesAsync(
-                    browsePc,
-                    nextPath,
-                    currentPathField,
-                    remoteList,
-                    currentPath,
-                    usbOnlyCheck,
-                    driveStatusLabel,
-                    driveSnapshotRef,
-                    usbDriveRoots
+                    browsePc, nextPath, 0, REMOTE_LIST_PAGE_SIZE, false,
+                    currentPathField, remoteList, currentPath, usbOnlyCheck,
+                    driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                    loadMoreButton, pagingStatusLabel, loadingLabel,
+                    nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
             );
         });
 
@@ -1000,19 +1932,51 @@ public class DashboardPcManagementModule {
 
     private void loadRemoteEntriesAsync(PcStatusDto browsePc,
                                         String path,
+                                        int offset,
+                                        int limit,
+                                        boolean append,
                                         TextField currentPathField,
                                         ListView<RemoteBrowseEntry> remoteList,
                                         String[] currentPathRef,
                                         CheckBox usbOnlyCheck,
                                         Label driveStatusLabel,
                                         String[] driveSnapshotRef,
-                                        Set<String> usbDriveRoots) {
+                                        Set<String> usbDriveRoots,
+                                        Button loadMoreButton,
+                                        Label pagingStatusLabel,
+                                        Label loadingLabel,
+                                        int[] nextOffsetRef,
+                                        boolean[] hasMoreRef,
+                                        AtomicBoolean remoteBrowseLoading,
+                                        int[] epochRef,
+                                        int expectedEpoch) {
+        if (remoteBrowseLoading != null && !remoteBrowseLoading.compareAndSet(false, true)) {
+            return;
+        }
+        if (loadingLabel != null) {
+            Platform.runLater(() -> { loadingLabel.setVisible(true); loadingLabel.setManaged(true); });
+        }
         Thread t = new Thread(() -> {
             try {
-                Map<String, Object> resp = requestRemoteFileList(browsePc, path);
+                Map<String, Object> resp = requestRemoteFileList(browsePc, path, offset, limit);
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> entriesRaw = (List<Map<String, Object>>) resp.getOrDefault("entries", List.of());
                 String currentPath = String.valueOf(resp.getOrDefault("currentPath", ""));
+                int nextOffset = toInt(resp.get("nextOffset"), offset + entriesRaw.size());
+                boolean hasMore = toBoolean(resp.get("hasMore"), false);
+                long returnedEntries = toLong(resp.get("returnedEntries"));
+                if (returnedEntries <= 0 && !entriesRaw.isEmpty()) {
+                    returnedEntries = entriesRaw.size();
+                }
+                long totalEntries = toLong(resp.get("totalEntries"));
+                if (totalEntries <= 0) {
+                    totalEntries = hasMore ? Math.max(nextOffset, returnedEntries) : Math.max(returnedEntries, nextOffset);
+                }
+                boolean partial = toBoolean(resp.get("partial"), false)
+                        || toBoolean(resp.get("scanLimitReached"), false)
+                        || toBoolean(resp.get("timeLimitReached"), false);
+                long warningsCount = toLong(resp.get("warningsCount"));
+                String warningPreview = extractWarningPreview(resp.get("warningsPreview"));
                 List<RemoteBrowseEntry> entries = entriesRaw.stream()
                         .map(row -> new RemoteBrowseEntry(
                                 String.valueOf(row.getOrDefault("name", "")),
@@ -1035,15 +1999,31 @@ public class DashboardPcManagementModule {
                             .filter(RemoteBrowseEntry::isUsbDrive)
                             .toList();
                 }
+                int displayNextOffset = hasMore ? Math.max(nextOffset, offset + displayEntries.size()) : nextOffset;
                 final List<RemoteBrowseEntry> displayEntriesFinal = displayEntries;
                 String nextSnapshot = rootLevel ? snapshotDriveNames(entries) : driveSnapshotRef[0];
                 String changeMessage = rootLevel ? describeDriveChanges(driveSnapshotRef[0], nextSnapshot) : "";
                 String driveSummary = rootLevel ? buildDriveSummary(entries, usbOnlyCheck != null && usbOnlyCheck.isSelected()) : "";
+                long returnedEntriesFinal = returnedEntries;
+                long totalEntriesFinal = totalEntries;
+                boolean hasMoreFinal = hasMore;
+                boolean partialFinal = partial;
+                long warningsCountFinal = warningsCount;
+                String warningPreviewFinal = warningPreview;
+                int displayNextOffsetFinal = displayNextOffset;
 
                 Platform.runLater(() -> {
+                    // stale 응답 폐기: 더 최신 이동 요청이 있으면 무시
+                    if (epochRef != null && epochRef[0] != expectedEpoch) return;
                     currentPathRef[0] = currentPath;
                     currentPathField.setText(currentPath == null ? "" : currentPath);
-                    remoteList.setItems(FXCollections.observableArrayList(displayEntriesFinal));
+                    if (append) {
+                        List<RemoteBrowseEntry> merged = new ArrayList<>(remoteList.getItems());
+                        merged.addAll(displayEntriesFinal);
+                        remoteList.setItems(FXCollections.observableArrayList(merged));
+                    } else {
+                        remoteList.setItems(FXCollections.observableArrayList(displayEntriesFinal));
+                    }
                     if (rootLevel) {
                         if (usbDriveRoots != null) {
                             usbDriveRoots.clear();
@@ -1062,21 +2042,53 @@ public class DashboardPcManagementModule {
                             }
                         }
                     }
+                    if (nextOffsetRef != null && nextOffsetRef.length > 0) {
+                        nextOffsetRef[0] = Math.max(0, displayNextOffsetFinal);
+                    }
+                    if (hasMoreRef != null && hasMoreRef.length > 0) {
+                        hasMoreRef[0] = hasMoreFinal;
+                    }
+                    if (loadMoreButton != null) {
+                        loadMoreButton.setVisible(hasMoreFinal);
+                        loadMoreButton.setManaged(hasMoreFinal);
+                        loadMoreButton.setDisable(!hasMoreFinal);
+                    }
+                    if (pagingStatusLabel != null) {
+                        pagingStatusLabel.setText(buildPagingStatusText(
+                                returnedEntriesFinal,
+                                totalEntriesFinal,
+                                displayNextOffsetFinal,
+                                hasMoreFinal,
+                                partialFinal,
+                                warningsCountFinal,
+                                warningPreviewFinal
+                        ));
+                    }
                 });
             } catch (Exception ex) {
                 Platform.runLater(() -> showAlert("원격 탐색 실패", ex.getMessage(), Alert.AlertType.ERROR));
+            } finally {
+                if (remoteBrowseLoading != null) remoteBrowseLoading.set(false);
+                if (loadingLabel != null) Platform.runLater(() -> {
+                    loadingLabel.setVisible(false);
+                    loadingLabel.setManaged(false);
+                });
             }
         }, "pcmgmt-remote-browse");
         t.setDaemon(true);
         t.start();
     }
 
-    private Map<String, Object> requestRemoteFileList(PcStatusDto browsePc, String path) throws Exception {
+    private Map<String, Object> requestRemoteFileList(PcStatusDto browsePc, String path, int offset, int limit) throws Exception {
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("scope", "SINGLE");
         command.put("macAddress", browsePc.getMacAddress());
         command.put("type", "LIST_FILES");
-        command.put("payloadJson", objectMapper.writeValueAsString(Map.of("path", path == null ? "" : path)));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("path", path == null ? "" : path);
+        payload.put("offset", Math.max(0, offset));
+        payload.put("limit", Math.max(1, limit));
+        command.put("payloadJson", objectMapper.writeValueAsString(payload));
 
         String enqueueResp = apiClient.postJson("/commands", command).join();
         Map<String, Object> enqueueBody = objectMapper.readValue(enqueueResp, new TypeReference<Map<String, Object>>() {});
@@ -1087,25 +2099,65 @@ public class DashboardPcManagementModule {
         }
         long taskId = Long.parseLong(String.valueOf(taskIds.get(0)));
 
-        int maxPoll = 20;
+        int maxPoll = Math.max(1, (REMOTE_LIST_TIMEOUT_SECONDS * 1000) / REMOTE_LIST_POLL_INTERVAL_MS);
+        String lastStatus = "";
+        String lastErrorMessage = "";
         for (int i = 0; i < maxPoll; i++) {
-            Map<String, Object> row = apiClient.getJson("/commands?taskId=" + taskId,
-                    new TypeReference<Map<String, Object>>() {}).join();
+            Map<String, Object> row;
+            try {
+                row = apiClient.getJson("/commands?taskId=" + taskId,
+                        new TypeReference<Map<String, Object>>() {}).join();
+                lastErrorMessage = "";
+            } catch (Exception pollEx) {
+                Throwable cause = ApiClient.unwrapFailure(pollEx);
+                if (cause instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("원격 목록 조회가 중단되었습니다.");
+                }
+                if (cause instanceof ApiClientException apiEx
+                        && apiEx.getStatusCode() >= 400
+                        && apiEx.getStatusCode() < 500
+                        && apiEx.getStatusCode() != 429) {
+                    throw new IllegalStateException(apiEx.getMessage());
+                }
+                lastErrorMessage = cause == null || cause.getMessage() == null
+                        ? "명령 상태 조회 중 통신 오류"
+                        : cause.getMessage();
+                Thread.sleep(REMOTE_LIST_POLL_INTERVAL_MS);
+                continue;
+            }
+
             String status = String.valueOf(row.getOrDefault("status", ""));
+            if (status != null && !status.isBlank()) {
+                lastStatus = status;
+            }
             if ("COMPLETED".equalsIgnoreCase(status)) {
-                String stdout = String.valueOf(row.getOrDefault("stdout", ""));
-                if (stdout == null || stdout.isBlank()) {
+                String stdout = row.get("stdout") instanceof String value ? value : "";
+                if (stdout.isBlank()) {
                     throw new IllegalStateException("원격 목록 응답이 비어 있습니다.");
                 }
-                return objectMapper.readValue(stdout, new TypeReference<Map<String, Object>>() {});
+                try {
+                    return objectMapper.readValue(stdout, new TypeReference<Map<String, Object>>() {});
+                } catch (Exception parseEx) {
+                    throw new IllegalStateException(
+                            "원격 목록 응답 파싱 실패 (응답이 너무 크거나 손상되었을 수 있습니다): " + parseEx.getMessage());
+                }
             }
             if ("FAILED".equalsIgnoreCase(status)) {
-                String err = String.valueOf(row.getOrDefault("stderr", ""));
-                throw new IllegalStateException(err == null || err.isBlank() ? "원격 목록 조회 실패" : err);
+                String err = row.get("stderr") instanceof String value ? value : "";
+                throw new IllegalStateException(err.isBlank() ? "원격 목록 조회 실패" : err);
             }
-            Thread.sleep(500);
+            Thread.sleep(REMOTE_LIST_POLL_INTERVAL_MS);
         }
-        throw new IllegalStateException("원격 목록 조회 타임아웃");
+        String detail;
+        if (lastErrorMessage != null && !lastErrorMessage.isBlank()) {
+            detail = lastErrorMessage;
+        } else if (lastStatus != null && !lastStatus.isBlank()) {
+            detail = "마지막 상태: " + lastStatus;
+        } else {
+            detail = "명령 응답 지연";
+        }
+        throw new IllegalStateException("원격 목록 조회 타임아웃 (" + detail + ")");
     }
 
     private String resolveEntryAbsolutePath(String currentPath, RemoteBrowseEntry entry) {
@@ -1151,6 +2203,20 @@ public class DashboardPcManagementModule {
         }
     }
 
+    private int toInt(Object value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ex) {
+            return defaultValue;
+        }
+    }
+
     private boolean toBoolean(Object value, boolean defaultValue) {
         if (value == null) {
             return defaultValue;
@@ -1163,6 +2229,45 @@ public class DashboardPcManagementModule {
             return defaultValue;
         }
         return "true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s);
+    }
+
+    private String extractWarningPreview(Object warningPayload) {
+        if (warningPayload instanceof List<?> list && !list.isEmpty()) {
+            Object first = list.get(0);
+            return first == null ? "" : String.valueOf(first);
+        }
+        if (warningPayload == null) {
+            return "";
+        }
+        String value = String.valueOf(warningPayload);
+        return value == null ? "" : value.trim();
+    }
+
+    private String buildPagingStatusText(long returnedEntries,
+                                         long totalEntries,
+                                         int nextOffset,
+                                         boolean hasMore,
+                                         boolean partial,
+                                         long warningsCount,
+                                         String warningPreview) {
+        long shown = hasMore ? Math.max(0L, nextOffset) : Math.max(0L, Math.max(totalEntries, nextOffset));
+        long total = Math.max(totalEntries, shown);
+        String base = "원격 항목: " + shown + " / " + total + "개";
+        if (hasMore) {
+            base += " (더 불러오기 가능)";
+        }
+        if (partial) {
+            base += " / 일부 항목 생략";
+        }
+        if (warningsCount > 0) {
+            String preview = warningPreview == null ? "" : warningPreview.trim();
+            if (!preview.isBlank()) {
+                base += " / 경고 " + warningsCount + "건 (" + preview + ")";
+            } else {
+                base += " / 경고 " + warningsCount + "건";
+            }
+        }
+        return base;
     }
 
     private String snapshotDriveNames(List<RemoteBrowseEntry> entries) {
@@ -1347,8 +2452,6 @@ public class DashboardPcManagementModule {
         Button addFileBtn;
         Button addFolderBtn;
         Button removeBtn;
-        Button runAllBtn;
-        Button runNoneBtn;
         RadioButton downloadRadio;
         RadioButton desktopRadio;
         RadioButton customRadio;
@@ -1360,8 +2463,6 @@ public class DashboardPcManagementModule {
             addFileBtn = (Button) loader.getNamespace().get("addFileBtn");
             addFolderBtn = (Button) loader.getNamespace().get("addFolderBtn");
             removeBtn = (Button) loader.getNamespace().get("removeBtn");
-            runAllBtn = (Button) loader.getNamespace().get("runAllBtn");
-            runNoneBtn = (Button) loader.getNamespace().get("runNoneBtn");
             downloadRadio = (RadioButton) loader.getNamespace().get("downloadRadio");
             desktopRadio = (RadioButton) loader.getNamespace().get("desktopRadio");
             customRadio = (RadioButton) loader.getNamespace().get("customRadio");
@@ -1402,21 +2503,10 @@ public class DashboardPcManagementModule {
         });
 
         removeBtn.setOnAction(e -> {
-            // 마지막 선택된 항목 제거
             if (!items.isEmpty()) {
-                items.remove(items.size() - 1);
+                items.clear();
                 refreshItemsList(itemsList, items);
             }
-        });
-
-        runAllBtn.setOnAction(e -> {
-            items.forEach(item -> item.setRunAfterTransfer(true));
-            refreshItemsList(itemsList, items);
-        });
-
-        runNoneBtn.setOnAction(e -> {
-            items.forEach(item -> item.setRunAfterTransfer(false));
-            refreshItemsList(itemsList, items);
         });
         
         selectDialog.getDialogPane().setContent(mainContent);
@@ -1485,6 +2575,15 @@ public class DashboardPcManagementModule {
             runCheck.setSelected(item.runAfterTransfer());
             final int index = i;
             runCheck.selectedProperty().addListener((obs, old, newVal) -> items.get(index).setRunAfterTransfer(newVal));
+            Button deleteBtn = new Button("✕");
+            deleteBtn.setStyle("-fx-text-fill: #cc3333; -fx-background-color: transparent; -fx-cursor: hand; -fx-font-size: 13px;");
+            deleteBtn.setOnAction(ev -> {
+                if (index < items.size()) {
+                    items.remove(index);
+                    refreshItemsList(itemsList, items);
+                }
+            });
+            itemRow.getChildren().add(deleteBtn);
             itemsList.getChildren().add(itemRow);
         }
     }
@@ -1604,10 +2703,11 @@ public class DashboardPcManagementModule {
                                           String destinationMode,
                                           String destinationPath,
                                           boolean runAfterTransfer,
+                                          boolean zipped,
                                           boolean temporaryArtifact) {
         private static ScriptExecutionOptions none() {
             return new ScriptExecutionOptions(null, null, "FOREGROUND", "HIDDEN", "", false,
-                    "file", "", "DOWNLOADS", "", false, false);
+                    "file", "", "DOWNLOADS", "", false, false, false);
         }
 
         private boolean hasScript() {
@@ -1638,6 +2738,7 @@ public class DashboardPcManagementModule {
                     payload.put("destinationPath", destinationPath);
                 }
                 payload.put("runAfterTransfer", runAfterTransfer);
+                payload.put("zipped", zipped);
             }
             return payload;
         }

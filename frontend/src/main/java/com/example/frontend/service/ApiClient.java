@@ -2,6 +2,7 @@ package com.example.frontend.service;
 
 import com.example.frontend.config.FrontendEnvConfig;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
@@ -9,6 +10,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.function.BiConsumer;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -96,6 +100,8 @@ public class ApiClient {
     private volatile String currentUserRole = "USER";
     private volatile Consumer<Throwable> connectionFailureHandler;
     private volatile Consumer<ApiClientException> authFailureHandler;
+    // Optional callback invoked when bearer token changes (e.g., to reconnect WebSocket)
+    private volatile Runnable tokenChangeHandler;
     private final AtomicBoolean authFailureNotified = new AtomicBoolean(false);
 
     public ApiClient() {
@@ -114,7 +120,9 @@ public class ApiClient {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
-        this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        this.objectMapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         this.baseUrl = baseUrl;
         this.wsUrl = wsUrl;
     }
@@ -125,6 +133,15 @@ public class ApiClient {
             authFailureNotified.set(false);
         } else {
             this.currentUserRole = "USER";
+        }
+        // Notify listener about token change (best-effort)
+        Runnable cb = this.tokenChangeHandler;
+        if (cb != null) {
+            try {
+                cb.run();
+            } catch (Exception e) {
+                log.debug("tokenChangeHandler threw: {}", e.getMessage());
+            }
         }
     }
 
@@ -143,7 +160,7 @@ public class ApiClient {
 
     public static String viewerWriteDeniedMessage(String actionName) {
         String target = actionName == null || actionName.isBlank() ? "이 작업" : actionName;
-        return "VIEWER 계정은 조회 전용입니다. " + target + " 권한이 없습니다.";
+        return "조회 전용 계정입니다. " + target + " 권한이 없습니다.";
     }
 
     public static Throwable unwrapFailure(Throwable error) {
@@ -188,6 +205,10 @@ public class ApiClient {
 
     public void setAuthFailureHandler(Consumer<ApiClientException> handler) {
         this.authFailureHandler = handler;
+    }
+
+    public void setTokenChangeHandler(Runnable handler) {
+        this.tokenChangeHandler = handler;
     }
 
     public String getBearerToken() {
@@ -238,6 +259,43 @@ public class ApiClient {
         return sendBytes(request)
                 .thenApply(this::ensureSuccessBytes)
                 .thenApply(HttpResponse::body);
+    }
+
+    /**
+     * 파일을 스트리밍으로 직접 디스크에 저장합니다. 대용량 파일에 사용하세요.
+     * 백그라운드 스레드에서만 호출하세요 (블로킹 방식).
+     *
+     * @param onProgress (bytesReceived, totalBytes) 콜백. totalBytes=-1이면 크기 미제공.
+     */
+    public void downloadToFile(String urlPath, java.nio.file.Path destination,
+                               BiConsumer<Long, Long> onProgress) throws Exception {
+        String normalizedPath = urlPath.startsWith("http://") || urlPath.startsWith("https://")
+                ? urlPath : (urlPath.startsWith("/") ? baseUrl + urlPath : baseUrl + "/" + urlPath);
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(normalizedPath))
+                .timeout(Duration.ofHours(1)); // 대용량 파일 대비 1시간
+        if (bearerToken != null && !bearerToken.isBlank()) {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+        HttpResponse<InputStream> response = httpClient.send(builder.GET().build(),
+                HttpResponse.BodyHandlers.ofInputStream());
+        int code = response.statusCode();
+        if (code >= 400) {
+            throw new ApiClientException(code, "파일 다운로드 실패 (HTTP " + code + ")");
+        }
+        long totalBytes = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+        try (InputStream in = response.body();
+             OutputStream out = java.nio.file.Files.newOutputStream(destination)) {
+            byte[] buf = new byte[64 * 1024]; // 64 KB 청크
+            long received = 0;
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+                received += n;
+                if (onProgress != null) onProgress.accept(received, totalBytes);
+            }
+            out.flush();
+        }
     }
 
     public CompletableFuture<String> postJson(String path, Object body) {
