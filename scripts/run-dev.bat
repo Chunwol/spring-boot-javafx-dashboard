@@ -28,7 +28,7 @@ if not exist "scripts\backend-bootstrap.ps1" (
 )
 
 echo [0/5] Cleaning up stale database/cache processes...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$redisProcs = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue; if ($redisProcs) { $redisProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }; $postgresProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue; if ($postgresProcs) { $postgresProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\cleanup-runtime.ps1" -NoBanner
 
 echo [1/5] Bootstrap PostgreSQL/Redis and backup settings...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\backend-bootstrap.ps1"
@@ -37,9 +37,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Build the project
+REM Build the project (skip clean — locked JARs on Windows cause unnecessary failures)
 echo [2/5] Building project...
-call gradlew.bat clean build -x test
+call gradlew.bat build -x test
 if errorlevel 1 (
     echo Build failed!
     exit /b 1
