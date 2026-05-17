@@ -1,23 +1,78 @@
-version: '3.8'
-
 services:
-  # ─── Spring Boot 백엔드 ───────────────────────────────
-  app:
-    build: .
+
+  # ─── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     env_file: .env
     environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dashboard_db}
+      POSTGRES_USER: ${POSTGRES_USER:-dashboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dashboard
+
+  # ─── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      sh -c '
+      if [ -n "$$REDIS_PASSWORD" ]; then
+        redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+      else
+        redis-server --appendonly yes;
+      fi'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dashboard
+
+  # ─── Spring Boot 백엔드 ────────────────────────────────────────────────────
+  backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8888}:8888"
+    environment:
       SERVER_PORT: 8888
-      # X-Forwarded-* 헤더를 신뢰하도록 설정
+      SERVER_HOST: ${SERVER_HOST:-0.0.0.0}
+      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/dashboard_db}
+      DB_DRIVER: ${DB_DRIVER:-org.postgresql.Driver}
+      DB_USERNAME: ${POSTGRES_USER:-dashboard}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+      JPA_DDL_AUTO: ${JPA_DDL_AUTO:-validate}
+      FLYWAY_ENABLED: ${FLYWAY_ENABLED:-true}
+      FLYWAY_LOCATIONS: ${FLYWAY_LOCATIONS:-classpath:db/pgmigration}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       SERVER_FORWARD_HEADERS_STRATEGY: NATIVE
     volumes:
-      - ./db:/app/db
       - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
-      - web
-    # 직접 외부 노출 안 함 (Nginx가 앞단에서 처리)
+      - dashboard
 
-  # ─── Nginx 리버스 프록시 ───────────────────────────────
+  # ─── Nginx 리버스 프록시 ────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
     restart: unless-stopped
@@ -29,10 +84,14 @@ services:
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro
     depends_on:
-      - app
+      - backend
     networks:
-      - web
+      - dashboard
 
 networks:
-  web:
+  dashboard:
     driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:

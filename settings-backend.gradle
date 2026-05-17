@@ -1,0 +1,3 @@
+rootProject.name = 'spring-boot-javafx-dashboard'
+include 'common'
+include 'backend'

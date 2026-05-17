@@ -1,123 +1,70 @@
 @echo off
-REM Backend Only - Windows
-REM Usage: run-backend.bat
+REM Backend server stack (Docker) - Windows
+REM Usage: run-backend.bat [host-port]
+REM   Default: BACKEND_HOST_PORT in .env (or 8888)
+REM   Hyper-V port blocked? Try: run-backend.bat 8000
+REM   Permanent fix (admin CMD): net stop winnat && net start winnat
 
 setlocal enabledelayedexpansion
 
 set SCRIPT_DIR=%~dp0
 cd /d "%SCRIPT_DIR%.."
-set PROJECT_ROOT=%cd%
 
 echo.
 echo ============================================================
-echo === Backend Only (Port 8888, Auto Bootstrap)
+echo  Backend Server Stack (Docker)
 echo ============================================================
 echo.
 
-echo [0/3] Cleaning up stale database/cache processes...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$redisProcs = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue; if ($redisProcs) { $redisProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }; $postgresProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue; if ($postgresProcs) { $postgresProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"
+REM Command-line port argument takes priority
+if not "%~1"=="" set BACKEND_HOST_PORT=%~1
 
-rem Already-running guard: if backend health endpoint responds on 8888, do not start another instance.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:8888/actuator/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -ge 200 -and $r.StatusCode -lt 500){ exit 7 } } catch { exit 0 }"
-if "%ERRORLEVEL%"=="7" (
-    echo Backend already running on 8888. Skipping duplicate start.
-    endlocal
-    exit /b 0
-)
+REM Fall back to 8888
+if "%BACKEND_HOST_PORT%"=="" set BACKEND_HOST_PORT=8888
 
-if not exist "gradlew.bat" (
-    echo ERROR: gradlew.bat not found
-    exit /b 1
-)
-
-if not exist "scripts\backend-bootstrap.ps1" (
-    echo ERROR: scripts\backend-bootstrap.ps1 not found
-    exit /b 1
-)
-
-echo [1/3] Bootstrap PostgreSQL/Redis and backup settings...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\backend-bootstrap.ps1"
-if errorlevel 1 (
-    echo Bootstrap failed!
-    exit /b 1
-)
-
+echo [INFO] Backend host port: %BACKEND_HOST_PORT%
 echo.
-echo [2/3] Building backend...
-call gradlew.bat :backend:build -x test
-if errorlevel 1 (
-    echo Build failed!
-    exit /b 1
-)
+echo Starting backend + postgres + redis via Docker Compose...
 
-echo.
-echo [2.5/3] Ensure TLS certificate if configured for this host...
-set "PFX_PATH="
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\scripts\ensure-backend-cert.ps1" -EnvFilePath "backend/.env" -WinAcmeScript "%PROJECT_ROOT%\scripts\win-acme-setup.ps1" -PfxPassword "changeit"
-set "CERT_CHECK_EXIT=%ERRORLEVEL%"
+set BACKEND_HOST_PORT=%BACKEND_HOST_PORT%
+docker compose up -d --build backend postgres redis
+set COMPOSE_EXIT=%ERRORLEVEL%
 
-if exist "scripts\certs\last-pfx-path.txt" (
-    set /p PFX_PATH=<"scripts\certs\last-pfx-path.txt"
-)
+REM Verify backend is actually running (exit code is unreliable on Windows)
+docker compose ps backend 2>nul | findstr /i "backend" | findstr /i "Up" >nul 2>nul
+set PS_EXIT=%ERRORLEVEL%
 
-if defined PFX_PATH (
-    set "PFX_PATH=!PFX_PATH:"=!"
-    if not exist "!PFX_PATH!" set "PFX_PATH="
-)
-
-if not defined PFX_PATH (
-    for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cand=Get-ChildItem 'scripts/certs' -Filter *.pfx -File -ErrorAction SilentlyContinue ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1; if($cand){ Write-Output (Resolve-Path $cand.FullName).Path }"`) do set "PFX_PATH=%%i"
-)
-
-if not "%CERT_CHECK_EXIT%"=="0" (
-    if defined PFX_PATH (
-        echo WARNING: TLS ensure script failed with code %CERT_CHECK_EXIT%, but existing PFX was found. Continuing with HTTPS.
-    ) else (
-        echo WARNING: TLS ensure script failed with code %CERT_CHECK_EXIT%. Falling back to HTTP bootRun.
+if %COMPOSE_EXIT% NEQ 0 (
+    if %PS_EXIT% NEQ 0 (
+        echo.
+        echo ERROR: Backend container failed to start.
+        echo.
+        docker compose logs backend --tail=15 2>nul
+        echo.
+        echo -- Windows Hyper-V port reservation fix --
+        echo   Option 1: Use a different port
+        echo             scripts\run-backend.bat 8000
+        echo   Option 2: Reset WinNAT (requires admin CMD)
+        echo             net stop winnat
+        echo             net start winnat
+        echo             then retry: scripts\run-backend.bat
+        echo.
+        exit /b 1
     )
 )
 
-if not defined PFX_PATH goto START_HTTP
-if not exist "!PFX_PATH!" goto START_HTTP
-
-echo Found PFX at !PFX_PATH! - starting backend with HTTPS (port 443)
-echo [3/3] Building runnable jar...
-call gradlew.bat :backend:bootJar -x test
-if errorlevel 1 (
-    echo BootJar build failed!
-    exit /b 1
-)
-set "JARPATH="
-for %%f in (backend\build\libs\*.jar) do set "JARPATH=%%f"
-if not defined JARPATH (
-    echo Could not find backend jar.
-    exit /b 1
-)
-echo Running backend with HTTPS using PFX
-java -Dserver.ssl.key-store="!PFX_PATH!" -Dserver.ssl.key-store-password=changeit -Dserver.ssl.key-store-type=PKCS12 -Dserver.port=443 -jar "!JARPATH!"
-set EXIT_CODE=%ERRORLEVEL%
-if not "%EXIT_CODE%"=="0" (
-    echo Backend run failed with code %EXIT_CODE%
-    exit /b %EXIT_CODE%
-)
-endlocal
-exit /b 0
-
-:START_HTTP
-echo HTTPS auto-start skipped: no valid PFX candidate for non-localhost DOMAIN.
 echo.
-echo [3/3] Build successful. Starting Backend...
-echo Backend: http://localhost:8888
-echo Press Ctrl+C to stop
+echo  Backend stack started successfully.
 echo.
-
-call gradlew.bat :backend:bootRun
-set EXIT_CODE=%ERRORLEVEL%
-
-if not "%EXIT_CODE%"=="0" (
-    echo Backend run failed with code %EXIT_CODE%
-    exit /b %EXIT_CODE%
-)
+echo    Backend API : http://localhost:%BACKEND_HOST_PORT%
+echo    Database    : postgres:5432  (internal Docker network)
+echo    Cache       : redis:6379     (internal Docker network)
+echo.
+echo  Useful commands:
+echo    docker compose ps
+echo    docker compose logs -f backend
+echo    docker compose down
+echo.
 
 endlocal
 exit /b 0
