@@ -192,12 +192,18 @@ public class SchedulerService {
         try {
             LocalDateTime threshold = LocalDateTime.now().minusMinutes(heartbeatTimeoutMinutes);
 
-            // findAll() + Java 필터 대신 DB 레벨 쿼리로 교체 (830대 full load 방지)
+            // 1) 알림 발행을 위해 대상 PC 목록 먼저 조회 (읽기 전용)
             List<PcMaster> timedOutPcs = pcRepo.findOnlinePcsLastSeenBefore(threshold);
+            if (timedOutPcs.isEmpty()) return;
 
+            // 2) N × save() 대신 단일 UPDATE 쿼리로 일괄 전환
+            //    WHY: 800대 환경에서 네트워크 장애 직후 수백 건이 동시에 OFFLINE 전환될 때
+            //         개별 save()는 커넥션 풀 포화와 DB 스파이크를 유발한다.
+            int updated = pcRepo.markOfflineByLastSeenBefore(threshold);
+            log.info("[OFFLINE 일괄 전환] {}대 OFFLINE 처리 완료", updated);
+
+            // 3) AlertEvent는 미리 읽어둔 목록으로 발행 (DB 재조회 없음)
             for (PcMaster pc : timedOutPcs) {
-                pc.setStatus("OFFLINE");
-                pcRepo.save(pc);
                 log.info("[OFFLINE 감지] {} ({}) - 마지막 하트비트: {}",
                         pc.getPcName(), pc.getMacAddress(), pc.getLastSeen());
                 if (isAlertCooldownPassed(pc.getMacAddress())) {

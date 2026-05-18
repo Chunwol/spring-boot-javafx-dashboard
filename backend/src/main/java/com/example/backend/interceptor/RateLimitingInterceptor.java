@@ -191,14 +191,21 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * Check if endpoint should be exempt from rate limiting
+     * Rate limit 면제 대상 경로.
+     *
+     * <p>에이전트 heartbeat·명령 폴링은 JWT 에이전트 토큰으로 이미 인증되며,
+     * 800대 규모에서 상시 80개 롱폴링 연결이 유지되므로 rate limit을 적용하면
+     * 에이전트가 429를 받아 명령 수신 불가 상태가 될 수 있다.
+     * 보안 경계는 Rate Limit이 아닌 AgentTokenInterceptor가 담당한다.</p>
      */
     private boolean isExempted(String endpoint) {
         return endpoint.contains("/health") ||
                endpoint.contains("/swagger") ||
                endpoint.contains("/api-docs") ||
                endpoint.contains("/actuator") ||
-               endpoint.contains("/ip-ranges");  // Allow frequent IP range lookups
+               endpoint.contains("/ip-ranges") ||           // IP 범위 조회 (빈번한 에이전트 요청)
+               endpoint.startsWith("/api/v1/heartbeat") ||  // 에이전트 heartbeat (JWT 인증, 120초 주기)
+               endpoint.startsWith("/api/v1/agent/commands"); // 에이전트 롱폴링 (JWT 인증, 상시 연결)
     }
 
     /**
