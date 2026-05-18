@@ -15,6 +15,12 @@ spring:
       idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:600000}
       max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1800000}
       validation-timeout: ${DB_POOL_VALIDATION_TIMEOUT_MS:5000}
+      # PgBouncer transaction-mode 호환 설정:
+      # Hibernate의 서버사이드 prepared statement는 특정 PG 백엔드 프로세스에 바인딩되므로
+      # transaction-mode에서는 커넥션이 바뀔 때마다 "prepared statement not found" 오류 발생.
+      # prepareThreshold=0 으로 JDBC 드라이버가 항상 simple query protocol을 사용하도록 강제.
+      data-source-properties:
+        prepareThreshold: ${DB_PREPARE_THRESHOLD:0}
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:validate}
@@ -136,6 +142,8 @@ app:
   traffic:
     alert-threshold-mbps: ${TRAFFIC_ALERT_THRESHOLD_MBPS:100}
     log-min-interval-seconds: ${TRAFFIC_LOG_MIN_INTERVAL_SECONDS:30}
+    flush-interval-ms: ${TRAFFIC_FLUSH_INTERVAL_MS:5000}       # TrafficLogFlushService 배치 주기
+    flush-initial-delay-ms: ${TRAFFIC_FLUSH_INITIAL_DELAY_MS:10000}
   dashboard:
     traffic-lookback-seconds: ${DASHBOARD_TRAFFIC_LOOKBACK_SECONDS:0}
   audit:

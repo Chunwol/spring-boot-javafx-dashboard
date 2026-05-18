@@ -14,6 +14,7 @@ import com.example.backend.service.classroom.ClassroomResolutionService.PcRole;
 import com.example.backend.service.filedist.FileDistributionOrchestrator;
 import com.example.backend.service.realtime.WebSocketService;
 import com.example.backend.service.status.OperationalMetricsService;
+import com.example.backend.service.traffic.TrafficLogFlushService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
@@ -71,6 +72,7 @@ public class HeartbeatService {
     private final WebSocketService webSocketService;
     private final FileDistributionOrchestrator fileDistributionOrchestrator;
     private final OperationalMetricsService operationalMetricsService;
+    private final TrafficLogFlushService trafficLogFlushService;
 
     @Value("${app.heartbeat.persist-interval-seconds:30}")
     private int heartbeatPersistIntervalSeconds;
@@ -302,8 +304,17 @@ public class HeartbeatService {
         return 0L;
     }
 
+    /**
+     * 트래픽 샘플을 {@link TrafficLogFlushService} 비동기 버퍼에 적재한다.
+     *
+     * <p>직접 DB 저장을 제거하고 버퍼 적재만 수행하므로 하트비트 트랜잭션 내
+     * DB 쓰기 횟수가 0으로 줄어든다. 실제 저장은 5초 주기 flush에서 배치로 처리된다.</p>
+     *
+     * <p><b>데이터 신뢰성:</b> 서버 비정상 종료 시 버퍼 내 로그는 유실될 수 있다.
+     * 트래픽 로그는 모니터링 목적의 소프트 데이터이므로 허용 범위다.</p>
+     */
     private void persistTrafficSamples(String mac, HeartbeatDto heartbeat, LocalDateTime now) {
-        // 다중 샘플 지원: trafficSamples 리스트가 있으면 각각 저장
+        // 다중 샘플 모드: trafficSamples 리스트를 버퍼에 일괄 적재
         if (heartbeat.getTrafficSamples() != null && !heartbeat.getTrafficSamples().isEmpty()) {
             List<double[]> samples = heartbeat.getTrafficSamples();
             int sampleCount = samples.size();
@@ -311,9 +322,7 @@ public class HeartbeatService {
             List<TrafficLog> logs = new ArrayList<>(sampleCount);
             for (int i = 0; i < sampleCount; i++) {
                 double[] sample = samples.get(i);
-                if (sample == null || sample.length < 2) {
-                    continue;
-                }
+                if (sample == null || sample.length < 2) continue;
                 TrafficLog tlog = new TrafficLog();
                 tlog.setMacAddress(mac);
                 tlog.setInboundKbps(toNonNegativeKbps(sample[0]));
@@ -323,24 +332,22 @@ public class HeartbeatService {
                 logs.add(tlog);
             }
             if (!logs.isEmpty()) {
-                trafficLogsRepository.saveAll(logs);
+                trafficLogFlushService.enqueueAll(logs);  // 비동기 버퍼 — DB 쓰기 없음
                 lastTrafficPersistedAt.put(mac, now);
             }
             return;
         }
 
-        // 폴백: 단일값 저장 (하위 호환성)
-        long inboundKbps = resolveInboundKbps(heartbeat);
-        long outboundKbps = resolveOutboundKbps(heartbeat);
-        boolean shouldPersistTraffic = shouldPersistByInterval(mac, now, lastTrafficPersistedAt,
-            trafficLogMinIntervalSeconds);
+        // 폴백: 단일값 — 30초 인터벌 후 버퍼에 적재 (하위 호환성 유지)
+        boolean shouldPersistTraffic = shouldPersistByInterval(
+                mac, now, lastTrafficPersistedAt, trafficLogMinIntervalSeconds);
         if (shouldPersistTraffic) {
             TrafficLog tlog = new TrafficLog();
             tlog.setMacAddress(mac);
-            tlog.setInboundKbps(inboundKbps);
-            tlog.setOutboundKbps(outboundKbps);
+            tlog.setInboundKbps(resolveInboundKbps(heartbeat));
+            tlog.setOutboundKbps(resolveOutboundKbps(heartbeat));
             tlog.setTimestamp(now);
-            trafficLogsRepository.save(tlog);
+            trafficLogFlushService.enqueue(tlog);         // 비동기 버퍼 — DB 쓰기 없음
             lastTrafficPersistedAt.put(mac, now);
         }
     }

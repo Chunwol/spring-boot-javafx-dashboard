@@ -1,5 +1,41 @@
 services:
 
+  # ─── PgBouncer (커넥션 풀 프록시) ─────────────────────────────────────────
+  #
+  # WHY: PostgreSQL은 프로세스-per-connection 모델이라 커넥션 수가 늘수록
+  #      컨텍스트 스위칭 오버헤드가 급증한다. 850대 에이전트 환경에서
+  #      Spring Boot Hikari(70개) → PgBouncer(25개) → PostgreSQL 구조로
+  #      실제 PG 커넥션 수를 최소화해 처리량을 2~3배 향상시킨다.
+  #
+  # pool_mode=transaction: 쿼리 실행 동안만 PG 커넥션 점유
+  #   → 논리 커넥션 70개를 실제 PG 커넥션 25개로 다중화
+  #   → Hibernate의 서버사이드 prepared statement와 충돌하므로
+  #     Spring Boot 측에서 prepareThreshold=0 설정 필요 (application.yml 참조)
+  pgbouncer:
+    image: edoburu/pgbouncer:1.21.0
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_USER: ${POSTGRES_USER:-dashboard}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-dashboard_db}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "300"
+      DEFAULT_POOL_SIZE: "25"
+      MIN_POOL_SIZE: "5"
+      RESERVE_POOL_SIZE: "5"
+      SERVER_RESET_QUERY: "DISCARD ALL"
+      AUTH_TYPE: md5
+      LOG_CONNECTIONS: "0"
+      LOG_DISCONNECTIONS: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dashboard
+
   # ─── PostgreSQL ────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
@@ -51,7 +87,7 @@ services:
     environment:
       SERVER_PORT: 8888
       SERVER_HOST: ${SERVER_HOST:-0.0.0.0}
-      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/dashboard_db}
+      DB_URL: ${DB_URL:-jdbc:postgresql://pgbouncer:5432/${POSTGRES_DB:-dashboard_db}}
       DB_DRIVER: ${DB_DRIVER:-org.postgresql.Driver}
       DB_USERNAME: ${POSTGRES_USER:-dashboard}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
@@ -65,8 +101,8 @@ services:
     volumes:
       - ./uploads:/app/uploads
     depends_on:
-      postgres:
-        condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_healthy
     networks:
