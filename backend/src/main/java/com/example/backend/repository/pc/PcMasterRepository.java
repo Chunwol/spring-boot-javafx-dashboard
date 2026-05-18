@@ -19,6 +19,7 @@ public interface PcMasterRepository extends JpaRepository<PcMaster, String> {
     List<PcMaster> findByGroupIdAndRole(Long groupId, String role);
     List<PcMaster> findByGroupIdIn(List<Long> groupIds);
     List<PcMaster> findByStatus(String status);
+    List<PcMaster> findByStatusIn(List<String> statuses);
     long countByStatus(String status);
 
     /** ONLINE 상태이면서 lastSeen이 threshold 이전인 PC (오프라인 판정용) */

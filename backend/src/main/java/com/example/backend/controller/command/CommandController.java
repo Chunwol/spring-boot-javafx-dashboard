@@ -19,7 +19,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.ApplicationEventPublisher;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -42,14 +42,21 @@ import java.util.*;
 import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 /**
- * 원격 명령 관리 API
- * PC에 종료, 재부팅, WOL, PS1 스크립트 실행 등의 명령을 발행하고 결과를 수집합니다.
- * 
- * 명령 흐름:
- * 1. 관리자가 /commands에 명령 요청 (SINGLE 또는 GROUP 스코프)
- * 2. 서버가 CommandQueue에 저장
- * 3. 에이전트가 다음 하트비트 때 명령을 받음
- * 4. 에이전트가 실행 후 /agent/commands/{taskId}/result로 결과 보고
+ * 원격 명령 관리 컨트롤러.
+ *
+ * <p>PC에 종료, 재부팅, WOL, PS1 스크립트 실행 등의 명령을 발행하고 결과를 수집합니다.</p>
+ *
+ * <h3>명령 흐름</h3>
+ * <ol>
+ *   <li>관리자가 {@code POST /api/v1/commands} 로 명령 요청 (SINGLE 또는 GROUP 스코프)</li>
+ *   <li>서버가 {@code CommandQueue} 에 저장 (상태: QUEUED)</li>
+ *   <li>에이전트가 Long-poll {@code GET /agent/commands/next} 또는 하트비트로 명령 수령 (상태: DELIVERED)</li>
+ *   <li>에이전트가 ACK 후 실행 → {@code POST /agent/commands/{taskId}/result} 로 결과 보고 (상태: COMPLETED/FAILED)</li>
+ * </ol>
+ *
+ * <h3>WOL 릴레이 구조</h3>
+ * <p>WOL은 같은 서브넷 안에서만 동작하므로, 서버가 직접 매직 패킷을 보내지 않고
+ * 그룹 내 ONLINE 상태의 리더 에이전트를 통해 WOL_RELAY 명령을 릴레이합니다.</p>
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -130,6 +137,67 @@ public class CommandController {
         });
     }
 
+    // ─── WOL 페이로드 헬퍼 ──────────────────────────────────────────────────
+
+    /**
+     * 단일 MAC 대상 WOL 페이로드 JSON을 빌드한다.
+     *
+     * <p>ObjectMapper를 사용해 JSON 인젝션을 방지한다.
+     * broadcastIp가 없으면 255.255.255.255(전체 브로드캐스트)를 사용한다.</p>
+     *
+     * @param targetMac   깨울 PC의 MAC 주소
+     * @param broadcastIp 브로드캐스트 IP (null이면 255.255.255.255 사용)
+     * @return JSON 문자열, 직렬화 실패 시 null
+     */
+    private String buildWolPayloadJson(String targetMac, String broadcastIp) {
+        String bcast = (broadcastIp != null && !broadcastIp.isBlank()) ? broadcastIp : "255.255.255.255";
+        try {
+            Map<String, String> wolPayload = new LinkedHashMap<>();
+            wolPayload.put("targetMacs", targetMac != null ? targetMac : "");
+            wolPayload.put("broadcastIp", bcast);
+            return objectMapper.writeValueAsString(wolPayload);
+        } catch (Exception e) {
+            log.warn("WOL 페이로드 직렬화 실패: targetMac={}, broadcastIp={}", targetMac, bcast);
+            return null;
+        }
+    }
+
+    /**
+     * 그룹 내 여러 MAC 대상 WOL 페이로드 JSON을 빌드한다.
+     *
+     * <p>targetMacs는 쉼표로 구분된 MAC 주소 목록이다.</p>
+     *
+     * @param targetMacs  쉼표 구분 MAC 주소 목록
+     * @param broadcastIp 브로드캐스트 IP (null이면 255.255.255.255 사용)
+     * @return JSON 문자열, 직렬화 실패 시 null
+     */
+    private String buildGroupWolPayloadJson(List<String> targetMacs, String broadcastIp) {
+        return buildWolPayloadJson(String.join(",", targetMacs), broadcastIp);
+    }
+
+    /**
+     * WOL_RELAY CommandQueue 엔트리를 생성하고 저장한 뒤, 리더 에이전트에 즉시 푸시한다.
+     *
+     * @param leaderMac   WOL 릴레이를 수행할 리더 에이전트의 MAC
+     * @param payloadJson WOL 페이로드 JSON
+     * @return 저장된 CommandQueue
+     */
+    private CommandQueue saveWolRelayCommand(String leaderMac, String payloadJson) {
+        CommandQueue c = new CommandQueue();
+        c.setMacAddress(leaderMac);
+        c.setCommandType("WOL_RELAY");
+        c.setScriptUrl(null);
+        c.setPayloadJson(payloadJson);
+        c.setStatus("QUEUED");
+        c.setCreatedAt(LocalDateTime.now());
+        c.setIsExecuted(false);
+        CommandQueue saved = commandQueueRepository.save(c);
+        notifyWaitingAgentsAfterCommit(List.of(leaderMac));
+        return saved;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+
     private void pushCommandsToWaiters(List<String> macAddresses) {
         for (String mac : macAddresses) {
             if (mac == null) continue;
@@ -183,6 +251,7 @@ public class CommandController {
         }
 
         // SINGLE + WOL: 대상 PC의 그룹 리더 에이전트를 통해 WOL 릴레이
+        // 같은 서브넷에서만 WOL 매직 패킷이 전달되므로, 서버 대신 그룹 내 ONLINE 리더 에이전트가 발송한다.
         if ("SINGLE".equals(scope) && "WOL".equals(type)) {
             if (req.getMacAddress() == null || req.getMacAddress().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "macAddress required"));
@@ -204,31 +273,16 @@ public class CommandController {
             }
 
             PcMaster leader = leaders.get(0);
+            // 요청에 payloadJson이 이미 있으면 그대로 사용, 없으면 헬퍼로 빌드
             String payloadJson = req.getPayloadJson();
             if (payloadJson == null || payloadJson.isBlank()) {
-                try {
-                    String broadcastIp = (req.getBroadcastIp() != null && !req.getBroadcastIp().isBlank())
-                            ? req.getBroadcastIp() : "255.255.255.255";
-                    Map<String, String> wolPayload = new LinkedHashMap<>();
-                    wolPayload.put("targetMacs", targetPc.getMacAddress());
-                    wolPayload.put("broadcastIp", broadcastIp);
-                    payloadJson = objectMapper.writeValueAsString(wolPayload);
-                } catch (Exception e) {
+                payloadJson = buildWolPayloadJson(targetPc.getMacAddress(), req.getBroadcastIp());
+                if (payloadJson == null) {
                     return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
                 }
             }
 
-            CommandQueue c = new CommandQueue();
-            c.setMacAddress(leader.getMacAddress());
-            c.setCommandType("WOL_RELAY");
-            c.setScriptUrl(null);
-            c.setPayloadJson(payloadJson);
-            c.setStatus("QUEUED");
-            c.setCreatedAt(LocalDateTime.now());
-            c.setIsExecuted(false);
-            CommandQueue saved = commandQueueRepository.save(c);
-            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
-
+            CommandQueue saved = saveWolRelayCommand(leader.getMacAddress(), payloadJson);
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
                     "leaderMac", leader.getMacAddress(),
@@ -236,7 +290,8 @@ public class CommandController {
             ));
         }
 
-        // Special-case: WOL via relay agent (one command to leader)
+        // GROUP + WOL: 리더 에이전트를 통해 그룹 전체 WOL 릴레이
+        // 리더를 제외한 그룹 내 모든 PC(오프라인 포함)의 MAC 목록을 페이로드에 담아 전달한다.
         if ("GROUP".equals(scope) && "WOL".equals(type)) {
             if (req.getGroupId() == null) {
                 return ResponseEntity.badRequest().body(Map.of("message", "groupId required"));
@@ -247,40 +302,23 @@ public class CommandController {
             }
             PcMaster leader = leaders.get(0);
 
-            // targets: all PCs in group excluding leader (include offline too)
-            List<PcMaster> all = pcMasterRepository.findByGroupId(req.getGroupId());
-            List<String> macs = new ArrayList<>();
-            for (PcMaster pc : all) {
-                if (pc.getMacAddress() == null) continue;
-                if (pc.getMacAddress().equalsIgnoreCase(leader.getMacAddress())) continue;
-                macs.add(pc.getMacAddress());
-            }
+            // 리더를 제외한 그룹 전체 PC 목록(오프라인 포함) → targetMacs
+            List<String> macs = pcMasterRepository.findByGroupId(req.getGroupId()).stream()
+                    .filter(pc -> pc.getMacAddress() != null)
+                    .filter(pc -> !pc.getMacAddress().equalsIgnoreCase(leader.getMacAddress()))
+                    .map(PcMaster::getMacAddress)
+                    .collect(Collectors.toList());
+
             String payloadJson = req.getPayloadJson();
             if (payloadJson == null || payloadJson.isBlank()) {
-                try {
-                    // ObjectMapper로 안전하게 직렬화 (JSON 인젝션 방지)
-                    // broadcastIp: 요청에 명시된 값 또는 서브넷 브로드캐스트로 계산 가능하도록 전달
-                    String broadcastIp = (req.getBroadcastIp() != null && !req.getBroadcastIp().isBlank())
-                            ? req.getBroadcastIp() : "255.255.255.255";
-                    Map<String, String> wolPayload = new LinkedHashMap<>();
-                    wolPayload.put("targetMacs", String.join(",", macs));
-                    wolPayload.put("broadcastIp", broadcastIp);
-                    payloadJson = objectMapper.writeValueAsString(wolPayload);
-                } catch (Exception e) {
+                // ObjectMapper로 안전하게 직렬화 (JSON 인젝션 방지)
+                payloadJson = buildGroupWolPayloadJson(macs, req.getBroadcastIp());
+                if (payloadJson == null) {
                     return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
                 }
             }
-            CommandQueue c = new CommandQueue();
-            c.setMacAddress(leader.getMacAddress());
-            c.setCommandType("WOL_RELAY");
-            c.setScriptUrl(null);
-            c.setPayloadJson(payloadJson);
-            c.setStatus("QUEUED");
-            c.setCreatedAt(LocalDateTime.now());
-            c.setIsExecuted(false);
-            CommandQueue saved = commandQueueRepository.save(c);
-            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
 
+            CommandQueue saved = saveWolRelayCommand(leader.getMacAddress(), payloadJson);
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
                     "leaderMac", leader.getMacAddress(),
@@ -738,27 +776,13 @@ public class CommandController {
             }
 
             PcMaster leader = leaders.get(0);
-            String payloadJson;
-            try {
-                String broadcastIp = body.containsKey("broadcastIp")
-                        ? body.get("broadcastIp").toString() : "255.255.255.255";
-                payloadJson = objectMapper.writeValueAsString(Map.of(
-                        "targetMacs", targetMac != null ? targetMac : "",
-                        "broadcastIp", broadcastIp
-                ));
-            } catch (Exception e) {
+            String broadcastIp = body.containsKey("broadcastIp") ? body.get("broadcastIp").toString() : null;
+            String payloadJson = buildWolPayloadJson(targetMac, broadcastIp);
+            if (payloadJson == null) {
                 return ResponseEntity.internalServerError().body(Map.of("message", "페이로드 생성 실패"));
             }
 
-            CommandQueue c = new CommandQueue();
-            c.setMacAddress(leader.getMacAddress());
-            c.setCommandType("WOL_RELAY");
-            c.setPayloadJson(payloadJson);
-            c.setStatus("QUEUED");
-            c.setCreatedAt(LocalDateTime.now());
-            c.setIsExecuted(false);
-            CommandQueue saved = commandQueueRepository.save(c);
-            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
+            CommandQueue saved = saveWolRelayCommand(leader.getMacAddress(), payloadJson);
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
                     "macAddress", leader.getMacAddress(),
@@ -887,38 +911,5 @@ public class CommandController {
         return row;
     }
 
-    /**
-     * SQLite에 숫자형 epoch 문자열로 남은 시간값을 datetime text로 정규화한다.
-     * 일부 데이터에서 JDBC Timestamp 파싱 오류가 발생하는 것을 방지한다.
-     */
-    private void normalizeCommandQueueTimestamps() {
-        String[] columns = {
-                "created_at",
-                "delivered_at",
-                "acked_at",
-                "completed_at",
-                "scmate_reset_requested_at",
-                "scmate_reset_completed_at"
-        };
-
-        for (String column : columns) {
-            String sql = "UPDATE command_queue " +
-                    "SET " + column + " = datetime(" +
-                    "CASE " +
-                    "WHEN length(trim(CAST(" + column + " AS TEXT))) >= 13 THEN CAST(substr(trim(CAST(" + column + " AS TEXT)), 1, 10) AS INTEGER) " +
-                    "ELSE CAST(trim(CAST(" + column + " AS TEXT)) AS INTEGER) " +
-                    "END, 'unixepoch') " +
-                    "WHERE " + column + " IS NOT NULL " +
-                    "AND trim(CAST(" + column + " AS TEXT)) <> '' " +
-                    "AND trim(CAST(" + column + " AS TEXT)) GLOB '[0-9]*' " +
-                    "AND trim(CAST(" + column + " AS TEXT)) NOT LIKE '%-%'";
-            try {
-                jdbcTemplate.update(sql);
-            } catch (Exception e) {
-                // SQLite 외 DB에서는 문법 차이가 있을 수 있으므로 조회 자체는 계속 진행한다.
-                log.debug("Timestamp normalization skipped for column {}: {}", column, e.getMessage());
-            }
-        }
-    }
 }
 

@@ -78,6 +78,7 @@ public class DashboardManagementModule {
     private Label perfCacheLabel;
     private Label perfQueuePressureLabel;
     private Label perfStalePressureLabel;
+    private Button refreshAgentBtnRef;
     private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
     private List<PcStatusDto> cachedBrokenPcs = List.of();
 
@@ -161,6 +162,7 @@ public class DashboardManagementModule {
         });
         refreshKeyBtn.setOnAction(e -> loadInstallKey());
         downloadConfigBtn.setOnAction(e -> downloadConfigJson());
+        refreshAgentBtnRef = refreshAgentBtn;
         refreshAgentBtn.setOnAction(e -> loadAgentList());
 
         // ── 컬럼 바인딩 (FXML에서 정의된 컬럼 사용) ──
@@ -290,8 +292,13 @@ public class DashboardManagementModule {
     @SuppressWarnings("unchecked")
     private void loadAgentList() {
         if (agentTable == null) return;
+        // 항상 FX 스레드에서 호출되므로 runLater 불필요
+        agentTable.setPlaceholder(new Label("로딩 중..."));
+        if (refreshAgentBtnRef != null) refreshAgentBtnRef.setDisable(true);
         apiClient.getPagedList("/admin/agents", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(list -> Platform.runLater(() -> {
+                    agentTable.setPlaceholder(new Label("등록된 에이전트가 없습니다."));
+                    if (refreshAgentBtnRef != null) refreshAgentBtnRef.setDisable(false);
                     if (list == null) {
                         agentTable.getItems().setAll(List.of());
                         return;
@@ -307,6 +314,10 @@ public class DashboardManagementModule {
                 }))
                 .exceptionally(ex -> {
                     log.warn("에이전트 목록 조회 실패", ex);
+                    Platform.runLater(() -> {
+                        agentTable.setPlaceholder(new Label("목록 조회에 실패했습니다."));
+                        if (refreshAgentBtnRef != null) refreshAgentBtnRef.setDisable(false);
+                    });
                     return null;
                 });
     }

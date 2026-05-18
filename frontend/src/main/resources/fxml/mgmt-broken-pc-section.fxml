@@ -31,7 +31,7 @@
         </HBox>
 
         <TableView fx:id="brokenPcTable" prefHeight="220.0">
-            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY" /></columnResizePolicy>
+            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" /></columnResizePolicy>
             <placeholder><Label text="등록된 고장 PC가 없습니다." /></placeholder>
             <columns>
                 <TableColumn fx:id="brokenMacCol" text="MAC 주소" prefWidth="150.0" />

@@ -31,21 +31,25 @@ public class LogController {
     }
 
     /**
-     * 최근 트래픽 로그 조회
+     * 최근 트래픽 로그 조회.
+     * timestamp(발생 시각)와 message(인바운드 KB/s 요약)를 포함한 페이지 응답을 반환합니다.
      */
     @GetMapping("/logs")
     @Operation(
         summary = "트래픽 로그 조회",
-        description = "최근 네트워크 트래픽 로그를 시간 역순으로 조회합니다. 페이지네이션을 지원합니다."
+        description = "최근 네트워크 트래픽 로그를 시간 역순으로 조회합니다. " +
+                      "각 항목은 timestamp와 message(인바운드 KB/s 요약)를 포함합니다. 페이지네이션을 지원합니다."
     )
     @ApiResponse(responseCode = "200", description = "트래픽 로그 목록")
+    @ApiResponse(responseCode = "400", description = "page/size 파라미터 오류")
     public Page<?> recentLogs(
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
             @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "페이지 크기", example = "50")
+            @Parameter(description = "페이지 크기 (최대 200 권장)", example = "50")
             @RequestParam(defaultValue = "50") int size) {
         PageRequest pageable = PageRequest.of(page, size);
         Page<TrafficLog> logPage = trafficLogRepository.findAllByOrderByTimestampDesc(pageable);
+        // TrafficLog 엔티티를 프론트 표시용 간략 맵으로 변환
         return logPage.map(l -> java.util.Map.<String, Object>of(
                 "timestamp", l.getTimestamp(),
                 "message", "Traffic " + l.getInboundKbps() + " KB/s"));

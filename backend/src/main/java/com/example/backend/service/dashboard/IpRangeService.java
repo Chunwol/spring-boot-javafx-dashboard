@@ -10,6 +10,9 @@ import com.example.backend.service.classroom.ClassroomResolutionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -50,9 +53,17 @@ public class IpRangeService {
     /**
      * Save a new IP range or update existing one
      */
+    @Transactional
     public ClassroomIpRange saveClassroomIpRange(ClassroomIpRange range) {
         ClassroomIpRange saved = ipRangeRepository.save(range);
-        classroomResolutionService.evictIpRangeCache();
+        // 캐시 무효화는 커밋 후 실행 — save() 실패 시 캐시가 오염되지 않도록 afterCommit에서 처리
+        // TransactionSynchronization 인터페이스 직접 구현 (TransactionSynchronizationAdapter는 deprecated)
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                classroomResolutionService.evictIpRangeCache();
+            }
+        });
         logger.info("IP range saved: id={}, groupId={}", saved.getId(), saved.getGroupId());
         return saved;
     }

@@ -97,7 +97,7 @@ public class ReportService {
             long onlinePc = allPcs.stream().filter(p -> "ONLINE".equalsIgnoreCase(p.getStatus())).count();
 
             List<TrafficLog> trafficLogs = trafficRepository.findByTimestampBetween(from, to);
-                Map<String, PcMaster> pcByMac = pcRepository.findAll().stream()
+                Map<String, PcMaster> pcByMac = allPcs.stream()
                     .collect(Collectors.toMap(PcMaster::getMacAddress, p -> p, (a, b) -> a));
                 Map<Long, String> groupNameById = groupRepository.findAll().stream()
                     .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName, (a, b) -> a));
@@ -292,16 +292,23 @@ public class ReportService {
         // 2분 간격 하트비트 기준 예상 횟수
         long expectedBeats = Math.max(1, periodMinutes / 2);
 
+        // N+1 방지: PC 목록과 트래픽 로그를 한 번에 로드 후 메모리에서 분류
+        Map<Long, List<PcMaster>> pcsByGroup = pcRepository.findAll().stream()
+                .filter(pc -> pc.getGroupId() != null)
+                .collect(Collectors.groupingBy(PcMaster::getGroupId));
+        Map<String, List<TrafficLog>> logsByMac = trafficRepository.findByTimestampBetween(from, to)
+                .stream()
+                .collect(Collectors.groupingBy(TrafficLog::getMacAddress));
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (ClassroomGroup g : groups) {
-            List<PcMaster> pcs = pcRepository.findByGroupId(g.getId());
+            List<PcMaster> pcs = pcsByGroup.getOrDefault(g.getId(), List.of());
             if (pcs.isEmpty()) continue;
 
             long totalOnlineAccum = 0;
             int anomalyCount = 0;
             for (PcMaster pc : pcs) {
-                List<TrafficLog> logs = trafficRepository
-                        .findByMacAddressAndTimestampBetween(pc.getMacAddress(), from, to);
+                List<TrafficLog> logs = logsByMac.getOrDefault(pc.getMacAddress(), List.of());
                 totalOnlineAccum += logs.size();
                 // 임계 초과: 최대 인바운드가 100Mbps 넘는 경우
                 boolean anomaly = logs.stream().anyMatch(t ->

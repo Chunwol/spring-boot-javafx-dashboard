@@ -8,12 +8,33 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 시스템 성능 상태 종합 스냅샷 서비스.
+ *
+ * <p>담당 기능:
+ * <ul>
+ *   <li>PC 온라인/오프라인 현황</li>
+ *   <li>명령 큐 상태 (QUEUED/DELIVERED/ACKED/COMPLETED/FAILED) 및 stale 명령 감지</li>
+ *   <li>에이전트 인증 토큰 현황</li>
+ *   <li>캐시 히트율 (Caffeine 통계)</li>
+ *   <li>운영 메트릭 (레이턴시·전송·요청 오류율) 및 압력 레벨(LOW/MEDIUM/HIGH) 계산</li>
+ * </ul>
+ *
+ * <p>압력 레벨 판정 임계치:
+ * <ul>
+ *   <li>큐 압력: 80 이상 MEDIUM, 200 이상 HIGH</li>
+ *   <li>Stale 압력: 10 이상 MEDIUM, 30 이상 HIGH</li>
+ *   <li>명령/전송 실패율: 10% 이상 MEDIUM, 25% 이상 HIGH</li>
+ *   <li>HTTP 오류율: 5% 이상 MEDIUM, 15% 이상 HIGH</li>
+ * </ul>
+ */
 @Service
 public class PerformanceStatusService {
 
@@ -41,6 +62,15 @@ public class PerformanceStatusService {
         this.operationalMetricsService = operationalMetricsService;
     }
 
+    /**
+     * 시스템 성능 상태 전체 스냅샷을 수집하여 반환한다.
+     *
+     * <p>PC 현황, 명령 큐, 토큰, 캐시, 운영 메트릭을 조합하고
+     * 각 영역별 압력 레벨(LOW/MEDIUM/HIGH)을 계산하여 포함한다.
+     *
+     * @return timestamp, pc, command, token, cache, operational, pressure 섹션을 포함한 맵
+     */
+    @Transactional(readOnly = true)
     public Map<String, Object> snapshot() {
         Map<String, Object> resp = new LinkedHashMap<>();
 
@@ -104,6 +134,17 @@ public class PerformanceStatusService {
         return resp;
     }
 
+    /**
+     * 캐시 통계를 수집한다.
+     *
+     * <p>Caffeine 캐시인 경우 히트율·히트수·미스수·축출 수를 반환한다.
+     * 다른 캐시 프로바이더(Redis 등)는 provider-specific 통계를 지원하지 않아 메시지만 반환한다.
+     *
+     * <p><b>WHY</b>: {@code ipRangeCache}는 IP 범위 조회 성능에 직접 영향을 주므로
+     * 히트율을 모니터링하여 캐시 유효성을 확인할 수 있어야 한다.
+     *
+     * @return 캐시 통계 맵
+     */
     private Map<String, Object> cacheStats() {
         Map<String, Object> cache = new LinkedHashMap<>();
         Cache springCache = cacheManager.getCache("ipRangeCache");

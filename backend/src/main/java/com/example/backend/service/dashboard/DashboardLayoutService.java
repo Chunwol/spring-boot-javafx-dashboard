@@ -23,6 +23,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 대시보드 레이아웃 및 패널 CRUD, 백업/복원 관리 서비스.
+ * <p>
+ * 대시보드당 최대 {@code MAX_BACKUPS_PER_DASHBOARD}(50)개의 백업을 유지하며,
+ * {@code BACKUP_RETENTION_DAYS}(90일) 초과 백업은 자동 삭제한다.
+ * </p>
+ */
 @Service
 public class DashboardLayoutService {
 
@@ -236,25 +243,31 @@ public class DashboardLayoutService {
     }
 
     /**
-     * Cleanup old backups (keep only latest MAX_BACKUPS_PER_DASHBOARD)
+     * 오래된 백업을 정리하여 대시보드당 최대 {@value #MAX_BACKUPS_PER_DASHBOARD}개를 유지한다.
+     * <p>
+     * <b>WHY 단일 쿼리:</b> 기존 {@code countByDashboardId} → {@code findByDashboardIdOrderByCreatedAtDesc}
+     * 두 쿼리 패턴은 count와 list 사이에 다른 트랜잭션이 백업을 추가/삭제하면
+     * count 결과와 실제 리스트 크기가 달라지는 TOCTOU(Time-of-Check-Time-of-Use) 문제가 있었다.
+     * {@code findByDashboardIdOrderByCreatedAtDesc} 한 번 호출로 size 체크와 삭제를 모두 처리한다.
+     * </p>
+     *
+     * @param dashboardId 백업 정리 대상 대시보드 ID
      */
     @Transactional
     public void cleanupOldBackups(Long dashboardId) {
-        long backupCount = backupRepository.countByDashboardId(dashboardId);
-        if (backupCount > MAX_BACKUPS_PER_DASHBOARD) {
-            // Delete oldest backups to maintain limit
-            List<DashboardLayoutBackup> allBackups =
-                    backupRepository.findByDashboardIdOrderByCreatedAtDesc(dashboardId);
+        // 단일 쿼리로 정렬된 전체 리스트를 가져와 TOCTOU 제거
+        List<DashboardLayoutBackup> allBackups =
+                backupRepository.findByDashboardIdOrderByCreatedAtDesc(dashboardId);
 
-            if (allBackups.size() > MAX_BACKUPS_PER_DASHBOARD) {
-                List<DashboardLayoutBackup> toDelete =
-                        allBackups.subList(MAX_BACKUPS_PER_DASHBOARD, allBackups.size());
-                backupRepository.deleteAll(toDelete);
-                log.debug("Cleaned up {} old backups for dashboardId={}", toDelete.size(), dashboardId);
-            }
+        if (allBackups.size() > MAX_BACKUPS_PER_DASHBOARD) {
+            // 최신 MAX_BACKUPS_PER_DASHBOARD건을 남기고 나머지 삭제
+            List<DashboardLayoutBackup> toDelete =
+                    allBackups.subList(MAX_BACKUPS_PER_DASHBOARD, allBackups.size());
+            backupRepository.deleteAll(toDelete);
+            log.debug("Cleaned up {} old backups for dashboardId={}", toDelete.size(), dashboardId);
         }
 
-        // Also delete backups older than retention period
+        // 보존 기간(BACKUP_RETENTION_DAYS일)을 초과한 백업도 추가 삭제
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(BACKUP_RETENTION_DAYS);
         int deleted = backupRepository.deleteOldBackups(dashboardId, cutoffDate);
         if (deleted > 0) {

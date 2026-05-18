@@ -3,6 +3,8 @@ package com.example.backend.controller.report;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.service.report.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -14,6 +16,17 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+/**
+ * 보고서 생성 컨트롤러.
+ *
+ * <p>트래픽, 가동률, 강의실 사용 현황 등을 PDF 또는 JSON 형식으로 제공합니다.</p>
+ *
+ * <ul>
+ *   <li>{@code GET /api/v1/reports/pdf} — PDF 다운로드 (주간/월간/사용자 지정 기간)</li>
+ *   <li>{@code GET /api/v1/reports/traffic} — 일별 인바운드/아웃바운드 Kbps JSON</li>
+ *   <li>{@code GET /api/v1/reports/uptime} — 강의실별 가동률 JSON</li>
+ * </ul>
+ */
 @RestController
 @RequestMapping("/api/v1/reports")
 @Tag(name = "Reports", description = "보고서 생성 API")
@@ -35,6 +48,8 @@ public class ReportController {
     @GetMapping("/pdf")
     @Operation(summary = "PDF 보고서 생성",
                description = "fromDate/toDate(yyyy-MM-dd) 지정 가능. 미지정 시 type=WEEKLY 또는 type=MONTHLY&year=&month= 기준")
+    @ApiResponse(responseCode = "200", description = "PDF 파일 반환")
+    @ApiResponse(responseCode = "500", description = "PDF 생성 실패")
     public ResponseEntity<byte[]> generatePdf(
             @RequestParam(defaultValue = "WEEKLY") String type,
             @RequestParam(required = false) Integer year,
@@ -98,11 +113,14 @@ public class ReportController {
      */
     @GetMapping("/traffic")
     @Operation(summary = "트래픽 집계 JSON",
-               description = "기간 내 일별 인바운드/아웃바운드 Kbps 합산")
+               description = "기간 내 일별 인바운드/아웃바운드 Kbps 합산. from/to 미지정 시 최근 7일.")
+    @ApiResponse(responseCode = "200", description = "트래픽 집계 결과 반환")
     public ResponseEntity<Map<String, Object>> getTrafficSummary(
+            @Parameter(description = "시작 일시 (yyyy-MM-dd'T'HH:mm:ss)", example = "2026-05-01T00:00:00")
             @RequestParam(required = false) String from,
+            @Parameter(description = "종료 일시 (yyyy-MM-dd'T'HH:mm:ss)", example = "2026-05-07T23:59:59")
             @RequestParam(required = false) String to,
-            @RequestParam(required = false) Long groupId) {
+            @Parameter(description = "강의실 ID (미지정 시 전체)") @RequestParam(required = false) Long groupId) {
 
         LocalDateTime[] range = parseDateRange(from, to, 7);
         List<TrafficLog> logs = groupId != null
@@ -136,11 +154,13 @@ public class ReportController {
      * GET /api/v1/reports/uptime?from=&to=&groupId=
      */
     @GetMapping("/uptime")
-    @Operation(summary = "강의실별 가동률 JSON")
+    @Operation(summary = "강의실별 가동률 JSON",
+               description = "기간 내 강의실별 PC 가동률(%)을 반환합니다. groupId 지정 시 해당 강의실만 필터링.")
+    @ApiResponse(responseCode = "200", description = "가동률 집계 결과 반환")
     public ResponseEntity<Map<String, Object>> getUptimeSummary(
-            @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to,
-            @RequestParam(required = false) Long groupId) {
+            @Parameter(description = "시작 일시 (yyyy-MM-dd'T'HH:mm:ss)") @RequestParam(required = false) String from,
+            @Parameter(description = "종료 일시 (yyyy-MM-dd'T'HH:mm:ss)") @RequestParam(required = false) String to,
+            @Parameter(description = "강의실 ID (미지정 시 전체)") @RequestParam(required = false) Long groupId) {
 
         LocalDateTime[] range = parseDateRange(from, to, 7);
         List<Map<String, Object>> rows = reportService.computeUptimeByGroup(range[0], range[1]);

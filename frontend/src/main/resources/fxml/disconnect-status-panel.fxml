@@ -27,7 +27,7 @@
         <Label fx:id="summaryLabel" styleClass="module-panel-summary" />
 
         <TableView fx:id="logTable" VBox.vgrow="ALWAYS">
-            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY" /></columnResizePolicy>
+            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" /></columnResizePolicy>
             <placeholder><Label text="아직 접속 상태 변경 로그가 없습니다." /></placeholder>
             <columns>
                 <TableColumn fx:id="timeCol" text="시간" prefWidth="150.0" />

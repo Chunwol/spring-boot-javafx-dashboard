@@ -18,8 +18,28 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Rate limiting interceptor implementing token bucket algorithm.
- * Tracks requests per client IP and limits request rate.
+ * IP 또는 에이전트 MAC 단위의 API 요청 속도 제한 인터셉터.
+ *
+ * <p><b>알고리즘</b>: 고정 윈도우(Fixed Window) 방식.
+ * 1분(60초) 단위 윈도우 내에서 요청 횟수를 카운트하며,
+ * 윈도우가 만료되면 카운터를 리셋한다.
+ * 토큰 버킷 방식과 비교했을 때 구현이 단순하고 메모리 효율이 좋지만,
+ * 윈도우 경계에서 순간 버스트가 허용될 수 있다.
+ *
+ * <p><b>키 선택 전략</b>:
+ * <ul>
+ *   <li>에이전트 엔드포인트({@code /api/v1/agent/**, /api/v1/heartbeat}): request attribute
+ *       {@code agentMac}이 있으면 {@code "agent:<MAC>"}을 키로 사용한다.
+ *       에이전트는 NAT 뒤에 있을 수 있어 IP 기반 키가 부정확하다.</li>
+ *   <li>일반 엔드포인트: {@code X-Forwarded-For} 헤더 우선, 없으면 {@code RemoteAddr}을 사용한다.</li>
+ * </ul>
+ *
+ * <p><b>메모리 관리</b>:
+ * {@code MAX_TRACKED_CLIENTS}(20,000) 초과 또는 512 요청마다 오래된 항목을 정리한다.
+ * 10분({@code STALE_ENTRY_TTL_MILLIS}) 이상 비활성 항목을 우선 제거하고,
+ * 그래도 초과 시 LRU(최근 미접근) 순으로 제거한다.
+ *
+ * @see RateLimitConfig 임계값 설정
  */
 @Component
 public class RateLimitingInterceptor implements HandlerInterceptor {

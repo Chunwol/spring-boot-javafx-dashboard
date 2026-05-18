@@ -13,6 +13,13 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 강의실 그룹 및 IP 범위 유효성 검증 서비스.
+ * <p>
+ * 강의실 이름 중복, IP 대역 중복 검사를 수행하며,
+ * 충돌 감지 시 AlertEvent를 발행하고 {@link ConflictException}을 던진다.
+ * </p>
+ */
 @Service
 public class ClassroomValidationService {
 
@@ -30,6 +37,14 @@ public class ClassroomValidationService {
         this.eventPublisher = eventPublisher;
     }
 
+    /**
+     * 강의실 생성 시 이름 중복을 검증한다.
+     * 대소문자를 구분하지 않는다.
+     *
+     * @param name 등록할 강의실 이름
+     * @throws IllegalArgumentException 이름이 null 또는 공백인 경우
+     * @throws ConflictException        동일한 이름이 이미 존재하는 경우
+     */
     public void validateGroupNameForCreate(String name) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("강의실 이름은 필수입니다.");
@@ -42,6 +57,14 @@ public class ClassroomValidationService {
         }
     }
 
+    /**
+     * 강의실 수정 시 이름 중복을 검증한다. 자기 자신(id)은 제외하고 검사한다.
+     *
+     * @param id   수정 대상 강의실 ID
+     * @param name 변경할 강의실 이름
+     * @throws IllegalArgumentException 이름이 null 또는 공백인 경우
+     * @throws ConflictException        다른 강의실에 동일한 이름이 이미 사용 중인 경우
+     */
     public void validateGroupNameForUpdate(Long id, String name) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("강의실 이름은 필수입니다.");
@@ -54,6 +77,15 @@ public class ClassroomValidationService {
         }
     }
 
+    /**
+     * IP 범위 등록 시 기존 대역과의 중복(overlap)을 검증한다.
+     * CIDR 또는 startIp/endIp 방식 모두 지원한다.
+     * 중복된 경우 같은 강의실인지 다른 강의실인지를 메시지에 포함한다.
+     *
+     * @param request 등록 요청 IP 범위 객체
+     * @throws IllegalArgumentException 요청 데이터가 불완전하거나 형식이 잘못된 경우
+     * @throws ConflictException        기존 대역과 중복되는 경우
+     */
     public void validateIpRangeForCreate(ClassroomIpRange request) {
         if (request == null) {
             throw new IllegalArgumentException("IP 범위 요청이 비어 있습니다.");

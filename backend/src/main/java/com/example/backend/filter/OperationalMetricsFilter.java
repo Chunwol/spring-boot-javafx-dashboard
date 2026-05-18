@@ -30,6 +30,25 @@ import java.util.Collection;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * API 요청별 운영 메트릭(응답 시간, 전송 바이트, 역할별 요청 수)을 수집하는 서블릿 필터.
+ *
+ * <p>수집 항목:
+ * <ul>
+ *   <li><b>API 요청</b>: 호출자 역할(ADMIN/USER/VIEWER/AGENT/ANON), HTTP 상태 코드, 처리 시간(나노초)</li>
+ *   <li><b>파일 전송</b>: 스크립트·에이전트 업로드/다운로드 엔드포인트의 실제 바이트 수와 처리 시간</li>
+ * </ul>
+ *
+ * <p>바이트 측정 방법:
+ * {@link CountingHttpServletRequestWrapper}와 {@link CountingHttpServletResponseWrapper}로
+ * 실제 읽고 쓴 바이트를 원자적으로 카운트한다.
+ * 측정값이 0인 경우 {@code Content-Length} 헤더를 폴백으로 사용한다.
+ *
+ * <p>적용 범위: {@code /api/} 접두사를 가진 경로에만 필터가 실행된다.
+ * {@code @Order(LOWEST_PRECEDENCE)}로 다른 필터(보안, 인증 등)가 모두 완료된 후 메트릭을 기록한다.
+ *
+ * @see OperationalMetricsService 메트릭 저장·집계
+ */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
 public class OperationalMetricsFilter extends OncePerRequestFilter {

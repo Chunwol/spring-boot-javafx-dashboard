@@ -6,6 +6,9 @@
 
 <TableView fx:id="commandTable"
            xmlns:fx="http://javafx.com/fxml">
+    <columnResizePolicy>
+        <TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" />
+    </columnResizePolicy>
     <placeholder><Label text="명령 로그가 없습니다." /></placeholder>
     <columns>
         <TableColumn fx:id="timeCol" text="시간" prefWidth="160.0" />

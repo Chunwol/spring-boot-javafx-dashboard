@@ -19,6 +19,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+/**
+ * 에이전트 최초 등록 서비스.
+ * <p>
+ * 설치키 검증 → PC 레코드 upsert → 에이전트 인증 토큰 발급 순서로 처리한다.
+ * 동일 MAC에 대한 동시 등록 요청은 Stripe 기반 내부 Lock으로 직렬화하고,
+ * 분산 환경에서 UNIQUE 충돌이 발생하면 낙관적 재시도(saveTokenResilient)로 처리한다.
+ * </p>
+ */
 @Service
 public class AgentRegistrationService {
 
@@ -26,6 +34,11 @@ public class AgentRegistrationService {
 
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
+    /**
+     * Stripe Lock: MAC 해시 기반으로 512개의 독립 잠금 슬롯을 사용.
+     * 모든 등록 요청을 단일 lock으로 직렬화하면 성능 병목이 발생하므로,
+     * MAC별로 같은 슬롯에만 경합이 생기도록 분산한다.
+     */
     private final Object[] registrationLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
             .mapToObj(i -> new Object())
             .toArray();
@@ -39,6 +52,13 @@ public class AgentRegistrationService {
         this.agentAuthTokenRepository = agentAuthTokenRepository;
     }
 
+    /**
+     * 에이전트를 등록하고 인증 토큰을 반환한다.
+     *
+     * @param requestInstallKey 설치키 (헤더 또는 바디에서 전달)
+     * @param request           등록 요청 DTO (macAddress, hostname, ipAddress)
+     * @return 발급된 plaintext 토큰과 안내 메시지
+     */
     @Transactional
     public AgentRegisterResponse registerAgent(String requestInstallKey, AgentRegisterRequest request) {
         validateInstallKey(requestInstallKey);
@@ -88,6 +108,10 @@ public class AgentRegistrationService {
         return new AgentRegisterResponse(plainToken, "등록 완료. 하트비트를 시작하세요.");
     }
 
+    /**
+     * 토큰 저장 시 UNIQUE 제약 충돌이 발생하면 기존 레코드를 다시 읽어 업데이트로 전환한다.
+     * 멀티 인스턴스 환경에서 동시 등록이 발생해도 데이터 정합성을 보장한다.
+     */
     private AgentAuthToken saveTokenResilient(String mac, String tokenHash, AgentAuthToken candidate) {
         LocalDateTime now = LocalDateTime.now();
         candidate.setMacAddress(mac);
@@ -129,11 +153,18 @@ public class AgentRegistrationService {
         return a;
     }
 
+    /**
+     * 설치키를 검증한다. 타이밍 어택 방지를 위해 MessageDigest.isEqual(상수 시간 비교)을 사용한다.
+     *
+     * @param requestInstallKey 요청에서 전달된 설치키
+     * @throws IllegalArgumentException 설치키가 없거나 불일치하는 경우
+     */
     private void validateInstallKey(String requestInstallKey) {
         if (requestInstallKey == null || requestInstallKey.isBlank()) {
             throw new IllegalArgumentException("설치키가 누락되었습니다.");
         }
-        // 타이밍 어택 방지: MessageDigest.isEqual로 상수 시간 비교
+        // WHY MessageDigest.isEqual: 문자열 equals()는 길이 불일치 시 조기 종료하여
+        // 타이밍 어택으로 키 길이를 추론할 수 있다. 상수 시간 비교로 이를 방지한다.
         boolean match = MessageDigest.isEqual(
                 requestInstallKey.getBytes(StandardCharsets.UTF_8),
                 installKey.getBytes(StandardCharsets.UTF_8));
@@ -142,6 +173,12 @@ public class AgentRegistrationService {
         }
     }
 
+    /**
+     * 등록 요청 필수 필드(macAddress, hostname)를 검증한다.
+     *
+     * @param request 에이전트 등록 요청 DTO
+     * @throws IllegalArgumentException 필수 필드가 누락된 경우
+     */
     private void validateRequest(AgentRegisterRequest request) {
         if (request == null || request.getMacAddress() == null || request.getMacAddress().isBlank()) {
             throw new IllegalArgumentException("macAddress는 필수입니다.");
@@ -151,6 +188,12 @@ public class AgentRegistrationService {
         }
     }
 
+    /**
+     * 문자열의 SHA-256 해시를 16진수 문자열로 반환한다.
+     *
+     * @param value 해시할 문자열
+     * @return 64자리 16진수 SHA-256 해시
+     */
     private String sha256Hex(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

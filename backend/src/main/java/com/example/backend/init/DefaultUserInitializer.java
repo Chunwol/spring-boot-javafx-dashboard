@@ -88,6 +88,10 @@ public class DefaultUserInitializer implements ApplicationRunner {
             logger.warn("DEFAULT_{}_PASSWORD is blank. Skipping.", label.toUpperCase());
             return;
         }
+        if ("password".equals(rawPassword)) {
+            logger.warn("[보안 경고] DEFAULT_{}_PASSWORD가 기본값 'password'로 설정되어 있습니다. " +
+                        "운영 환경에서는 반드시 강력한 비밀번호로 변경하세요.", label.toUpperCase());
+        }
 
         userRepository.findByUsername(username).ifPresentOrElse(user -> {
             boolean changed = false;

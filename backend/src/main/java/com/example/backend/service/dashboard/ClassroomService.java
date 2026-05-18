@@ -17,13 +17,23 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Service for classroom-related operations including summaries, PC stats, and traffic management.
+ * 강의실 관련 비즈니스 로직 서비스.
+ *
+ * <p>담당 기능:
+ * <ul>
+ *   <li>강의실 그룹별 PC 온라인/전체 수 집계 ({@link #getClassroomSummaries()})</li>
+ *   <li>교사 PC 상태(온라인/오프라인) 판별</li>
+ *   <li>강의실 최근 트래픽 조회 ({@link #getClassroomPcTraffic(Long)})</li>
+ * </ul>
+ *
+ * <p>모든 조회 메서드는 읽기 전용 트랜잭션을 사용하여 불필요한 flush를 방지한다.
  */
 @Service
 public class ClassroomService {
@@ -49,8 +59,16 @@ public class ClassroomService {
     }
 
     /**
-     * Get comprehensive classroom summaries including online PC counts and teacher status
+     * 전체 강의실 요약 정보를 조회한다.
+     *
+     * <p>조회 전략: N+1 문제를 방지하기 위해 그룹별 PC 통계를 LEFT JOIN 단일 쿼리로 로드한다.
+     * 이후 PC 목록, IP 범위, 교사 디바이스를 인메모리에서 그룹별로 매핑한다.
+     *
+     * <p>교사 PC 상태 판별: MAC 주소 또는 IP 주소 일치 + {@code lastSeen} 5분 이내를 온라인으로 판정한다.
+     *
+     * @return 강의실 요약 DTO 목록 (조회 실패 시 빈 목록 반환)
      */
+    @Transactional(readOnly = true)
     public List<ClassroomSummaryDto> getClassroomSummaries() {
         try {
             // Verify all classroom groups exist
@@ -146,16 +164,30 @@ public class ClassroomService {
     }
 
     /**
-     * Get paginated classroom summaries
+     * 페이징 처리된 강의실 요약 정보를 반환한다.
+     *
+     * <p>내부적으로 {@link #getClassroomSummaries()}로 전체 목록을 조회한 뒤
+     * 인메모리 페이징을 적용한다. 강의실 수가 적으므로 DB 페이징 대신 단순 인메모리 분할을 사용한다.
+     *
+     * @param pageable 페이지 요청 정보
+     * @return 페이징된 강의실 요약 페이지
      */
+    @Transactional(readOnly = true)
     public Page<ClassroomSummaryDto> getClassroomSummariesPaged(Pageable pageable) {
         List<ClassroomSummaryDto> summaries = getClassroomSummaries();
         return PaginationUtil.paginate(summaries, pageable);
     }
 
     /**
-     * Get classroom PC traffic data for the last 10 minutes
+     * 특정 강의실의 최근 10분간 PC별 트래픽 데이터를 조회한다.
+     *
+     * <p>PC별 최신 로그를 선택하여 현재 시점의 트래픽 현황을 반환한다.
+     * 결과는 인바운드+아웃바운드 합산 기준으로 내림차순 정렬된다 (트래픽 상위 PC 파악 용이).
+     *
+     * @param classroomId 강의실 그룹 ID
+     * @return PC별 트래픽 정보 맵 목록 (pcName, ipAddress, macAddress, status, inboundMbps, outboundMbps, updatedAt)
      */
+    @Transactional(readOnly = true)
     public List<Map<String, Object>> getClassroomPcTraffic(Long classroomId) {
         List<PcMaster> pcs = pcMasterRepository.findByGroupId(classroomId);
         if (pcs.isEmpty()) {

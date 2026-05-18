@@ -16,9 +16,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * AlertEvent 수신 → 이메일 발송.
- * 수신자: app.alert.email (application.yml 또는 환경변수 ALERT_EMAIL)
- * 미설정 시 이메일 발송 건너뜀.
+ * AlertEvent 수신기.
+ * <p>
+ * AlertEvent 발생 시:
+ * 1. DB 저장 (AlertCenterService.create)
+ * 2. WebSocket 실시간 브로드캐스트
+ * 3. 이메일 알림 (app.alert.email 설정 시에만)
+ * </p>
+ * 수신자 설정: application.yml의 app.alert.email 또는 환경변수 ALERT_EMAIL.
+ * 미설정 시 이메일 발송을 건너뛴다.
  */
 @Component
 public class AlertListener implements ApplicationListener<AlertEvent> {

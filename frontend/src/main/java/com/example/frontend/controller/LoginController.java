@@ -58,6 +58,9 @@ public class LoginController {
 
     @FXML
     public void initialize() {
+        // 숨김 시 레이아웃 공간도 해제
+        messageLabel.managedProperty().bind(messageLabel.visibleProperty());
+
         hostField.setText(PREFS.get(PREF_SERVER_HOST, apiClient.currentLoginHost()));
         portField.setText(PREFS.get(PREF_SERVER_PORT, Integer.toString(apiClient.currentLoginPort())));
         // username/remember 설정 로드

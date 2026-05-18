@@ -13,10 +13,21 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
 
 /**
- * SQLite timestamp 문자열이 섞여 있을 때도 안전하게 LocalDateTime으로 변환한다.
- * - yyyy-MM-dd HH:mm:ss[.fraction]
- * - yyyy-MM-dd'T'HH:mm:ss[.fraction]
- * - epoch seconds / epoch millis 숫자 문자열
+ * DB의 다양한 타임스탬프 문자열 형식을 {@link LocalDateTime}으로 변환하는 JPA AttributeConverter.
+ *
+ * <p>지원하는 입력 형식:
+ * <ul>
+ *   <li>{@code yyyy-MM-dd HH:mm:ss[.fraction]} — SQLite 기본 datetime 형식</li>
+ *   <li>{@code yyyy-MM-dd'T'HH:mm:ss[.fraction]} — ISO-8601 형식</li>
+ *   <li>순수 숫자 문자열 — epoch seconds 또는 epoch milliseconds 자동 판별
+ *       (값이 2,000,000,000 초과이면 밀리초로 판단하여 1000으로 나눔)</li>
+ * </ul>
+ *
+ * <p>DB 저장 형식: {@code yyyy-MM-dd HH:mm:ss} (초 단위, 고정)
+ *
+ * <p>WHY: SQLite는 네이티브 날짜 타입이 없어 텍스트로 저장한다.
+ * 레거시 데이터가 여러 형식으로 혼재되어 있어 허용 범위를 넓게 설정했다.
+ * 파싱 실패 시 null을 반환하고 TRACE 로그만 남겨 운영을 방해하지 않는다.
  */
 @Converter
 public class LenientLocalDateTimeStringConverter implements AttributeConverter<LocalDateTime, String> {

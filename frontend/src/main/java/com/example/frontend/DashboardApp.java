@@ -24,10 +24,10 @@ public class DashboardApp extends Application {
         controller.setPrimaryStage(primaryStage);
 
         primaryStage.setTitle("스마트 강의실 대시보드 - 로그인");
-        Scene scene = new Scene(root, 460, 360);
+        Scene scene = new Scene(root, 480, 540);
         scene.getStylesheets().add(getClass().getResource("/dashboard-theme.css").toExternalForm());
-        primaryStage.setMinWidth(420);
-        primaryStage.setMinHeight(320);
+        primaryStage.setMinWidth(400);
+        primaryStage.setMinHeight(480);
         primaryStage.setScene(scene);
         primaryStage.show();
     }

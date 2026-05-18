@@ -3,6 +3,7 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
@@ -20,8 +21,12 @@
         <HBox fx:id="headerBar" alignment="CENTER_RIGHT" spacing="4">
             <children>
                 <Region HBox.hgrow="ALWAYS" />
-                <Button fx:id="gridSettingsBtn" text="⚙" styleClass="btn-neutral" />
-                <Button fx:id="deleteBtn" text="삭제" styleClass="btn-danger" />
+                <Button fx:id="gridSettingsBtn" text="⚙" styleClass="btn-neutral">
+                    <tooltip><Tooltip text="그리드 설정" /></tooltip>
+                </Button>
+                <Button fx:id="deleteBtn" text="삭제" styleClass="btn-danger">
+                    <tooltip><Tooltip text="패널 삭제" /></tooltip>
+                </Button>
             </children>
         </HBox>
 
@@ -38,30 +43,33 @@
 
         <HBox fx:id="countStrip" spacing="4">
             <children>
-                <StackPane fx:id="totalBox" styleClass="classroom-stat-total" HBox.hgrow="ALWAYS">
+                <VBox fx:id="totalBox" styleClass="classroom-stat-total" HBox.hgrow="ALWAYS" alignment="CENTER" spacing="2">
                     <padding>
-                        <Insets top="9" right="8" bottom="9" left="8" />
+                        <Insets top="8" right="8" bottom="8" left="8" />
                     </padding>
                     <children>
+                        <Label text="전체" styleClass="classroom-stat-key" />
                         <Label fx:id="totalLabel" styleClass="classroom-stat-label" text="0 대" />
                     </children>
-                </StackPane>
-                <StackPane fx:id="onlineBox" styleClass="classroom-stat-online" HBox.hgrow="ALWAYS">
+                </VBox>
+                <VBox fx:id="onlineBox" styleClass="classroom-stat-online" HBox.hgrow="ALWAYS" alignment="CENTER" spacing="2">
                     <padding>
-                        <Insets top="9" right="8" bottom="9" left="8" />
+                        <Insets top="8" right="8" bottom="8" left="8" />
                     </padding>
                     <children>
+                        <Label text="온라인" styleClass="classroom-stat-key" />
                         <Label fx:id="onlineLabel" styleClass="classroom-stat-label" text="0 대" />
                     </children>
-                </StackPane>
-                <StackPane fx:id="offlineBox" styleClass="classroom-stat-offline" HBox.hgrow="ALWAYS">
+                </VBox>
+                <VBox fx:id="offlineBox" styleClass="classroom-stat-offline" HBox.hgrow="ALWAYS" alignment="CENTER" spacing="2">
                     <padding>
-                        <Insets top="9" right="8" bottom="9" left="8" />
+                        <Insets top="8" right="8" bottom="8" left="8" />
                     </padding>
                     <children>
+                        <Label text="오프라인" styleClass="classroom-stat-key" />
                         <Label fx:id="offlineLabel" styleClass="classroom-stat-label" text="0 대" />
                     </children>
-                </StackPane>
+                </VBox>
             </children>
         </HBox>
 
@@ -69,8 +77,12 @@
 
         <HBox fx:id="buttonBox" alignment="CENTER" spacing="5">
             <children>
-                <Button fx:id="shutdownAllBtn" text="전체 종료" styleClass="btn-danger" />
-                <Button fx:id="wolAllBtn" text="전체 켜기" styleClass="btn-primary" />
+                <Button fx:id="shutdownAllBtn" text="전체 종료" styleClass="btn-danger">
+                    <tooltip><Tooltip text="모든 PC 종료" /></tooltip>
+                </Button>
+                <Button fx:id="wolAllBtn" text="전체 켜기" styleClass="btn-primary">
+                    <tooltip><Tooltip text="Wake-on-LAN 으로 모든 PC 켜기" /></tooltip>
+                </Button>
             </children>
         </HBox>
 

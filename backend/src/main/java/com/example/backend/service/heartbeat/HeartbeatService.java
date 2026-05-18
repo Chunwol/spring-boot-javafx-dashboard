@@ -35,6 +35,28 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+/**
+ * 에이전트 하트비트 처리 서비스.
+ * <p>
+ * 하트비트 수신 시 다음 작업을 수행한다:
+ * <ol>
+ *   <li>PC 상태(IP, hostname, groupId, role, sessionId) 갱신 및 조건부 저장</li>
+ *   <li>그룹 재배정 감지 → 감사(Audit) 로그 기록 (트랜잭션 커밋 후 afterCommit에서 실행)</li>
+ *   <li>에이전트 세션 변경 감지 → 진행 중인 명령 재큐잉 또는 FAILED 처리</li>
+ *   <li>자동 캐치업: 최신 배포 버전과 다른 에이전트를 FileDistributionOrchestrator에 전달</li>
+ *   <li>SCMATE 초기화 복구 완료 자동 감지 (OFFLINE→ONLINE 전환 시)</li>
+ *   <li>트래픽 샘플 저장 ({@code persistTrafficSamples})</li>
+ *   <li>다음 QUEUED 명령 디스패치 ({@code dispatchNextCommand} — CAS로 race condition 방지)</li>
+ * </ol>
+ * </p>
+ *
+ * <b>성능 최적화:</b>
+ * <ul>
+ *   <li>PC 저장: 상태 변경 또는 {@code heartbeatPersistIntervalSeconds} 경과 시에만 DB 쓰기</li>
+ *   <li>트래픽 로그: {@code trafficLogMinIntervalSeconds} 경과 시에만 단일값 저장
+ *       (다중 샘플은 항상 저장)</li>
+ * </ul>
+ */
 @Service
 @RequiredArgsConstructor
 public class HeartbeatService {
@@ -159,9 +181,10 @@ public class HeartbeatService {
                 cmd.setScmateResetStatus("COMPLETED");
                 cmd.setScmateResetCompletedAt(now);
                 commandQueueRepository.save(cmd);
+                long waitSec = cmd.getScmateResetRequestedAt() != null
+                        ? java.time.temporal.ChronoUnit.SECONDS.between(cmd.getScmateResetRequestedAt(), now) : 0;
                 log.info("[SCMATE 복구 완료] {} - 명령 ID: {} (대기 시간: {}초)",
-                        mac, cmd.getTaskId(),
-                        java.time.temporal.ChronoUnit.SECONDS.between(cmd.getScmateResetRequestedAt(), now));
+                        mac, cmd.getTaskId(), waitSec);
             }
         }
 

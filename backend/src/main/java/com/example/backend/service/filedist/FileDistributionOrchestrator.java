@@ -33,11 +33,32 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * 대용량 파일/에이전트 업데이트 Wave 오케스트레이션 서비스.
- * - Wave별 점진 확장(ramp-up)
- * - Wave 시작 시 AGENT_UPDATE 명령 자동 큐잉
- * - AGENT_UPDATE 결과를 Job 상태에 자동 반영
- * - 실패 임계치 초과 시 중단, 안정 버전 롤백 Job 생성 지원
+ * 파일/에이전트 업데이트의 Wave 기반 점진 배포를 오케스트레이션하는 서비스.
+ *
+ * <h2>배포 흐름</h2>
+ * <ol>
+ *   <li><b>Job 생성</b> ({@link #createJob}): 대상 에이전트를 Wave 목록으로 분할하여 DB에 저장</li>
+ *   <li><b>Wave 시작</b> ({@link #startWave}): 첫 번째 Wave의 에이전트들에게 {@code AGENT_UPDATE} 명령을 큐잉</li>
+ *   <li><b>결과 수신</b> ({@link #reportAgentResult}): 에이전트가 업데이트 결과를 보고</li>
+ *   <li><b>Wave 평가 및 진행</b> ({@link #evaluateAndAdvance}): Wave 내 전체 완료 시 다음 Wave 시작
+ *       또는 실패율 초과 시 Job 중단 + 자동 롤백 트리거</li>
+ * </ol>
+ *
+ * <h2>Wave Ramp-up 전략</h2>
+ * <p>초기 Canary Wave(소수) → ramp-up factor만큼 기하급수적으로 Wave 크기 확장.
+ * 초기 Wave에서 문제 감지 시 전체 배포를 중단하고 안정 버전으로 롤백한다.
+ *
+ * <h2>소스 모드</h2>
+ * <ul>
+ *   <li>{@code SERVER_ONLY}: 모든 에이전트가 서버에서 직접 다운로드</li>
+ *   <li>{@code HYBRID_PEER}: 이전 Wave 완료 에이전트가 P2P 소스로 활용 (서버 부하 분산)</li>
+ * </ul>
+ *
+ * <h2>Auto Catch-up</h2>
+ * <p>Heartbeat 수신 시 에이전트 버전을 확인하여 최신 배포 버전과 불일치하면 단독 Job을 생성해 자동 업데이트한다.
+ * 쿨다운 기간 내 동일 버전으로 실패한 이력이 있으면 재시도를 건너뛴다.
+ *
+ * <p>설정 프로퍼티: {@code app.file-distribution.*} (application.yml 참고)
  */
 @Service
 public class FileDistributionOrchestrator {
@@ -165,12 +186,25 @@ public class FileDistributionOrchestrator {
 
     /**
      * 배포 Job을 Wave 단위로 오케스트레이션 (초기 Canary → 전체)
+     *
+     * @param jobId      배포 Job ID
+     * @param waveSize   초기 Wave 크기
+     * @param canaryOnly {@code true}이면 첫 Wave만 실행하고 중단 (Canary 검증 전용)
+     * @param groupId    대상 강의실 그룹 ID (null이면 전체 ONLINE PC)
      */
     @Transactional
     public void orchestrateWaves(Long jobId, int waveSize, boolean canaryOnly, Long groupId) {
         orchestrateWaves(jobId, waveSize, canaryOnly, groupId, null);
     }
 
+    /**
+     * 명시적 대상 에이전트 ID 목록을 사용하는 Wave 오케스트레이션.
+     *
+     * <p>{@code explicitTargetAgentIds}가 제공되면 groupId를 무시하고 해당 목록만 대상으로 삼는다.
+     * Rollback/Auto Catch-up에서 특정 에이전트만 재배포할 때 사용한다.
+     *
+     * @param explicitTargetAgentIds 명시 대상 에이전트 ID (MAC 주소) 목록 (null이면 groupId 기반)
+     */
     @Transactional
     public void orchestrateWaves(Long jobId,
                                  int waveSize,
@@ -226,7 +260,14 @@ public class FileDistributionOrchestrator {
     }
 
     /**
-     * Wave별 상태/진행률/실패/취소/재시도 등 상태 관리
+     * 특정 Wave의 모든 에이전트 상태를 일괄 변경한다.
+     *
+     * <p>CANCELLED 상태로 변경 시 이미 완료/실패된 에이전트는 건너뛴다.
+     * (이미 결과가 확정된 에이전트를 취소 상태로 덮어쓰면 진행률 계산이 왜곡될 수 있음)
+     *
+     * @param jobId  배포 Job ID
+     * @param wave   대상 Wave 번호
+     * @param status 변경할 상태 문자열
      */
     @Transactional
     public void updateWaveStatus(Long jobId, int wave, String status) {
@@ -274,7 +315,11 @@ public class FileDistributionOrchestrator {
     }
 
     /**
-     * Wave별 취소/재시도/확장 등 제어 API
+     * 특정 Wave를 취소한다.
+     * IN_PROGRESS/QUEUED 상태 에이전트만 CANCELLED로 변경하고, 이미 완료/실패된 항목은 유지한다.
+     *
+     * @param jobId 배포 Job ID
+     * @param wave  취소할 Wave 번호
      */
     @Transactional
     public void cancelWave(Long jobId, int wave) {
@@ -687,6 +732,13 @@ public class FileDistributionOrchestrator {
         }
     }
 
+    /**
+     * Wave 크기를 유효 범위(1 ~ maxWaveSize)로 정규화한다.
+     * 0 이하 입력 시 기본값({@code defaultWaveSize})을 사용한다.
+     *
+     * @param waveSize 요청된 Wave 크기
+     * @return 정규화된 Wave 크기
+     */
     private int normalizeWaveSize(int waveSize) {
         int safe = waveSize <= 0 ? defaultWaveSize : waveSize;
         return Math.min(Math.max(1, safe), Math.max(1, maxWaveSize));
@@ -716,6 +768,25 @@ public class FileDistributionOrchestrator {
         return Math.max(1.0, Math.min(3.0, factor));
     }
 
+    /**
+     * Wave 크기 계획 목록을 계산한다.
+     *
+     * <p><b>Ramp-up 알고리즘</b>:
+     * <ul>
+     *   <li>첫 Wave: {@code initialWaveSize}</li>
+     *   <li>이후 Wave: 이전 크기 × {@code rampFactor} (기하급수적 확장)</li>
+     *   <li>최대 Wave 크기는 {@code maxWaveSize}로 상한 제한</li>
+     *   <li>{@code canaryOnly == true}이면 첫 Wave만 포함 (Canary 검증 단계 지원)</li>
+     * </ul>
+     *
+     * <p>예시: total=100, initial=5, rampFactor=1.8 → [5, 9, 16, 28, 42] (합 = 100)
+     *
+     * @param totalTargets    전체 대상 에이전트 수
+     * @param initialWaveSize 첫 Wave 크기
+     * @param rampFactor      Wave 간 확장 비율 (1.0 ~ 3.0)
+     * @param canaryOnly      첫 Wave만 실행 여부
+     * @return Wave별 크기 목록
+     */
     private List<Integer> buildWaveSizes(int totalTargets,
                                          int initialWaveSize,
                                          double rampFactor,
@@ -731,9 +802,11 @@ public class FileDistributionOrchestrator {
             remaining -= waveSize;
 
             if (canaryOnly) {
+                // Canary 모드: 첫 Wave만 실행하고 나머지는 수동 승인 대기
                 break;
             }
 
+            // 이전 waveSize보다 최소 1 이상 증가 보장 (무한루프 방지)
             nextSize = Math.max(waveSize + 1, nextSize * rampFactor);
             nextSize = Math.min(nextSize, Math.max(1, maxWaveSize));
         }
@@ -941,10 +1014,28 @@ public class FileDistributionOrchestrator {
         }
     }
 
+    /**
+     * Wave 완료 후 다음 단계를 결정한다: 실패율 평가 → 중단/롤백 또는 다음 Wave 시작.
+     *
+     * <p><b>평가 순서</b>:
+     * <ol>
+     *   <li>Wave 내 모든 에이전트가 종료 상태(COMPLETED/FAILED/CANCELLED)인지 확인</li>
+     *   <li>실패율이 {@code failThreshold} 초과 시 Job을 FAILED로 마킹하고 Auto Rollback 트리거</li>
+     *   <li>다음 Wave가 없으면 Job을 COMPLETED로 마킹</li>
+     *   <li>다음 Wave가 있으면 {@link #startWave}로 진행</li>
+     * </ol>
+     *
+     * <p><b>WHY</b>: 각 에이전트 결과 보고 시점에 호출되므로, Wave 내 모든 에이전트가 완료되지 않으면
+     * 아무 작업도 하지 않는다 (조기 진행 방지).
+     *
+     * @param jobId 배포 Job ID
+     * @param wave  평가할 Wave 번호
+     */
     private void evaluateAndAdvance(Long jobId, int wave) {
         List<FileDistributionAgentStatus> currentWave = agentStatusRepo.findByJobIdAndWaveOrderByIdAsc(jobId, wave);
         if (currentWave.isEmpty()) return;
 
+        // Wave 내 모든 에이전트가 종료 상태가 아니면 대기
         boolean allDone = currentWave.stream().allMatch(s ->
                 "COMPLETED".equals(s.getStatus()) || "FAILED".equals(s.getStatus()) || "CANCELLED".equals(s.getStatus()));
         if (!allDone) return;
@@ -954,6 +1045,7 @@ public class FileDistributionOrchestrator {
 
         FileDistributionJob job = jobRepo.findById(jobId).orElseThrow();
         if (failRate > failThreshold) {
+            // 실패율 임계치 초과: 전체 배포 중단 후 안정 버전 롤백 시도
             job.setStatus("FAILED");
             job.setErrorMessage("Wave fail rate too high: " + failRate);
             job.setCompletedAt(LocalDateTime.now());
@@ -966,6 +1058,7 @@ public class FileDistributionOrchestrator {
         int nextWave = wave + 1;
         List<FileDistributionAgentStatus> next = agentStatusRepo.findByJobIdAndWaveOrderByIdAsc(jobId, nextWave);
         if (next.isEmpty()) {
+            // 더 이상 Wave가 없으면 전체 배포 완료
             job.setStatus("COMPLETED");
             job.setCompletedAt(LocalDateTime.now());
             jobRepo.save(job);

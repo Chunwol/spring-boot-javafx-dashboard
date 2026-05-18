@@ -1,6 +1,9 @@
 package com.example.backend.security;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +15,16 @@ import java.util.HexFormat;
 
 @Component
 public class FileDistributionRequestSecurity {
+
+    private static final Logger log = LoggerFactory.getLogger(FileDistributionRequestSecurity.class);
+
+    @PostConstruct
+    public void warnIfDisabled() {
+        if (!enabled) {
+            log.warn("[보안 경고] app.file-distribution.security.enabled=false — 파일 배포 API 요청 서명 검증이 비활성화되어 있습니다. " +
+                     "운영 환경에서는 true로 설정하고 shared-secret을 구성하세요.");
+        }
+    }
 
     @Value("${app.file-distribution.security.enabled:false}")
     private boolean enabled;

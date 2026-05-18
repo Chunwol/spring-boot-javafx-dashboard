@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -86,12 +87,14 @@ public class IpRangeApiController {
      * 예: 192.168.10.0/24, 192.168.10.1~192.168.10.254
      */
     @PostMapping
+    @Transactional
     @Operation(
         summary = "IP 범위 등록",
         description = "강의실에 IP 범위(CIDR 또는 start-end)를 등록합니다. " +
                       "등록 후 이 범위의 PC가 하트비트를 보내면 해당 강의실로 자동 할당됩니다."
     )
     @ApiResponse(responseCode = "200", description = "IP 범위 등록 성공")
+    @ApiResponse(responseCode = "400", description = "IP 범위 형식 오류 또는 중복")
     public ResponseEntity<ClassroomIpRange> createIpRange(@RequestBody ClassroomIpRange ipRange) {
         classroomValidationService.validateIpRangeForCreate(ipRange);
         ClassroomIpRange saved = ipRangeRepository.save(ipRange);
@@ -105,8 +108,23 @@ public class IpRangeApiController {
      * 예시 1) basePrefix=10.0.1. / rangeSpec=10-20,30-40
      * 예시 2) rangeSpec=10.0.1.10-10.0.1.20,10.0.1.30-10.0.1.40
      */
+    /**
+     * 다중 비연속 대역 일괄 등록.
+     * rangeSpec 내 토큰마다 IP 범위를 생성하고 캐시를 무효화합니다.
+     * 부분 실패 시 전체 롤백을 위해 트랜잭션으로 묶습니다.
+     *
+     * 예시 1) basePrefix=10.0.1. / rangeSpec=10-20,30-40
+     * 예시 2) rangeSpec=10.0.1.10-10.0.1.20,10.0.1.30-10.0.1.40
+     */
     @PostMapping("/batch")
-    @Operation(summary = "다중 IP 대역 일괄 등록")
+    @Transactional
+    @Operation(
+        summary = "다중 IP 대역 일괄 등록",
+        description = "rangeSpec(쉼표/줄바꿈/세미콜론 구분)에 나열된 여러 IP 대역을 한 번에 등록합니다. " +
+                      "CIDR, start-end, last-octet 범위를 모두 지원합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "일괄 등록 성공 (created: 등록 건수, items: 등록 목록)")
+    @ApiResponse(responseCode = "400", description = "잘못된 rangeSpec 형식 또는 basePrefix 누락")
     public ResponseEntity<Map<String, Object>> createIpRangesBatch(@Valid @RequestBody IpRangeBatchRequest req) {
         List<ClassroomIpRange> saved = new ArrayList<>();
         String normalizedSpec = req.getRangeSpec()
@@ -178,10 +196,16 @@ public class IpRangeApiController {
      * IP 범위 삭제
      * @param id IP 범위 ID
      */
+    /**
+     * IP 범위 삭제
+     * 삭제 후 IP 범위 캐시를 무효화합니다.
+     * @param id 삭제할 IP 범위 ID
+     */
     @DeleteMapping("/{id}")
+    @Transactional
     @Operation(
         summary = "IP 범위 삭제",
-        description = "등록된 IP 범위를 삭제합니다."
+        description = "등록된 IP 범위를 삭제합니다. 삭제 후 강의실 자동 배정 캐시가 갱신됩니다."
     )
     @ApiResponse(responseCode = "200", description = "IP 범위 삭제 성공")
     @ApiResponse(responseCode = "404", description = "IP 범위를 찾을 수 없음")

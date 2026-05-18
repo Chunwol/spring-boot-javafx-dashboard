@@ -59,6 +59,7 @@ public class AuthController {
         content = @Content(schema = @Schema(implementation = LoginResponse.class))
     )
     @ApiResponse(responseCode = "400", description = "잘못된 자격증명 (사용자명 또는 비밀번호 오류)")
+    @ApiResponse(responseCode = "401", description = "인증 실패")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
         var userOpt = userRepository.findByUsername(loginRequest.getUsername());
         if (userOpt.isPresent()) {

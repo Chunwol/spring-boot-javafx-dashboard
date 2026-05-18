@@ -30,7 +30,7 @@
         </HBox>
 
         <TableView fx:id="ipRangeTable" prefHeight="320.0">
-            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY" /></columnResizePolicy>
+            <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" /></columnResizePolicy>
             <placeholder><Label text="등록된 IP 대역이 없습니다." /></placeholder>
             <columns>
                 <TableColumn text="번호" maxWidth="60.0">

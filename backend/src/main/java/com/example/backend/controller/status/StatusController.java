@@ -88,8 +88,9 @@ public class StatusController {
     @GetMapping("/role/{role}")
     @Operation(summary = "역할별 PC 조회", description = "역할(TEACHER/STUDENT)로 PC 목록을 조회합니다.")
     @ApiResponse(responseCode = "200", description = "PC 목록 조회 성공")
+    @ApiResponse(responseCode = "400", description = "유효하지 않은 역할 값")
     public List<PcStatusDto> byRole(
-            @Parameter(description = "역할 (TEACHER/STUDENT)") @PathVariable String role) {
+            @Parameter(description = "역할 (TEACHER 또는 STUDENT)", example = "STUDENT") @PathVariable String role) {
         Map<Long, String> groupNames = loadGroupNameMap();
         return pcMasterRepository.findAll().stream()
             .filter(p -> role.equalsIgnoreCase(p.getRole()))
@@ -125,6 +126,10 @@ public class StatusController {
         return ResponseEntity.ok(performanceStatusService.snapshot());
     }
 
+    /**
+     * 강의실 ID → 강의실 이름 맵을 로드합니다.
+     * 중복 ID가 있을 경우 첫 번째 값을 유지합니다.
+     */
     private Map<Long, String> loadGroupNameMap() {
         return classroomGroupRepository.findAll().stream()
             .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName, (a, b) -> a));

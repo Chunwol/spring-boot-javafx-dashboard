@@ -78,9 +78,9 @@ public class ScriptController {
     @Value("${app.collect.max-total-bytes:" + DEFAULT_COLLECT_MAX_BYTES + "}")
     private long collectMaxTotalBytes;
 
-    public ScriptController(ScriptArtifactRepository scriptArtifactRepository) {
+    public ScriptController(ScriptArtifactRepository scriptArtifactRepository, ObjectMapper objectMapper) {
         this.scriptArtifactRepository = scriptArtifactRepository;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     @PostConstruct

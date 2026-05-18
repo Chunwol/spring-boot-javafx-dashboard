@@ -17,8 +17,29 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * .env 파일에서 환경 변수를 로드하는 설정 클래스
- * Spring Boot 애플리케이션 시작 시 .env 파일의 모든 값을 시스템 속성으로 로드합니다.
+ * {@code .env} 파일의 환경 변수를 Spring {@link ConfigurableEnvironment}에 주입하는 후처리기.
+ *
+ * <p>로드 우선순위(파일 탐색 순서):
+ * <ol>
+ *   <li>{@code backend/.env} — 프로젝트 루트 기준 backend 하위 디렉터리</li>
+ *   <li>{@code backend.env} — 프로젝트 루트에 단일 파일로 배치</li>
+ *   <li>{@code .env} — 하위 호환 기본 경로</li>
+ * </ol>
+ *
+ * <p>우선순위 정책: .env 값은 실제 시스템/OS 환경 변수보다 낮게 설정된다
+ * ({@code addLast}). 이를 통해 운영 환경에서 OS 환경 변수로 손쉽게 오버라이드할 수 있다.
+ *
+ * <p>별칭(alias) 처리:
+ * <ul>
+ *   <li>{@code POSTGRES_USER} → {@code DB_USERNAME} 자동 폴백</li>
+ *   <li>{@code POSTGRES_PASSWORD} / {@code PGPASSWORD} → {@code DB_PASSWORD} 자동 폴백</li>
+ *   <li>{@code JDBC_DATABASE_URL} → {@code DB_URL} 자동 폴백</li>
+ *   <li>{@code DB_BACKUP_TIME} (HH:mm) → {@code DB_BACKUP_CRON} (cron 표현식) 자동 변환</li>
+ * </ul>
+ *
+ * <p>등록 방법: {@code META-INF/spring.factories}에
+ * {@code org.springframework.boot.env.EnvironmentPostProcessor=com.example.backend.config.EnvConfig}
+ * 로 선언되어야 한다.
  */
 public class EnvConfig implements EnvironmentPostProcessor {
 

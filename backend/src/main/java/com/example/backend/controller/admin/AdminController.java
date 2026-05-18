@@ -19,6 +19,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -27,7 +29,9 @@ import java.util.Map;
 
 /**
  * 관리자 단편 API
- * 강의실단위 명령 및 WOL 전송 등을 담당합니다.
+ *
+ * <p>강의실 단위 명령 발행, WOL 전송, 에이전트 토큰 관리, 감사 로그 조회 등
+ * 관리자 전용 기능을 제공한다. 모든 엔드포인트에는 ADMIN 역할이 필요하다.</p>
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -70,7 +74,13 @@ public class AdminController {
     }
 
     @PostMapping("/group/wol")
-    public ResponseEntity<Map<String, Object>> groupWol(@RequestParam Long groupId) {
+    @Operation(
+        summary = "그룹 WOL 전송",
+        description = "지정한 강의실 그룹의 온라인 리더 에이전트를 통해 Wake-on-LAN 패킷을 그룹 전체에 전송합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "WOL 전송 성공 또는 온라인 리더 없음")
+    public ResponseEntity<Map<String, Object>> groupWol(
+            @Parameter(description = "강의실 그룹 ID") @RequestParam Long groupId) {
         boolean ok = commandService.sendGroupWol(groupId);
         Map<String, Object> resp = new HashMap<>();
         resp.put("status", ok ? "ok" : "no-leader");
@@ -96,15 +106,22 @@ public class AdminController {
     }
 
     @GetMapping("/install-key")
-    @Operation(summary = "에이전트 설치키 조회", description = "현재 서버에 설정된 에이전트 설치키를 반환합니다.")
+    @Operation(summary = "에이전트 설치키 조회", description = "설치키 설정 여부와 앞 4자리만 반환합니다 (평문 노출 방지).")
     public ResponseEntity<Map<String, Object>> getInstallKey() {
+        boolean configured = installKey != null && !installKey.isBlank()
+                && !installKey.startsWith("INST-CHANGE-ME") && !installKey.startsWith("CHANGE_ME");
+        String preview = (installKey != null && installKey.length() > 4)
+                ? installKey.substring(0, 4) + "****" : "****";
         Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("installKey", installKey);
+        resp.put("configured", configured);
+        resp.put("keyPreview", preview);
         return ResponseEntity.ok(resp);
     }
 
     @GetMapping("/agents")
-    @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다.")
+    @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다. pc_master에 없는 고아 토큰도 포함됩니다.")
+    @ApiResponse(responseCode = "200", description = "에이전트 목록 조회 성공")
+    @ApiResponse(responseCode = "401", description = "인증 실패")
     public ResponseEntity<List<Map<String, Object>>> listAgents() {
         List<PcMaster> pcs = pcMasterRepository.findAll();
         Map<String, PcMaster> pcByMac = new HashMap<>();
@@ -195,6 +212,7 @@ public class AdminController {
 
     @DeleteMapping("/agents/{mac}")
     @Operation(summary = "에이전트 강제 삭제", description = "PC 레코드와 토큰을 모두 삭제합니다.")
+    @Transactional
     public ResponseEntity<Map<String, Object>> deleteAgent(@PathVariable String mac) {
         agentAuthTokenRepository.findAllByMacAddress(mac).forEach(agentAuthTokenRepository::delete);
         pcMasterRepository.findById(mac).ifPresent(pcMasterRepository::delete);
@@ -206,7 +224,9 @@ public class AdminController {
     }
 
     @GetMapping("/audit/logs")
-    @Operation(summary = "감사 로그 조회", description = "action 또는 actor 기준으로 최근 감사 로그를 조회합니다.")
+    @Operation(summary = "감사 로그 조회", description = "action 또는 actor 기준으로 최근 감사 로그를 조회합니다. 기본 최대 100건.")
+    @ApiResponse(responseCode = "200", description = "감사 로그 목록")
+    @ApiResponse(responseCode = "401", description = "인증 실패")
     public ResponseEntity<List<Map<String, Object>>> getAuditLogs(
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String actor,

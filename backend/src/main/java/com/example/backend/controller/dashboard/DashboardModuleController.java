@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -60,21 +61,26 @@ public class DashboardModuleController {
 
     /**
      * 새 모듈 생성
+     * type, config, x/y, groupId를 포함한 모듈을 생성합니다.
      */
     @PostMapping
+    @Transactional
     @Operation(
         summary = "모듈 생성",
         description = "새 대시보드 모듈을 생성합니다. type(위젯 종류), config(설정), x/y(위치)를 포함합니다."
     )
     @ApiResponse(responseCode = "200", description = "생성된 모듈")
+    @ApiResponse(responseCode = "400", description = "필수 필드 누락")
     public DashboardModule create(@RequestBody DashboardModule m) {
         return moduleRepository.save(m);
     }
 
     /**
      * 모듈 수정
+     * 기존 모듈의 타입·설정·위치를 덮어씁니다. ID가 없으면 404를 반환합니다.
      */
     @PutMapping("/{id}")
+    @Transactional
     @Operation(
         summary = "모듈 수정",
         description = "기존 대시보드 모듈을 수정합니다. 타입, 설정, 위치(x/y) 등을 변경할 수 있습니다."
@@ -99,8 +105,10 @@ public class DashboardModuleController {
 
     /**
      * 모듈 삭제
+     * 존재하지 않는 ID이면 404를 반환합니다.
      */
     @DeleteMapping("/{id}")
+    @Transactional
     @Operation(
         summary = "모듈 삭제",
         description = "대시보드 모듈을 삭제합니다."

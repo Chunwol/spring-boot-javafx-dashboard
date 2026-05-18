@@ -72,8 +72,8 @@ public class PcStatusService {
      * Get all broken PC statuses
      */
     public List<PcStatusDto> getBrokenPcStatuses() {
-        return pcMasterRepository.findAll().stream()
-                .filter(pc -> "BROKEN".equalsIgnoreCase(pc.getStatus()) || "FAILED".equalsIgnoreCase(pc.getStatus()))
+        return pcMasterRepository.findByStatusIn(List.of("BROKEN", "FAILED"))
+                .stream()
                 .map(this::toPcStatusDto)
                 .toList();
     }

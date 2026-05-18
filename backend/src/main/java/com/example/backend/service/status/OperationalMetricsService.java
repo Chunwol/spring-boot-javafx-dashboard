@@ -20,6 +20,25 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
+/**
+ * 운영 메트릭 수집 및 조회 서비스.
+ *
+ * <p>수집 항목:
+ * <ul>
+ *   <li><b>명령 레이턴시</b>: dispatch(큐잉→전달), ack(전달→확인), result(확인→결과) 단계별</li>
+ *   <li><b>파일 전송</b>: 업로드/다운로드 요청 수, 바이트, 실패 수</li>
+ *   <li><b>HTTP 요청</b>: 역할별 요청 수, 403/4xx/5xx 비율</li>
+ * </ul>
+ *
+ * <p><b>이중 저장 전략</b>: Micrometer {@link MeterRegistry}(글로벌 누적)와
+ * 인메모리 시계열 Deque(최근 윈도우 슬라이딩)를 병행 사용한다.
+ * Micrometer는 Prometheus/Actuator 연동용, Deque는 대시보드 실시간 뷰용이다.
+ *
+ * <p><b>스레드 안전성</b>: 시계열 Deque 접근은 {@code recentLock} 모니터로 동기화한다.
+ * {@link java.util.concurrent.atomic.LongAdder}는 락 없이 원자적 증가를 제공한다.
+ *
+ * <p>DB를 조회하지 않으므로 트랜잭션이 불필요하다.
+ */
 @Service
 public class OperationalMetricsService {
 
@@ -72,6 +91,11 @@ public class OperationalMetricsService {
         this.commandFailureCounter = Counter.builder("ops.command.result.failure").register(meterRegistry);
     }
 
+    /**
+     * 명령 dispatch 레이턴시(큐잉 → 에이전트 전달 완료)를 기록한다.
+     *
+     * @param latencyMs 레이턴시 (밀리초, 음수 무시)
+     */
     public void recordCommandDispatchLatencyMillis(long latencyMs) {
         if (latencyMs < 0) {
             return;
@@ -79,6 +103,12 @@ public class OperationalMetricsService {
         commandDispatchLatencyTimer.record(latencyMs, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * 명령 ack 레이턴시(전달 → 에이전트 확인 응답)를 기록한다.
+     * Micrometer 타이머와 슬라이딩 윈도우 Deque 양쪽에 저장한다.
+     *
+     * @param latencyMs 레이턴시 (밀리초, 음수 무시)
+     */
     public void recordCommandAckLatencyMillis(long latencyMs) {
         if (latencyMs < 0) {
             return;
@@ -91,6 +121,12 @@ public class OperationalMetricsService {
         }
     }
 
+    /**
+     * 명령 결과 레이턴시(ack → 최종 결과 수신)와 성공/실패 카운터를 기록한다.
+     *
+     * @param latencyMs 레이턴시 (밀리초, 음수이면 타이머만 건너뜀)
+     * @param success   명령 성공 여부
+     */
     public void recordCommandResultLatencyMillis(long latencyMs, boolean success) {
         long now = System.currentTimeMillis();
         if (latencyMs >= 0) {
@@ -111,6 +147,13 @@ public class OperationalMetricsService {
         }
     }
 
+    /**
+     * HTTP API 요청을 역할별로 집계한다.
+     *
+     * @param role         요청자 역할 (ADMIN/USER/VIEWER/AGENT/ANON; 불인식 값은 ANON으로 처리)
+     * @param statusCode   HTTP 응답 상태 코드
+     * @param durationNanos 요청 처리 시간 (나노초)
+     */
     public void recordApiRequest(String role, int statusCode, long durationNanos) {
         long now = System.currentTimeMillis();
         String normalizedRole = normalizeRole(role);
@@ -139,6 +182,15 @@ public class OperationalMetricsService {
         }
     }
 
+    /**
+     * 파일 전송(업로드/다운로드) 메트릭을 기록한다.
+     *
+     * @param direction     전송 방향 ({@code "upload"} 또는 {@code "download"}, 대소문자 무시)
+     * @param bytes         전송된 바이트 수
+     * @param durationNanos 전송 소요 시간 (나노초)
+     * @param statusCode    HTTP 응답 상태 코드 (200~399: 성공)
+     * @param endpointGroup 엔드포인트 그룹 레이블 (Micrometer 태그용)
+     */
     public void recordTransfer(String direction, long bytes, long durationNanos, int statusCode, String endpointGroup) {
         long now = System.currentTimeMillis();
         String normalizedDirection = "download".equalsIgnoreCase(direction) ? "download" : "upload";
@@ -178,6 +230,12 @@ public class OperationalMetricsService {
         }
     }
 
+    /**
+     * 누적 메트릭 전체 스냅샷을 반환한다.
+     * Micrometer 타이머/카운터 기반이므로 서비스 재시작 시 초기화된다.
+     *
+     * @return latency/transfer/request 섹션을 포함한 메트릭 맵
+     */
     public Map<String, Object> snapshot() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("latency", buildLatencySnapshot());
@@ -186,10 +244,24 @@ public class OperationalMetricsService {
         return result;
     }
 
+    /**
+     * 기본 윈도우({@value #DEFAULT_RECENT_WINDOW_SECONDS}초) 기준 최근 메트릭 스냅샷을 반환한다.
+     *
+     * @return 슬라이딩 윈도우 메트릭 맵
+     */
     public Map<String, Object> snapshotRecent() {
         return snapshotRecent(DEFAULT_RECENT_WINDOW_SECONDS);
     }
 
+    /**
+     * 지정된 윈도우 기준 최근 메트릭 스냅샷을 반환한다.
+     *
+     * <p>인메모리 Deque에서 윈도우 이내 이벤트만 집계한다.
+     * 오래된 이벤트는 최대 보존 기간({@value #MAX_RECENT_WINDOW_SECONDS}초) 초과 시 제거된다.
+     *
+     * @param windowSeconds 집계 윈도우 (초, 0 이하이면 기본값, 최대 {@value #MAX_RECENT_WINDOW_SECONDS}초)
+     * @return latency/transfer/request 섹션을 포함한 슬라이딩 윈도우 메트릭 맵
+     */
     public Map<String, Object> snapshotRecent(int windowSeconds) {
         int safeWindowSeconds = normalizeWindowSeconds(windowSeconds);
         long now = System.currentTimeMillis();

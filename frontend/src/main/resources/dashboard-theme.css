@@ -371,16 +371,54 @@
    Login
    ═══════════════════════════════════════════════════════════════════ */
 
+.login-bg-pane {
+    -fx-background-color: linear-gradient(to bottom right, #dde8fb, #e8f4ff 50%, #f8fbff);
+}
+
+.login-card {
+    -fx-background-color: white;
+    -fx-background-radius: 16;
+    -fx-border-color: #dbe5f1;
+    -fx-border-radius: 16;
+    -fx-border-width: 1;
+    -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.14), 28, 0, 0, 6);
+}
+
+/* keep .login-container as fallback so old usage doesn't break */
 .login-container {
     -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
 }
+
 .login-title {
-    -fx-font-size: 18px;
-    -fx-font-weight: bold;
+    -fx-font-size: 20px;
+    -fx-font-weight: 800;
+    -fx-text-fill: -fx-text-heading;
 }
+
+.login-subtitle {
+    -fx-font-size: 13px;
+    -fx-text-fill: -fx-text-muted;
+}
+
+.login-divider {
+    -fx-border-color: -fx-border-light;
+}
+
+.login-field-label {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-text-fill: -fx-text-body;
+    -fx-padding: 0 0 3 0;
+}
+
 .login-message-error {
     -fx-text-fill: -fx-status-failed;
+    -fx-font-size: 12px;
+    -fx-background-color: #fff0f0;
+    -fx-background-radius: 6;
+    -fx-padding: 6 10;
 }
+
 .login-btn {
     -fx-background-color: -fx-primary;
     -fx-text-fill: white;
@@ -442,16 +480,19 @@
 .statusbar-summary {
     -fx-font-size: 12px;
     -fx-font-weight: 600;
-    -fx-text-fill: -fx-text-primary;
+    -fx-text-fill: -fx-text-body;
+}
+.statusbar-dot {
+    -fx-font-size: 12px;
+    -fx-text-fill: -fx-border-default;
 }
 .statusbar-connectivity {
     -fx-font-size: 11px;
     -fx-text-fill: -fx-text-muted;
-    -fx-padding: 0 0 0 6;
 }
 .statusbar-clock {
     -fx-font-size: 12px;
-    -fx-font-family: "monospace";
+    -fx-font-family: "Consolas", "monospace";
     -fx-text-fill: -fx-text-muted;
 }
 .statusbar-role {
@@ -735,8 +776,14 @@
     -fx-background-color: #9f1239;
     -fx-background-radius: 4;
 }
+.classroom-stat-key {
+    -fx-text-fill: rgba(255,255,255,0.75);
+    -fx-font-size: 10px;
+    -fx-font-weight: 600;
+}
 .classroom-stat-label {
     -fx-text-fill: white;
+    -fx-font-weight: 700;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -768,6 +815,7 @@
 
 .pcmgmt-root {
     -fx-background-color: -fx-bg-white;
+    -fx-background-radius: 8;
 }
 
 .pcmgmt-section-divider {
@@ -1116,9 +1164,10 @@
 
 .cmd-panel-root {
     -fx-background-color: #f8fbff;
-    -fx-background-radius: 8;
+    -fx-background-radius: 10;
     -fx-border-color: -fx-border-default;
-    -fx-border-radius: 8;
+    -fx-border-radius: 10;
+    -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 8, 0, 0, 2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1273,14 +1322,20 @@
 .panel-card {
     -fx-border-color: -fx-border-default;
     -fx-border-width: 1;
-    -fx-padding: 15;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 16;
     -fx-background-color: white;
+    -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 8, 0, 0, 2);
 }
 .panel-card-section {
     -fx-border-color: -fx-primary;
-    -fx-border-width: 1;
-    -fx-padding: 12;
-    -fx-background-color: white;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 14;
+    -fx-background-color: #f9fbff;
+    -fx-effect: dropshadow(three-pass-box, rgba(49,130,206,0.08), 8, 0, 0, 2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════

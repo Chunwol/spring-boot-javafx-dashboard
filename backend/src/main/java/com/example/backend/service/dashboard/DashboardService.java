@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -22,8 +23,17 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Service for core dashboard operations including refresh snapshots and widget management.
- * Delegates to specialized services for classroom, PC status, and IP range management.
+ * 대시보드 핵심 비즈니스 로직 서비스.
+ *
+ * <p>담당 기능:
+ * <ul>
+ *   <li>대시보드 전체 스냅샷 조합 ({@link #getRefreshSnapshot()}): 강의실 요약 + 트래픽 집계</li>
+ *   <li>네트워크 트래픽 집계 ({@link #getNetworkTraffic()}): PC별 최신값 합산 방식</li>
+ *   <li>위젯 아이템 조회: 강의실/PC 상태·IP 범위 관리는 전용 서비스에 위임</li>
+ * </ul>
+ *
+ * <p>트래픽 룩백 윈도우는 heartbeat 인터벌에 맞게 동적으로 결정된다.
+ * (고정 윈도우 사용 시 heartbeat 주기보다 짧으면 항상 0을 반환할 수 있음)
  */
 @Service
 public class DashboardService {
@@ -56,16 +66,29 @@ public class DashboardService {
     }
 
     /**
-     * Get classroom summaries for dashboard display
+     * 대시보드 표시용 강의실 요약 목록을 반환한다.
+     * 실제 집계는 {@link ClassroomService}에 위임한다.
+     *
+     * @return 강의실 요약 DTO 목록
      */
+    @Transactional(readOnly = true)
     public List<ClassroomSummaryDto> getClassroomSummaries() {
         return classroomService.getClassroomSummaries();
     }
 
     /**
-     * Get network traffic data from recent traffic logs.
-     * Lookback window is adaptive to heartbeat/log intervals to avoid empty windows.
+     * 최근 트래픽 로그에서 전체 네트워크 트래픽을 집계하여 반환한다.
+     *
+     * <p><b>집계 방식</b>: 룩백 윈도우 내 PC별 최신 로그값을 합산한다.
+     * 모든 샘플 평균 대신 최신값 합산을 사용하는 이유:
+     * heartbeat 사이클이 다른 PC들의 오래된 0값이 포함되면 실제 부하가 과소 표시되기 때문이다.
+     *
+     * <p><b>룩백 윈도우</b>: {@code app.dashboard.traffic-lookback-seconds} 설정이 있으면 그 값을 사용하고,
+     * 없으면 {@code heartbeat 인터벌 × 2}로 자동 결정한다.
+     *
+     * @return 인바운드/아웃바운드 Mbps (조회 실패 시 0.0 반환)
      */
+    @Transactional(readOnly = true)
     public NetworkTrafficDto getNetworkTraffic() {
         try {
             LocalDateTime now = LocalDateTime.now();
@@ -143,8 +166,14 @@ public class DashboardService {
     }
 
     /**
-     * Get complete dashboard refresh snapshot
+     * 대시보드 전체 새로고침 스냅샷을 조합하여 반환한다.
+     *
+     * <p>강의실 요약과 네트워크 트래픽을 하나의 DTO로 조합한다.
+     * 텍스트/이미지 위젯은 대시보드 범위 스코핑을 위해 별도 API로 제공된다.
+     *
+     * @return 대시보드 새로고침 DTO
      */
+    @Transactional(readOnly = true)
     public DashboardRefreshDto getRefreshSnapshot() {
         DashboardRefreshDto snapshot = new DashboardRefreshDto();
         snapshot.setClassrooms(getClassroomSummaries());
@@ -156,7 +185,10 @@ public class DashboardService {
     }
 
     /**
-     * Get widget items by type
+     * 지정된 타입의 위젯 아이템 목록을 조회한다.
+     *
+     * @param type 위젯 타입 (대소문자 무시)
+     * @return 위젯 응답 맵 목록 (조회 실패 시 빈 목록)
      */
     private List<Map<String, Object>> getWidgetItemsByType(String type) {
         try {
@@ -170,7 +202,13 @@ public class DashboardService {
     }
 
     /**
-     * Convert DashboardWidgetItem to response map
+     * {@link DashboardWidgetItem} 엔티티를 클라이언트 응답용 맵으로 변환한다.
+     *
+     * <p>config JSON 필드를 파싱하여 맵에 병합한다. 파싱 실패 시 경고 로그만 출력하고
+     * config 문자열을 그대로 포함하여 부분 응답을 유지한다.
+     *
+     * @param item 위젯 아이템 엔티티
+     * @return 응답용 LinkedHashMap (id, type, 위치/크기, visible, config 필드 포함)
      */
     private Map<String, Object> toWidgetResponse(DashboardWidgetItem item) {
         Map<String, Object> out = new LinkedHashMap<>();
