@@ -11,6 +11,7 @@
 <?import javafx.scene.control.SplitPane?>
 <?import javafx.scene.control.Tab?>
 <?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.control.ToggleButton?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
@@ -51,7 +52,9 @@
 				<Region HBox.hgrow="ALWAYS" />
 				<StackPane fx:id="alertsButtonStack" pickOnBounds="false">
 					<children>
-						<Button fx:id="alertsButton" styleClass="btn-icon-action,btn-icon-alert" />
+						<Button fx:id="alertsButton" styleClass="btn-icon-action,btn-icon-alert">
+							<tooltip><Tooltip text="알림" /></tooltip>
+						</Button>
 						<Label fx:id="alertsBadgeLabel"
 							   managed="false"
 							   text="0"
@@ -64,7 +67,9 @@
 						</Label>
 					</children>
 				</StackPane>
-				<Button fx:id="logoutButton" text="로그아웃" styleClass="btn-icon-action,btn-icon-logout" />
+				<Button fx:id="logoutButton" text="로그아웃" styleClass="btn-icon-action,btn-icon-logout">
+					<tooltip><Tooltip text="로그아웃" /></tooltip>
+				</Button>
 			</children>
 		</HBox>
 		<TabPane fx:id="mainTabPane" styleClass="dashboard-tabpane" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
@@ -84,10 +89,15 @@
 												<Insets top="8" right="8" bottom="8" left="8" />
 											</padding>
 											<children>
-												<ColorPicker fx:id="bgColorPicker" />
+												<Label text="배경:" styleClass="dashboard-topbar-subtitle" />
+												<ColorPicker fx:id="bgColorPicker">
+													<tooltip><Tooltip text="대시보드 배경색 변경" /></tooltip>
+												</ColorPicker>
 												<ToggleButton fx:id="editModeButton" text="편집 모드" styleClass="dashboard-toolbar-toggle" />
 												<ToggleButton fx:id="focusModeButton" text="포커스 모드" styleClass="dashboard-toolbar-toggle" />
-												<Button fx:id="fullScreenButton" text="전체 화면" styleClass="btn-icon-action,btn-icon-fullscreen" />
+												<Button fx:id="fullScreenButton" text="전체 화면" styleClass="btn-icon-action,btn-icon-fullscreen">
+													<tooltip><Tooltip text="전체 화면 전환 (F11)" /></tooltip>
+												</Button>
 												<ToggleButton fx:id="dashboardOnlyButton" text="대시보드만" styleClass="dashboard-toolbar-toggle" />
 												<HBox fx:id="editOnlyToolbar" managed="false" spacing="8" visible="false">
 													<children>
@@ -97,15 +107,29 @@
 												</HBox>
 												<HBox alignment="CENTER_RIGHT" spacing="4">
 													<children>
-														<Button fx:id="zoomOutButton" text="-" styleClass="dashboard-zoom-btn" />
-														<Button fx:id="zoomResetButtonNode" text="100%" styleClass="dashboard-zoom-btn" />
-														<Button fx:id="zoomInButton" text="+" styleClass="dashboard-zoom-btn" />
-														<Button fx:id="fitAllButton" text="전체 맞춤" styleClass="dashboard-zoom-btn" />
+														<Button fx:id="zoomOutButton" text="-" styleClass="dashboard-zoom-btn">
+															<tooltip><Tooltip text="축소" /></tooltip>
+														</Button>
+														<Button fx:id="zoomResetButtonNode" text="100%" styleClass="dashboard-zoom-btn">
+															<tooltip><Tooltip text="원래 크기로" /></tooltip>
+														</Button>
+														<Button fx:id="zoomInButton" text="+" styleClass="dashboard-zoom-btn">
+															<tooltip><Tooltip text="확대" /></tooltip>
+														</Button>
+														<Button fx:id="fitAllButton" text="전체 맞춤" styleClass="dashboard-zoom-btn">
+															<tooltip><Tooltip text="모든 패널이 보이도록 맞춤" /></tooltip>
+														</Button>
 													</children>
 												</HBox>
-												<Button fx:id="undoButton" styleClass="btn-icon-action,btn-icon-undo" />
-												<Button fx:id="redoButton" styleClass="btn-icon-action,btn-icon-redo" />
-												<Button fx:id="refreshButton" text="새로고침" styleClass="btn-icon-action,btn-icon-refresh" />
+												<Button fx:id="undoButton" styleClass="btn-icon-action,btn-icon-undo">
+													<tooltip><Tooltip text="실행 취소 (Ctrl+Z)" /></tooltip>
+												</Button>
+												<Button fx:id="redoButton" styleClass="btn-icon-action,btn-icon-redo">
+													<tooltip><Tooltip text="다시 실행 (Ctrl+Y)" /></tooltip>
+												</Button>
+												<Button fx:id="refreshButton" text="새로고침" styleClass="btn-icon-action,btn-icon-refresh">
+													<tooltip><Tooltip text="대시보드 데이터 새로고침" /></tooltip>
+												</Button>
 											</children>
 										</HBox>
 										<StackPane fx:id="canvasStack" VBox.vgrow="ALWAYS">

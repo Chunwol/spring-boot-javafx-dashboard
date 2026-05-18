@@ -33,18 +33,26 @@
         <Label fx:id="summaryLabel" text="조회 중..." styleClass="module-panel-summary" />
         <Label fx:id="lastUpdatedLabel" text="마지막 갱신: -" styleClass="resource-sub-label" />
 
+        <!-- 검색 -->
         <HBox alignment="CENTER_LEFT" spacing="8">
             <children>
-                <TextField fx:id="searchField" prefWidth="260" promptText="검색: PC명, IP, MAC, 명령" />
+                <TextField fx:id="searchField" HBox.hgrow="ALWAYS" promptText="검색: PC명, IP, MAC, 명령" />
+            </children>
+        </HBox>
+
+        <!-- 필터 -->
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <children>
                 <Label text="상태" styleClass="meta-key" />
-                <ComboBox fx:id="statusFilterCombo" prefWidth="150" promptText="상태 선택" />
+                <ComboBox fx:id="statusFilterCombo" prefWidth="145" promptText="상태 선택" />
                 <Label text="종류" styleClass="meta-key" />
-                <ComboBox fx:id="typeFilterCombo" prefWidth="130" promptText="종류 선택" />
+                <ComboBox fx:id="typeFilterCombo" prefWidth="125" promptText="종류 선택" />
                 <Label text="강의실" styleClass="meta-key" />
-                <ComboBox fx:id="roomFilterCombo" prefWidth="150" promptText="강의실 선택" />
+                <ComboBox fx:id="roomFilterCombo" prefWidth="145" promptText="강의실 선택" />
                 <Label text="정렬" styleClass="meta-key" />
-                <ComboBox fx:id="sortCombo" prefWidth="140" promptText="정렬 기준" />
-                <Button fx:id="clearButton" text="초기화" styleClass="btn-neutral" />
+                <ComboBox fx:id="sortCombo" prefWidth="135" promptText="정렬 기준" />
+                <Region HBox.hgrow="ALWAYS" />
+                <Button fx:id="clearButton" text="필터 초기화" styleClass="btn-neutral" />
             </children>
         </HBox>
 

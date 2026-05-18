@@ -13,6 +13,8 @@
     -fx-success-hover: #1a6630;
     -fx-danger: #d73a49;
     -fx-danger-hover: #be2e3c;
+    -fx-danger-soft: #b4535f;
+    -fx-danger-soft-hover: #993b47;
     -fx-warning: #e36209;
     -fx-warning-hover: #c45508;
     -fx-neutral: #718096;
@@ -22,6 +24,12 @@
     -fx-accent-teal-hover: #0a7a70;
     -fx-accent-cyan: #0891b2;
     -fx-accent-cyan-hover: #0770a0;
+    -fx-accent-indigo: #6366f1;
+    -fx-accent-indigo-hover: #4f46e5;
+    -fx-accent-violet: #7c3aed;
+    -fx-accent-violet-hover: #6d28d9;
+    -fx-accent-amber: #f59e0b;
+    -fx-accent-amber-hover: #d97706;
 
     /* — Text — */
     -fx-text-heading: #0f172a;
@@ -243,10 +251,10 @@
     -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.15), 4, 0, 0, 1);
 }
 .btn-icon-logout {
-    -fx-background-color: #b4535f;
+    -fx-background-color: -fx-danger-soft;
     -fx-text-fill: white;
 }
-.btn-icon-logout:hover { -fx-background-color: #993b47; }
+.btn-icon-logout:hover { -fx-background-color: -fx-danger-soft-hover; }
 .btn-icon-fullscreen {
     -fx-background-color: -fx-accent-cyan;
     -fx-text-fill: white;
@@ -258,20 +266,20 @@
 }
 .btn-icon-refresh:hover { -fx-background-color: -fx-accent-teal-hover; }
 .btn-icon-undo {
-    -fx-background-color: #6366f1;
+    -fx-background-color: -fx-accent-indigo;
     -fx-text-fill: white;
 }
-.btn-icon-undo:hover { -fx-background-color: #4f46e5; }
+.btn-icon-undo:hover { -fx-background-color: -fx-accent-indigo-hover; }
 .btn-icon-redo {
-    -fx-background-color: #7c3aed;
+    -fx-background-color: -fx-accent-violet;
     -fx-text-fill: white;
 }
-.btn-icon-redo:hover { -fx-background-color: #6d28d9; }
+.btn-icon-redo:hover { -fx-background-color: -fx-accent-violet-hover; }
 .btn-icon-alert {
-    -fx-background-color: #f59e0b;
+    -fx-background-color: -fx-accent-amber;
     -fx-text-fill: white;
 }
-.btn-icon-alert:hover { -fx-background-color: #d97706; }
+.btn-icon-alert:hover { -fx-background-color: -fx-accent-amber-hover; }
 
 .alert-badge-label {
     -fx-background-color: #dc2626;

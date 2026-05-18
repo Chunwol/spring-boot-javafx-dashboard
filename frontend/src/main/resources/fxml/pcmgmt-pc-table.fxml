@@ -9,6 +9,7 @@
 <VBox xmlns:fx="http://javafx.com/fxml" VBox.vgrow="ALWAYS">
     <children>
         <TableView fx:id="pcTable" minHeight="300.0" VBox.vgrow="ALWAYS">
+            <placeholder><Label text="조회된 PC가 없습니다." /></placeholder>
             <columns>
                 <TableColumn fx:id="classroomCol" text="강의실" prefWidth="100.0" />
                 <TableColumn fx:id="ipCol" text="IP" prefWidth="130.0" />
