@@ -17,14 +17,30 @@ server {
     # HSTS (6개월)
     add_header Strict-Transport-Security "max-age=15768000; includeSubDomains" always;
 
+    # 대용량 파일 업로드 허용 (에이전트 파일 배포)
+    client_max_body_size 500m;
+
     # certbot 갱신용 webroot
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
 
+    # ─── X-Accel-Redirect 내부 파일 서빙 ──────────────────────────────────
+    # Spring Boot가 X-Accel-Redirect 헤더를 반환하면 Nginx가 직접 파일을 서빙한다.
+    # internal 지시어로 외부 직접 접근 차단.
+    # - Spring Boot 설정: NGINX_ACCEL_REDIRECT=true
+    # - 파일 경로: /app/uploads/ (backend 컨테이너의 볼륨 마운트 경로와 동일)
+    #
+    # NAS 자체 Nginx에서 사용 시: alias를 실제 업로드 경로로 변경
+    #   예: alias /volume1/docker/dashboard/uploads/;
+    location /internal-uploads/ {
+        internal;
+        alias /app/uploads/;
+    }
+
     # WebSocket 프록시 (STOMP/SockJS)
     location /ws {
-        proxy_pass         http://app:8888;
+        proxy_pass         http://backend:8888;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade $http_upgrade;
         proxy_set_header   Connection "upgrade";
@@ -35,9 +51,32 @@ server {
         proxy_read_timeout 3600s;
     }
 
+    # 파일 다운로드 엔드포인트 — 대용량 허용 (에이전트 배포 파일)
+    location ~ ^/api/v1/(scripts|agent/uploads)/[0-9]+/download$ {
+        proxy_pass         http://backend:8888;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;         # 대용량 파일 다운로드 타임아웃 10분
+        proxy_buffering    off;          # X-Accel-Redirect 시 불필요, 직접 스트리밍도 지원
+        proxy_request_buffering off;
+    }
+
+    # 파일 업로드 엔드포인트 — 청크 업로드 포함
+    location ~ ^/api/v1/(scripts|file-chunks|agent/file-chunks|agent/uploads) {
+        proxy_pass              http://backend:8888;
+        proxy_set_header        Host $host;
+        proxy_set_header        X-Real-IP $remote_addr;
+        proxy_set_header        X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header        X-Forwarded-Proto $scheme;
+        proxy_read_timeout      300s;
+        proxy_request_buffering off;     # 대용량 업로드: 버퍼링 없이 바로 전달
+    }
+
     # REST API + 정적 리소스 프록시
     location / {
-        proxy_pass         http://app:8888;
+        proxy_pass         http://backend:8888;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;

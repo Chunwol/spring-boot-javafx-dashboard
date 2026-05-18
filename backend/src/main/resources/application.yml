@@ -97,6 +97,13 @@ app:
   security:
     admin-users: ${ADMIN_USERS:${DEFAULT_ADMIN_USERNAME:admin}}
     viewer-users: ${VIEWER_USERS:${DEFAULT_VIEWER_USERNAME:}}
+  nginx:
+    # true: Nginx X-Accel-Redirect로 파일 서빙 위임 (JVM 힙 우회, Tomcat 스레드 즉시 반환)
+    # Nginx에 아래 설정이 필요함:
+    #   location /internal-uploads/ { internal; alias /app/uploads/; }
+    # NAS Nginx: alias를 실제 uploads 경로로 변경할 것
+    accel-redirect-enabled: ${NGINX_ACCEL_REDIRECT:false}
+    internal-location: ${NGINX_INTERNAL_LOCATION:/internal-uploads/}
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
   collect:

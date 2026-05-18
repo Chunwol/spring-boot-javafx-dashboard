@@ -45,10 +45,27 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * 스크립트 관리 API
- * PowerShell 및 다른 스크립트 작을 업로드 및 다운로드할 수 있습니다.
+ * PowerShell 및 다른 스크립트 파일을 업로드 및 다운로드합니다.
+ *
+ * <h2>대용량 파일 다운로드 최적화 (X-Accel-Redirect)</h2>
+ * <p>{@code app.nginx.accel-redirect-enabled=true} 설정 시 Spring Boot가 파일을 직접 스트리밍하는 대신
+ * Nginx에게 {@code X-Accel-Redirect} 헤더로 서빙을 위임한다.</p>
+ * <ul>
+ *   <li>Spring Boot: 헤더만 반환, Tomcat 스레드 즉시 반환</li>
+ *   <li>Nginx: sendfile(2) 시스템 콜로 커널 복사 — JVM 메모리 무관</li>
+ *   <li>850대 동시 다운로드 시 JVM 힙 압박 제거</li>
+ * </ul>
+ * <p><b>Nginx 설정 필요 (Docker 및 NAS Nginx 공통):</b></p>
+ * <pre>
+ * location /internal-uploads/ {
+ *     internal;
+ *     alias /app/uploads/;   # NAS의 경우 실제 파일 경로로 변경
+ * }
+ * </pre>
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -77,6 +94,20 @@ public class ScriptController {
 
     @Value("${app.collect.max-total-bytes:" + DEFAULT_COLLECT_MAX_BYTES + "}")
     private long collectMaxTotalBytes;
+
+    /**
+     * true이면 Nginx X-Accel-Redirect로 파일 서빙을 Nginx에 위임한다.
+     * Nginx에 internal location이 설정된 경우에만 활성화할 것.
+     */
+    @Value("${app.nginx.accel-redirect-enabled:false}")
+    private boolean nginxAccelRedirectEnabled;
+
+    /**
+     * X-Accel-Redirect 헤더에 사용할 Nginx internal location 경로.
+     * Nginx 설정의 alias 경로와 일치해야 한다.
+     */
+    @Value("${app.nginx.internal-location:/internal-uploads/}")
+    private String nginxInternalLocation;
 
     public ScriptController(ScriptArtifactRepository scriptArtifactRepository, ObjectMapper objectMapper) {
         this.scriptArtifactRepository = scriptArtifactRepository;
@@ -518,7 +549,7 @@ public class ScriptController {
     }
 
     @GetMapping("/scripts/{id}/download")
-    public ResponseEntity<Resource> download(@PathVariable Long id) {
+    public ResponseEntity<?> download(@PathVariable Long id) {
         Optional<ScriptArtifact> opt = scriptArtifactRepository.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
@@ -526,46 +557,68 @@ public class ScriptController {
         // Path traversal 방지: resolve 후 반드시 scripts 디렉터리 내부인지 검증
         Path baseDir = Path.of(scriptsDir).toAbsolutePath().normalize();
         Path file = baseDir.resolve(a.getStoredFilename()).normalize();
-        if (!file.startsWith(baseDir)) {
-            return ResponseEntity.status(400).build();
-        }
+        if (!file.startsWith(baseDir)) return ResponseEntity.status(400).build();
         if (!Files.exists(file)) return ResponseEntity.notFound().build();
 
-        Resource res = new FileSystemResource(file);
-        // 원본 파일명을 Content-Disposition에 노출하되 RFC 5987 비ASCII 문자 제거
         String filename = a.getOriginalFilename() == null ? ("script-" + id + ".ps1") : a.getOriginalFilename();
         String safeFilename = filename.replaceAll("[^\\w.\\-]", "_");
+        String sha256 = a.getSha256() != null ? a.getSha256() : "";
+
+        if (nginxAccelRedirectEnabled) {
+            // X-Accel-Redirect: Spring Boot는 헤더만 반환, Nginx가 직접 파일 서빙
+            // Nginx JVM 힙 완전 우회 → 850대 동시 다운로드에서 메모리 압박 없음
+            // 필수 Nginx 설정: location /internal-uploads/ { internal; alias /app/uploads/; }
+            return ResponseEntity.ok()
+                    .header("X-Accel-Redirect", nginxInternalLocation + a.getStoredFilename())
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                    .header("X-Script-SHA256", sha256)
+                    .build();
+        }
+
+        // 폴백: Spring Boot 직접 스트리밍 (Nginx internal location 미설정 시)
+        Resource res = new FileSystemResource(file);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
-                .header("X-Script-SHA256", a.getSha256() != null ? a.getSha256() : "")
+                .header("X-Script-SHA256", sha256)
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(res);
     }
 
     /**
-     * 관리자용: 에이전트가 업로드한 수집 파일 다운로드
+     * 관리자용: 에이전트가 업로드한 수집 파일 다운로드.
+     * X-Accel-Redirect 활성화 시 Nginx가 직접 서빙한다.
      */
     @GetMapping("/agent/uploads/{id}/download")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "수집 파일 다운로드", description = "에이전트가 업로드한 수집 파일을 관리자가 다운로드합니다.")
-    public ResponseEntity<Resource> downloadCollected(@PathVariable Long id) {
+    public ResponseEntity<?> downloadCollected(@PathVariable Long id) {
         Optional<ScriptArtifact> opt = scriptArtifactRepository.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
 
         Path baseDir = Path.of(scriptsDir).toAbsolutePath().normalize();
         Path file = baseDir.resolve(a.getStoredFilename()).normalize();
-        if (!file.startsWith(baseDir)) {
-            return ResponseEntity.status(400).build();
-        }
+        if (!file.startsWith(baseDir)) return ResponseEntity.status(400).build();
         if (!Files.exists(file)) return ResponseEntity.notFound().build();
 
-        Resource res = new FileSystemResource(file);
         String filename = a.getOriginalFilename() == null ? ("collected-" + id + ".zip") : a.getOriginalFilename();
         String safeFilename = filename.replaceAll("[^\\w.\\-]", "_");
+        String sha256 = a.getSha256() != null ? a.getSha256() : "";
+
+        if (nginxAccelRedirectEnabled) {
+            return ResponseEntity.ok()
+                    .header("X-Accel-Redirect", nginxInternalLocation + a.getStoredFilename())
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                    .header("X-Script-SHA256", sha256)
+                    .build();
+        }
+
+        Resource res = new FileSystemResource(file);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
-                .header("X-Script-SHA256", a.getSha256() != null ? a.getSha256() : "")
+                .header("X-Script-SHA256", sha256)
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(res);
     }

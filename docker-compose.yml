@@ -45,6 +45,19 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-dashboard_db}
       POSTGRES_USER: ${POSTGRES_USER:-dashboard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dashboard}
+    # 3GB NAS 메모리 플랜:
+    #   shared_buffers=256MB: PG 버퍼 캐시 (전체 RAM의 ~8%)
+    #   max_connections=35: PgBouncer 연결 수(25+5 reserve) + 관리자 여유
+    #   work_mem=4MB: 정렬/해시 연산 스레드당 메모리
+    command: >
+      postgres
+      -c max_connections=35
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -63,9 +76,11 @@ services:
     command: >
       sh -c '
       if [ -n "$$REDIS_PASSWORD" ]; then
-        redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+        redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+          --maxmemory 150mb --maxmemory-policy allkeys-lru;
       else
-        redis-server --appendonly yes;
+        redis-server --appendonly yes
+          --maxmemory 150mb --maxmemory-policy allkeys-lru;
       fi'
     volumes:
       - redis-data:/data
@@ -98,6 +113,16 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       SERVER_FORWARD_HEADERS_STRATEGY: NATIVE
+      # JVM 힙 설정: 3GB NAS에서 Spring Boot에 768MB 할당
+      # X-Accel-Redirect 활성화 시 파일 스트리밍이 JVM을 거치지 않아 힙 압박 없음
+      JAVA_TOOL_OPTIONS: >-
+        -Xmx768m
+        -Xms256m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+        -XX:+HeapDumpOnOutOfMemoryError
+      # X-Accel-Redirect: Docker Nginx에 internal location 설정 후 true로 변경
+      NGINX_ACCEL_REDIRECT: ${NGINX_ACCEL_REDIRECT:-false}
     volumes:
       - ./uploads:/app/uploads
     depends_on:
@@ -119,6 +144,9 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro
+      # X-Accel-Redirect: Nginx가 직접 파일을 서빙하기 위해 uploads 폴더 공유
+      # ssl.conf에서 location /internal-uploads/ { internal; alias /app/uploads/; }
+      - ./uploads:/app/uploads:ro
     depends_on:
       - backend
     networks:
