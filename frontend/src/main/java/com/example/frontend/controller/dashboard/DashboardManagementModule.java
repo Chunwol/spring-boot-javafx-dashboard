@@ -812,12 +812,10 @@ public class DashboardManagementModule {
                             brokenGroupCombo.getItems().setAll(options);
                             brokenGroupCombo.getSelectionModel().selectFirst();
                         }
-                        groupComboBox.getSelectionModel().selectFirst();
+                        groupComboBox.getSelectionModel().selectFirst(); // valueProperty 리스너가 loadIpRangesForGroup 호출
                         teacherGroupCombo.getSelectionModel().selectFirst();
                         loadTeacherDevices();
                     });
-
-                    loadIpRangesForGroup(null);
                 } catch (Exception e) {
                     log.warn("Failed while preparing classroom list", e);
                 }

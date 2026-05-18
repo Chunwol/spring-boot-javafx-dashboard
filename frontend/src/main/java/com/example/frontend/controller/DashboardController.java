@@ -324,7 +324,6 @@ public class DashboardController {
     private DashboardNetworkPanelModule networkPanelModule;
     private DashboardOperationsMetricsPanelModule operationsMetricsPanelModule;
 
-    private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final DashboardService dashboardService = new DashboardService();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
