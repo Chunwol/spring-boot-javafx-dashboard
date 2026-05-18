@@ -2,9 +2,11 @@ package com.example.agent;
 
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
+import com.example.agent.config.AgentConfigValidator;
 import com.example.agent.hardware.HardwareCollector;
 import com.example.agent.heartbeat.HeartbeatSender;
 import com.example.agent.update.OtaUpdater;
+import com.example.agent.update.UpdateCacheServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import okhttp3.CertificatePinner;
@@ -48,6 +50,12 @@ public class AgentMain {
 
         AgentConfigLoader configLoader = new AgentConfigLoader();
         AgentConfig config = configLoader.load();
+            AgentConfigValidator configValidator = new AgentConfigValidator();
+            if (!configValidator.validateAndLog(config)) {
+                log.error("설정 검증 실패로 에이전트를 시작할 수 없습니다. config.json 또는 환경변수를 확인하세요.");
+                System.exit(2);
+                return;
+            }
         agentConfig = config;
 
         log.info("서버: {}", config.getServerUrl());
@@ -81,7 +89,16 @@ public class AgentMain {
 
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         HardwareCollector hardware = new HardwareCollector();
-        HeartbeatSender heartbeat = new HeartbeatSender(config, configLoader, hardware, httpClient, mapper);
+        UpdateCacheServer cacheServer = null;
+        try {
+            Path updateCacheDir = configLoader.getConfigPath().getParent().resolve("update-cache");
+            cacheServer = new UpdateCacheServer(updateCacheDir, Math.max(1, config.getUpdatePeerPort()));
+            cacheServer.start();
+        } catch (Exception ex) {
+            log.warn("업데이트 P2P 캐시 서버 시작 실패 (계속 진행): {}", ex.getMessage());
+        }
+        final UpdateCacheServer updateCacheServer = cacheServer;
+        HeartbeatSender heartbeat = new HeartbeatSender(config, configLoader, hardware, httpClient, mapper, updateCacheServer);
 
         // OTA 업데이터 초기화
         OtaUpdater otaUpdater = new OtaUpdater(httpClient, mapper,
@@ -127,6 +144,7 @@ public class AgentMain {
         // 종료 훅
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("에이전트 종료 시작...");
+            heartbeat.sendOfflineNotice("AGENT_SHUTDOWN");
             scheduler.shutdown();
             try {
                 if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
@@ -140,6 +158,9 @@ public class AgentMain {
             }
             // MEDIUM FIX: Graceful shutdown of command executor
             heartbeat.gracefulShutdown();
+            if (updateCacheServer != null) {
+                updateCacheServer.stop();
+            }
             log.info("에이전트 종료 완료.");
         }));
 

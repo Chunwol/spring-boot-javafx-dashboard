@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
 <?import javafx.scene.control.TextField?>
@@ -21,5 +22,6 @@
     </HBox>
     <TextField fx:id="usernameField" promptText="사용자명" maxWidth="250"/>
     <PasswordField fx:id="passwordField" promptText="비밀번호" maxWidth="250"/>
+    <CheckBox fx:id="rememberUserCheck" text="사용자 기억" />
     <Button text="로그인" onAction="#handleLogin" defaultButton="true" styleClass="login-btn"/>
 </VBox>

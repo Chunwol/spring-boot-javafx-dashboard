@@ -158,6 +158,11 @@ public class ApiClient {
         return "VIEWER".equalsIgnoreCase(currentUserRole);
     }
 
+    /** USER 역할: ADMIN·VIEWER가 아닌 일반 사용자 */
+    public boolean isUserRole() {
+        return "USER".equalsIgnoreCase(currentUserRole);
+    }
+
     public static String viewerWriteDeniedMessage(String actionName) {
         String target = actionName == null || actionName.isBlank() ? "이 작업" : actionName;
         return "조회 전용 계정입니다. " + target + " 권한이 없습니다.";

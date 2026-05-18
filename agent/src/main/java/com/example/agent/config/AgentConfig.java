@@ -19,6 +19,7 @@ public class AgentConfig {
     private int internetCheckPort = 53;
     private int heartbeatIntervalSec = 30;
     private int jitterSec = 5;
+    private int updatePeerPort = 18777;
 
     // ----- getters / setters -----
 
@@ -53,4 +54,43 @@ public class AgentConfig {
 
     public int getInternetCheckPort() { return internetCheckPort; }
     public void setInternetCheckPort(int internetCheckPort) { this.internetCheckPort = internetCheckPort; }
+
+    public int getUpdatePeerPort() {
+        return updatePeerPort;
+    }
+
+    public void setUpdatePeerPort(int updatePeerPort) {
+        this.updatePeerPort = updatePeerPort;
+    }
+
+    // Optional overrides used when a disk image is cloned to another machine.
+    // If non-empty, these values are used instead of detected hardware values
+    // for registration and heartbeat (macAddress/hostname/ip).
+    private String overrideMacAddress = "";
+    private String overrideHostname = "";
+    private String overrideIpAddress = "";
+
+    public String getOverrideMacAddress() {
+        return overrideMacAddress;
+    }
+
+    public void setOverrideMacAddress(String overrideMacAddress) {
+        this.overrideMacAddress = overrideMacAddress;
+    }
+
+    public String getOverrideHostname() {
+        return overrideHostname;
+    }
+
+    public void setOverrideHostname(String overrideHostname) {
+        this.overrideHostname = overrideHostname;
+    }
+
+    public String getOverrideIpAddress() {
+        return overrideIpAddress;
+    }
+
+    public void setOverrideIpAddress(String overrideIpAddress) {
+        this.overrideIpAddress = overrideIpAddress;
+    }
 }

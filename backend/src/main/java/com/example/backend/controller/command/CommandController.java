@@ -1,6 +1,7 @@
 package com.example.backend.controller.command;
 
 import com.example.backend.dto.command.CommandRequestDto;
+import com.example.backend.event.AlertEvent;
 import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.command.CommandQueue;
 import com.example.backend.model.pc.PcMaster;
@@ -8,11 +9,16 @@ import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.audit.AuditService;
+import com.example.backend.service.command.CommandPollRegistry;
+import com.example.backend.service.filedist.FileDistributionOrchestrator;
+import com.example.backend.service.heartbeat.HeartbeatService;
 import com.example.backend.service.scheduler.SchedulerService;
+import com.example.backend.service.status.OperationalMetricsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.context.ApplicationEventPublisher;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -24,10 +30,14 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.DeferredResult;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.*;
 import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
@@ -48,6 +58,9 @@ import java.util.stream.Collectors;
 public class CommandController {
 
     private static final Logger log = LoggerFactory.getLogger(CommandController.class);
+    private static final int DEFAULT_RESULT_TEXT_LIMIT = 4_096;
+    private static final int LIST_FILES_RESULT_TEXT_LIMIT = 256 * 1024;
+    private static final int COLLECT_FILES_RESULT_TEXT_LIMIT = 32 * 1024;
 
     private final CommandQueueRepository commandQueueRepository;
     private final PcMasterRepository pcMasterRepository;
@@ -56,6 +69,84 @@ public class CommandController {
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
     private final SchedulerService schedulerService;
+    private final FileDistributionOrchestrator fileDistributionOrchestrator;
+    private final ApplicationEventPublisher eventPublisher;
+    private final OperationalMetricsService operationalMetricsService;
+    private final HeartbeatService heartbeatService;
+    private final CommandPollRegistry commandPollRegistry;
+
+    /** Long-poll 서버 홀드 시간 (ms). 이 시간 안에 명령이 없으면 204 반환. */
+    private static final long LONG_POLL_TIMEOUT_MS = 10_000L;
+
+    /**
+     * 에이전트 Long-poll 명령 수령 (GET /api/v1/agent/commands/next)
+     *
+     * 동작:
+     * 1. 즉시 QUEUED 명령이 있으면 → DELIVERED 처리 후 200 + {"command": {...}} 즉시 반환
+     * 2. 없으면 → DeferredResult 등록, 최대 10초 대기
+     *    - 그 사이 명령이 큐에 삽입되면 → 즉시 응답 (enqueue 경로에서 푸시)
+     *    - 10초 경과 → 204 No Content 자동 반환
+     * 3. 에이전트는 응답을 받자마자 즉시 재연결 → 800대 기준 ~80 req/s (10s 타임아웃)
+     */
+    @GetMapping("/agent/commands/next")
+    @Operation(summary = "에이전트 Long-poll 명령 수령",
+               description = "명령이 없으면 최대 10초 대기. 명령이 큐잉되면 즉시 응답. 에이전트는 응답 후 즉시 재연결.")
+    @ApiResponse(responseCode = "200", description = "전달할 명령 있음")
+    @ApiResponse(responseCode = "204", description = "타임아웃 (대기 명령 없음) - 즉시 재연결")
+    public DeferredResult<ResponseEntity<?>> nextCommand(HttpServletRequest request) {
+        String agentMac = resolveAgentMac(request);
+        if (agentMac == null) {
+            DeferredResult<ResponseEntity<?>> err = new DeferredResult<>();
+            err.setResult(ResponseEntity.status(401).body(Map.of("error", "Missing agent identity")));
+            return err;
+        }
+        String canonical = canonicalMac(agentMac);
+
+        // 1) 즉시 처리 가능한 명령이 있으면 바로 반환
+        Map<String, Object> cmd = heartbeatService.dispatchNextCommand(agentMac);
+        if (cmd != null) {
+            DeferredResult<ResponseEntity<?>> result = new DeferredResult<>();
+            result.setResult(ResponseEntity.ok(Map.of("command", cmd)));
+            return result;
+        }
+
+        // 2) 없으면 Long-poll 대기 등록 (타임아웃 시 자동 204)
+        return commandPollRegistry.register(canonical, LONG_POLL_TIMEOUT_MS);
+    }
+
+    /**
+     * 명령이 큐에 삽입된 뒤 트랜잭션 커밋 후, 해당 MAC의 대기 에이전트에 즉시 응답을 푸시한다.
+     */
+    private void notifyWaitingAgentsAfterCommit(List<String> macAddresses) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            pushCommandsToWaiters(macAddresses);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                pushCommandsToWaiters(macAddresses);
+            }
+        });
+    }
+
+    private void pushCommandsToWaiters(List<String> macAddresses) {
+        for (String mac : macAddresses) {
+            if (mac == null) continue;
+            String canonical = canonicalMac(mac);
+            DeferredResult<ResponseEntity<?>> waiter = commandPollRegistry.take(canonical);
+            if (waiter == null) continue;
+            try {
+                Map<String, Object> cmd = heartbeatService.dispatchNextCommand(mac);
+                if (cmd != null) {
+                    waiter.setResult(ResponseEntity.ok(Map.of("command", cmd)));
+                }
+                // cmd == null이면 waiter는 타임아웃까지 대기 (정상)
+            } catch (Exception e) {
+                log.debug("대기 에이전트 푸시 실패 mac={}: {}", mac, e.getMessage());
+            }
+        }
+    }
 
     /**
      * 명령 발행 (POST /api/v1/commands)
@@ -136,6 +227,7 @@ public class CommandController {
             c.setCreatedAt(LocalDateTime.now());
             c.setIsExecuted(false);
             CommandQueue saved = commandQueueRepository.save(c);
+            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
 
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
@@ -187,6 +279,7 @@ public class CommandController {
             c.setCreatedAt(LocalDateTime.now());
             c.setIsExecuted(false);
             CommandQueue saved = commandQueueRepository.save(c);
+            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
 
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
@@ -234,6 +327,15 @@ public class CommandController {
                 .filter(Objects::nonNull)
                 .toList();
 
+        // 대기 중인 에이전트에 즉시 푸시 (GROUP 800대도 커밋 후 일괄 알림)
+        List<String> savedMacs = saved.stream()
+                .map(CommandQueue::getMacAddress)
+                .filter(Objects::nonNull)
+                .toList();
+        if (!savedMacs.isEmpty()) {
+            notifyWaitingAgentsAfterCommit(savedMacs);
+        }
+
         return ResponseEntity.accepted().body(Map.of(
                 "queued", taskIds.size(),
                 "taskIds", taskIds
@@ -263,12 +365,62 @@ public class CommandController {
         Optional<CommandQueue> opt = commandQueueRepository.findById(taskId);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         CommandQueue c = opt.get();
-        c.setStatus("ACKED");
-        c.setAckedAt(LocalDateTime.now());
-        commandQueueRepository.save(c);
-        String agentMac = (String) request.getAttribute("agentMac");
-        auditService.log(agentMac != null ? agentMac : c.getMacAddress(),
-                "CMD_ACK", "COMMAND", String.valueOf(taskId));
+        String agentMac = resolveAgentMac(request);
+        if (agentMac == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Missing agent identity"));
+        }
+        if (!isCommandOwner(c, agentMac)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Command owner mismatch"));
+        }
+
+        String currentStatus = normalizeStatus(c.getStatus());
+        if (isFinalCommandStatus(currentStatus)) {
+            return ResponseEntity.ok(Map.of(
+                    "status", "ok",
+                    "alreadyFinal", true,
+                    "commandStatus", currentStatus
+            ));
+        }
+        if ("ACKED".equals(currentStatus)) {
+            return ResponseEntity.ok(Map.of(
+                    "status", "ok",
+                    "alreadyAcked", true
+            ));
+        }
+        if (!"DELIVERED".equals(currentStatus)) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Command is not in DELIVERED state",
+                    "commandStatus", currentStatus
+            ));
+        }
+
+        LocalDateTime ackedAt = LocalDateTime.now();
+        int updated = commandQueueRepository.markAckedIfDelivered(taskId, ackedAt);
+        if (updated == 0) {
+            String latestStatus = fetchCurrentStatus(taskId);
+            if (isFinalCommandStatus(latestStatus)) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "ok",
+                        "alreadyFinal", true,
+                        "commandStatus", latestStatus
+                ));
+            }
+            if ("ACKED".equals(latestStatus)) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "ok",
+                        "alreadyAcked", true
+                ));
+            }
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Command state changed before ACK update",
+                    "commandStatus", latestStatus
+            ));
+        }
+        if (c.getDeliveredAt() != null) {
+            long ackLatencyMs = Duration.between(c.getDeliveredAt(), ackedAt).toMillis();
+            operationalMetricsService.recordCommandAckLatencyMillis(ackLatencyMs);
+        }
+        auditService.log(agentMac, "CMD_ACK", "COMMAND", String.valueOf(taskId));
         return ResponseEntity.ok(Map.of("status", "ok"));
     }
 
@@ -296,24 +448,70 @@ public class CommandController {
         Optional<CommandQueue> opt = commandQueueRepository.findById(taskId);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         CommandQueue c = opt.get();
+        String agentMac = resolveAgentMac(request);
+        if (agentMac == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Missing agent identity"));
+        }
+        if (!isCommandOwner(c, agentMac)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Command owner mismatch"));
+        }
+
+        String currentStatus = normalizeStatus(c.getStatus());
+        if (isFinalCommandStatus(currentStatus)) {
+            return ResponseEntity.ok(Map.of(
+                    "status", "ok",
+                    "alreadyFinal", true,
+                    "commandStatus", currentStatus
+            ));
+        }
+        if (!"ACKED".equals(currentStatus) && !"DELIVERED".equals(currentStatus)) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Command is not in ACKED/DELIVERED state",
+                    "commandStatus", currentStatus
+            ));
+        }
 
         Object exit = body.get("exitCode");
         Integer exitCode = exit instanceof Number ? ((Number) exit).intValue() : null;
-        // stdout/stderr 4KB 제한 (보안: 대용량 업로드 방지)
-        String stdout = body.get("stdout") == null ? null : truncate(body.get("stdout").toString(), 4096);
-        String stderr = body.get("stderr") == null ? null : truncate(body.get("stderr").toString(), 4096);
-        c.setExitCode(exitCode);
-        c.setStdout(stdout);
-        c.setStderr(stderr);
-        c.setCompletedAt(LocalDateTime.now());
+        // stdout/stderr 기본 제한을 두되, 원격 파일 탐색/수집 결과는 필요한 범위까지 허용한다.
+        int outputLimit = resolveOutputLimit(c.getCommandType());
+        String stdout = body.get("stdout") == null ? null : truncate(body.get("stdout").toString(), outputLimit);
+        String stderr = body.get("stderr") == null ? null : truncate(body.get("stderr").toString(), outputLimit);
+        LocalDateTime completedAt = LocalDateTime.now();
         String newStatus = exitCode != null && exitCode == 0 ? "COMPLETED" : "FAILED";
-        c.setStatus(newStatus);
-        c.setIsExecuted(true);
-        schedulerService.armPostExecutionVerification(c, c.getCompletedAt());
-        commandQueueRepository.save(c);
+        boolean success = "COMPLETED".equals(newStatus);
+        int updated = commandQueueRepository.markResultIfInProgress(taskId, newStatus, exitCode, stdout, stderr, completedAt);
+        if (updated == 0) {
+            String latestStatus = fetchCurrentStatus(taskId);
+            if (isFinalCommandStatus(latestStatus)) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "ok",
+                        "alreadyFinal", true,
+                        "commandStatus", latestStatus
+                ));
+            }
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Command state changed before RESULT update",
+                    "commandStatus", latestStatus
+            ));
+        }
 
-        String agentMac = (String) request.getAttribute("agentMac");
-        String actor = agentMac != null ? agentMac : c.getMacAddress();
+        CommandQueue persisted = commandQueueRepository.findById(taskId).orElse(null);
+        if (persisted == null) {
+            return ResponseEntity.notFound().build();
+        }
+        schedulerService.armPostExecutionVerification(persisted, completedAt);
+        handleAgentUpdateVerification(persisted, exitCode, stdout, stderr);
+        commandQueueRepository.save(persisted);
+
+        long resultLatencyMs = -1L;
+        if (persisted.getAckedAt() != null) {
+            resultLatencyMs = Duration.between(persisted.getAckedAt(), completedAt).toMillis();
+        }
+        operationalMetricsService.recordCommandResultLatencyMillis(resultLatencyMs, success);
+        reportFileDistributionResult(persisted, exitCode, stderr);
+
+        String actor = agentMac;
         try {
             String detail = objectMapper.writeValueAsString(Map.of("exitCode", String.valueOf(exitCode), "status", newStatus));
             auditService.log(actor, "CMD_RESULT", "COMMAND", String.valueOf(taskId), detail, null);
@@ -323,8 +521,178 @@ public class CommandController {
         return ResponseEntity.ok(Map.of("status", "ok"));
     }
 
+    private void handleAgentUpdateVerification(CommandQueue command,
+                                               Integer exitCode,
+                                               String stdout,
+                                               String stderr) {
+        if (command == null || command.getCommandType() == null
+                || !"AGENT_UPDATE".equalsIgnoreCase(command.getCommandType())) {
+            return;
+        }
+        LocalDateTime now = command.getCompletedAt() == null ? LocalDateTime.now() : command.getCompletedAt();
+        if (exitCode != null && exitCode == 0) {
+            command.setVerificationStatus("PENDING_REBOOT_CONFIRM");
+            command.setVerificationStartedAt(now);
+            command.setVerificationDeadlineAt(null);
+            command.setVerificationObservedOfflineAt(null);
+            command.setVerificationCompletedAt(null);
+
+            String targetVersion = extractPayloadText(command.getPayloadJson(), "targetVersion");
+            String versionText = targetVersion == null || targetVersion.isBlank()
+                    ? "unknown"
+                    : targetVersion;
+            String message = "[업데이트 확인 필요] " + command.getMacAddress()
+                    + " 에이전트 업데이트 완료. 저장 후 재부팅하고 버전(" + versionText + ") 적용 여부를 확인하세요."
+                    + " (명령 ID: " + command.getTaskId() + ")";
+            eventPublisher.publishEvent(new AlertEvent(
+                    this,
+                    command.getMacAddress(),
+                    message,
+                    "WARNING",
+                    "UPDATE_REBOOT_REQUIRED"
+            ));
+            return;
+        }
+
+        command.setVerificationStatus("FAILED");
+        command.setVerificationCompletedAt(now);
+        command.setVerificationDeadlineAt(now);
+        command.setVerificationObservedOfflineAt(null);
+        String failReason = stderr == null || stderr.isBlank()
+                ? "agent update command failed"
+                : stderr;
+        command.setStderr(appendLine(command.getStderr(), failReason));
+    }
+
+    private void reportFileDistributionResult(CommandQueue command,
+                                              Integer exitCode,
+                                              String stderr) {
+        if (command == null) {
+            return;
+        }
+        Long jobId = extractPayloadLong(command.getPayloadJson(), "jobId");
+        if (jobId == null) {
+            return;
+        }
+        boolean success = exitCode != null && exitCode == 0;
+        String error = success ? null : (stderr == null || stderr.isBlank() ? "command failed" : stderr);
+        try {
+            fileDistributionOrchestrator.reportAgentResult(jobId, command.getMacAddress(), success, error);
+        } catch (Exception ex) {
+            log.warn("Failed to report file-distribution result: taskId={}, jobId={}, mac={}, message={}",
+                    command.getTaskId(), jobId, command.getMacAddress(), ex.getMessage());
+        }
+    }
+
+    private String extractPayloadText(String payloadJson, String field) {
+        if (payloadJson == null || payloadJson.isBlank() || field == null || field.isBlank()) {
+            return null;
+        }
+        try {
+            var node = objectMapper.readTree(payloadJson);
+            if (node == null || !node.has(field) || node.get(field).isNull()) {
+                return null;
+            }
+            String value = node.get(field).asText();
+            return value == null || value.isBlank() ? null : value;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private Long extractPayloadLong(String payloadJson, String field) {
+        String text = extractPayloadText(payloadJson, field);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String appendLine(String current, String line) {
+        if (line == null || line.isBlank()) {
+            return current;
+        }
+        if (current == null || current.isBlank()) {
+            return line;
+        }
+        if (current.contains(line)) {
+            return current;
+        }
+        return current + System.lineSeparator() + line;
+    }
+
+    private String resolveAgentMac(HttpServletRequest request) {
+        if (request == null) {
+            return null;
+        }
+        Object value = request.getAttribute("agentMac");
+        if (value == null) {
+            return null;
+        }
+        String mac = value.toString().trim();
+        return mac.isBlank() ? null : mac;
+    }
+
+    private boolean isCommandOwner(CommandQueue command, String agentMac) {
+        String commandMac = canonicalMac(command == null ? null : command.getMacAddress());
+        String callerMac = canonicalMac(agentMac);
+        if (commandMac == null || callerMac == null) {
+            return false;
+        }
+        return commandMac.equals(callerMac);
+    }
+
+    private String canonicalMac(String macAddress) {
+        if (macAddress == null || macAddress.isBlank()) {
+            return null;
+        }
+        String normalized = macAddress.replace(":", "")
+                .replace("-", "")
+                .trim()
+                .toUpperCase(Locale.ROOT);
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private String normalizeStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "";
+        }
+        return status.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean isFinalCommandStatus(String status) {
+        return "COMPLETED".equals(status)
+                || "FAILED".equals(status)
+                || "CANCELLED".equals(status);
+    }
+
+    private String fetchCurrentStatus(Long taskId) {
+        return commandQueueRepository.findById(taskId)
+                .map(CommandQueue::getStatus)
+                .map(this::normalizeStatus)
+                .orElse("");
+    }
+
     private static String truncate(String s, int max) {
         return s == null || s.length() <= max ? s : s.substring(0, max);
+    }
+
+    private int resolveOutputLimit(String commandType) {
+        if (commandType == null || commandType.isBlank()) {
+            return DEFAULT_RESULT_TEXT_LIMIT;
+        }
+        String normalized = commandType.trim().toUpperCase(Locale.ROOT);
+        if ("LIST_FILES".equals(normalized)) {
+            return LIST_FILES_RESULT_TEXT_LIMIT;
+        }
+        if ("COLLECT_FILES".equals(normalized)) {
+            return COLLECT_FILES_RESULT_TEXT_LIMIT;
+        }
+        return DEFAULT_RESULT_TEXT_LIMIT;
     }
 
     /**
@@ -390,6 +758,7 @@ public class CommandController {
             c.setCreatedAt(LocalDateTime.now());
             c.setIsExecuted(false);
             CommandQueue saved = commandQueueRepository.save(c);
+            notifyWaitingAgentsAfterCommit(List.of(leader.getMacAddress()));
             return ResponseEntity.accepted().body(Map.of(
                     "queued", 1,
                     "macAddress", leader.getMacAddress(),
@@ -411,6 +780,7 @@ public class CommandController {
         c.setCreatedAt(LocalDateTime.now());
         c.setIsExecuted(false);
         CommandQueue saved = commandQueueRepository.save(c);
+        notifyWaitingAgentsAfterCommit(List.of(pc.getMacAddress()));
         return ResponseEntity.accepted().body(Map.of(
                 "queued", 1,
                 "macAddress", pc.getMacAddress(),

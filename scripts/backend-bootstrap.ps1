@@ -540,7 +540,20 @@ function Ensure-PortablePostgres(
         }
     }
 
-    if (-not (Ensure-RoleAndDatabase -PsqlPath $PsqlPath -DbHost "127.0.0.1" -Port $targetPort -DbUser $DbUser -DbPassword $DbPassword -DbName $DbName -SuperUser $SuperUser -SuperPassword $SuperPassword)) {
+    $provisionReady = $false
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        if (Ensure-RoleAndDatabase -PsqlPath $PsqlPath -DbHost "127.0.0.1" -Port $targetPort -DbUser $DbUser -DbPassword $DbPassword -DbName $DbName -SuperUser $SuperUser -SuperPassword $SuperPassword) {
+            $provisionReady = $true
+            break
+        }
+
+        if ($attempt -lt 8) {
+            Write-WarnLine "Portable PostgreSQL login/provision check failed (attempt $attempt/8). Retrying..."
+            Start-Sleep -Milliseconds 1200
+        }
+    }
+
+    if (-not $provisionReady) {
         Write-WarnLine "Portable PostgreSQL role/database provisioning failed."
         return [pscustomobject]@{
             Success = $false

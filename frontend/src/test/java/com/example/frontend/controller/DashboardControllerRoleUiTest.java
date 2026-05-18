@@ -3,7 +3,9 @@ package com.example.frontend.controller;
 import com.example.frontend.service.ApiClient;
 import javafx.application.Platform;
 import javafx.embed.swing.JFXPanel;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -36,10 +38,10 @@ class DashboardControllerRoleUiTest {
             invokeApplyRoleUiState(controller);
         });
 
-        assertThat(subtitle.getText()).contains("읽기 전용");
+        assertThat(subtitle.getText()).contains("조회 전용");
         assertThat(topBadge.isVisible()).isTrue();
         assertThat(topBadge.isManaged()).isTrue();
-        assertThat(statusRole.getText()).contains("VIEWER");
+        assertThat(statusRole.getText()).contains("읽기 전용");
         assertThat(statusRole.getStyleClass()).contains("statusbar-role-readonly");
     }
 
@@ -64,8 +66,28 @@ class DashboardControllerRoleUiTest {
         assertThat(subtitle.getText()).doesNotContain("읽기 전용");
         assertThat(topBadge.isVisible()).isFalse();
         assertThat(topBadge.isManaged()).isFalse();
-        assertThat(statusRole.getText()).contains("USER");
+        assertThat(statusRole.getText()).contains("사용자");
         assertThat(statusRole.getStyleClass()).doesNotContain("statusbar-role-readonly");
+    }
+
+    @Test
+    void configureDashboardSettingsMenu_shouldKeepSettingsTextVisible() throws Exception {
+        DashboardController controller = new DashboardController();
+        MenuButton settingsMenu = new MenuButton();
+
+        runOnFxAndWait(() -> {
+            ApiClient.getInstance().setCurrentUserRole("ADMIN");
+            invokeConfigureDashboardSettingsMenu(controller, settingsMenu);
+        });
+
+        assertThat(settingsMenu.getText()).isEmpty();
+        assertThat(settingsMenu.getContentDisplay()).isEqualTo(ContentDisplay.GRAPHIC_ONLY);
+        assertThat(settingsMenu.getGraphic()).isInstanceOf(Label.class);
+        Label settingsLabel = (Label) settingsMenu.getGraphic();
+        assertThat(settingsLabel.getText()).isEqualTo("설정");
+        assertThat(settingsLabel.getStyleClass()).contains("dashboard-menu-button-text");
+        assertThat(settingsMenu.isVisible()).isTrue();
+        assertThat(settingsMenu.isManaged()).isTrue();
     }
 
     private static void invokeApplyRoleUiState(DashboardController controller) {
@@ -73,6 +95,16 @@ class DashboardControllerRoleUiTest {
             Method method = DashboardController.class.getDeclaredMethod("applyRoleUiState");
             method.setAccessible(true);
             method.invoke(controller);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void invokeConfigureDashboardSettingsMenu(DashboardController controller, MenuButton menuButton) {
+        try {
+            Method method = DashboardController.class.getDeclaredMethod("configureDashboardSettingsMenu", MenuButton.class);
+            method.setAccessible(true);
+            method.invoke(controller, menuButton);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

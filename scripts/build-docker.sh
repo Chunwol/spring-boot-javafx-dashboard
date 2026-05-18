@@ -13,6 +13,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Clean up: Stop any running containers
+echo -e "${YELLOW}[0/3] Cleaning up existing containers and processes...${NC}"
+bash ./scripts/cleanup-runtime.sh --quiet --docker
+
 # 1. Backend Docker 이미지
 echo -e "${YELLOW}[1/3] Building Backend Docker image...${NC}"
 if docker build -t dashboard-backend:latest -f Dockerfile .; then
@@ -33,7 +37,7 @@ fi
 
 echo ""
 echo -e "${GREEN}================================"
-echo "All Docker images built successfully!"
+echo "[3/3] All Docker images built successfully!"
 echo "================================${NC}"
 echo ""
 echo "Docker images created:"

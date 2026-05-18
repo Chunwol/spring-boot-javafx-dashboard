@@ -17,15 +17,18 @@ import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.stream.IntStream;
 
 @Service
 public class AgentRegistrationService {
 
+    private static final int LOCK_STRIPE_COUNT = 512;
+
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
-    private final ConcurrentMap<String, Object> registrationLocks = new ConcurrentHashMap<>();
+    private final Object[] registrationLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
+            .mapToObj(i -> new Object())
+            .toArray();
 
     @Value("${agent.install-key:CHANGE_ME_INSTALL_KEY}")
     private String installKey;
@@ -42,14 +45,14 @@ public class AgentRegistrationService {
         validateRequest(request);
 
         String mac = request.getMacAddress().trim().toUpperCase();
-        Object lock = registrationLocks.computeIfAbsent(mac, key -> new Object());
-        try {
-            synchronized (lock) {
-                return registerAgentUnderLock(mac, request);
-            }
-        } finally {
-            registrationLocks.remove(mac, lock);
+        synchronized (lockForMac(mac)) {
+            return registerAgentUnderLock(mac, request);
         }
+    }
+
+    private Object lockForMac(String mac) {
+        int idx = Math.floorMod(mac.hashCode(), LOCK_STRIPE_COUNT);
+        return registrationLockStripes[idx];
     }
 
     private AgentRegisterResponse registerAgentUnderLock(String mac, AgentRegisterRequest request) {

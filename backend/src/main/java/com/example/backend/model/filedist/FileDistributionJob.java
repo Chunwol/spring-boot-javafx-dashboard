@@ -31,6 +31,18 @@ public class FileDistributionJob {
     private String finalSha256;
     private String errorMessage;
 
+    @Column(name = "artifact_id")
+    private Long artifactId;
+
+    @Column(name = "target_version", length = 40)
+    private String targetVersion;
+
+    @Column(name = "source_mode", length = 32)
+    private String sourceMode;
+
+    @Column(name = "ramp_up_factor")
+    private Double rampUpFactor;
+
     public Long getId() {
         return id;
     }
@@ -117,5 +129,37 @@ public class FileDistributionJob {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public Long getArtifactId() {
+        return artifactId;
+    }
+
+    public void setArtifactId(Long artifactId) {
+        this.artifactId = artifactId;
+    }
+
+    public String getTargetVersion() {
+        return targetVersion;
+    }
+
+    public void setTargetVersion(String targetVersion) {
+        this.targetVersion = targetVersion;
+    }
+
+    public String getSourceMode() {
+        return sourceMode;
+    }
+
+    public void setSourceMode(String sourceMode) {
+        this.sourceMode = sourceMode;
+    }
+
+    public Double getRampUpFactor() {
+        return rampUpFactor;
+    }
+
+    public void setRampUpFactor(Double rampUpFactor) {
+        this.rampUpFactor = rampUpFactor;
     }
 }

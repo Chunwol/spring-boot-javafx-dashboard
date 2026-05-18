@@ -3,7 +3,14 @@ REM 전체 배포 배치 파일
 REM 모든 모듈을 빌드하고 Docker Compose로 배포합니다
 
 setlocal enabledelayedexpansion
+cd /d "%~dp0.."
 
+echo ==================================================
+echo STEP 0: Cleaning existing runtime and Docker stack...
+echo ==================================================
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0cleanup-runtime.ps1" -NoBanner -IncludeDocker
+
+echo.
 echo ==================================================
 echo STEP 1: Building Java modules...
 echo ==================================================
@@ -47,7 +54,7 @@ echo.
 echo ==================================================
 echo STEP 4: Starting Docker stack...
 echo ==================================================
-docker-compose up -d
+docker compose up -d
 if !errorlevel! neq 0 (
     echo *** Docker Compose startup failed ***
     exit /b 1
@@ -62,7 +69,7 @@ echo.
 echo ==================================================
 echo STEP 5: Checking container status...
 echo ==================================================
-docker-compose ps
+docker compose ps
 
 echo.
 echo ✓ Deployment completed!

@@ -24,9 +24,7 @@ echo ""
 
 # 0. Clean up stale processes before build
 echo -e "${YELLOW}[0/5] Cleaning up stale database/cache processes...${NC}"
-pkill -f "postgres" -9 2>/dev/null || true
-pkill -f "redis-server" -9 2>/dev/null || true
-sleep 1
+bash ./scripts/cleanup-runtime.sh --quiet
 echo ""
 
 # 1. Common module

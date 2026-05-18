@@ -26,7 +26,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -71,6 +73,7 @@ public class DashboardClassroomModule {
     private final Runnable refreshCallback;
     private final LongSupplier dashboardIdSupplier;
     private final Runnable refreshPanelCallback;
+    private final Runnable beforePanelMutation;
     private final BiConsumer<String, Boolean> showToast;
     private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final BooleanSupplier snapModeSupplier;
@@ -82,6 +85,11 @@ public class DashboardClassroomModule {
     private final java.util.concurrent.atomic.AtomicBoolean skipGroupCommandConfirm = new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final String ORDER_BY_PC_NAME = "PC_NAME";
     private static final String ORDER_BY_IP = "IP";
+    private static final String PC_CELL_STATUS_KEY = "pcStatus";
+    private static final String PC_CELL_MAC_KEY = "pcMacAddress";
+    private static final String PC_CELL_OFFLINE_BASE_CLASS = "pc-cell-offline";
+    private static final String PC_CELL_OFFLINE_ATTENTION_CLASS = "pc-cell-offline-attention";
+    private static final String PC_CELL_UPDATE_ATTENTION_CLASS = "pc-cell-update-attention";
 
     @FunctionalInterface
     public interface PanelLayoutCacheUpdater {
@@ -97,6 +105,7 @@ public class DashboardClassroomModule {
             Runnable refreshCallback,
             LongSupplier dashboardIdSupplier,
             Runnable refreshPanelCallback,
+            Runnable beforePanelMutation,
             BiConsumer<String, Boolean> showToast,
             PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             BooleanSupplier snapModeSupplier) {
@@ -109,6 +118,7 @@ public class DashboardClassroomModule {
         this.refreshCallback = refreshCallback;
         this.dashboardIdSupplier = dashboardIdSupplier;
         this.refreshPanelCallback = refreshPanelCallback;
+        this.beforePanelMutation = beforePanelMutation;
         this.showToast = showToast;
         this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.snapModeSupplier = snapModeSupplier;
@@ -229,6 +239,7 @@ public class DashboardClassroomModule {
         if (!ensureWritePermission("강의실 패널 추가")) {
             return;
         }
+        runBeforePanelMutation();
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0) {
             log.warn("Skip addClassroomPanel because dashboardId is not selected");
@@ -265,6 +276,7 @@ public class DashboardClassroomModule {
         if (!ensureWritePermission("강의실 패널 삭제")) {
             return;
         }
+        runBeforePanelMutation();
         long dashboardId = dashboardIdSupplier.getAsLong();
         if (dashboardId <= 0) {
             return;
@@ -648,8 +660,95 @@ public class DashboardClassroomModule {
             cell.setTextFill(Color.web("#f3f4f6"));
             cell.setFont(Font.font("Segoe UI", FontWeight.BOLD, fontSize));
             cell.getStyleClass().add(cellStyleClass);
+            String mac = normalizeMac(pc != null ? pc.getMacAddress() : null);
+            if (mac != null) {
+                cell.getProperties().put(PC_CELL_MAC_KEY, mac);
+            } else {
+                cell.getProperties().remove(PC_CELL_MAC_KEY);
+            }
+            cell.getProperties().put(PC_CELL_STATUS_KEY, status);
             pcGrid.add(cell, i % columns, i / columns);
         }
+    }
+
+    public void applyOfflineAlertBlink(Set<String> targetMacs, boolean highlightPhase) {
+        applyAlertBlink(targetMacs, Set.of(), highlightPhase);
+    }
+
+    public void applyAlertBlink(Set<String> offlineTargetMacs,
+                                Set<String> updateTargetMacs,
+                                boolean highlightPhase) {
+        if (panelManager == null) {
+            return;
+        }
+        for (PanelInfo info : panelManager.getPanels()) {
+            if (info == null || info.getType() != PanelInfo.PanelType.CLASSROOM) {
+                continue;
+            }
+            VBox panel = info.getPanel();
+            if (panel == null) {
+                continue;
+            }
+            Object gridObj = panel.getProperties().get("pcGrid");
+            if (!(gridObj instanceof GridPane pcGrid)) {
+                continue;
+            }
+            for (Node node : pcGrid.getChildren()) {
+                if (!(node instanceof Label cell)) {
+                    continue;
+                }
+                cell.getStyleClass().remove(PC_CELL_OFFLINE_ATTENTION_CLASS);
+                cell.getStyleClass().remove(PC_CELL_UPDATE_ATTENTION_CLASS);
+                if (!highlightPhase) {
+                    continue;
+                }
+
+                boolean shouldHighlightOffline = shouldHighlightOfflineCell(cell, offlineTargetMacs);
+                if (shouldHighlightOffline && !cell.getStyleClass().contains(PC_CELL_OFFLINE_ATTENTION_CLASS)) {
+                    cell.getStyleClass().add(PC_CELL_OFFLINE_ATTENTION_CLASS);
+                    continue;
+                }
+
+                boolean shouldHighlightUpdate = shouldHighlightUpdateCell(cell, updateTargetMacs);
+                if (shouldHighlightUpdate && !cell.getStyleClass().contains(PC_CELL_UPDATE_ATTENTION_CLASS)) {
+                    cell.getStyleClass().add(PC_CELL_UPDATE_ATTENTION_CLASS);
+                }
+            }
+        }
+    }
+
+    private boolean shouldHighlightOfflineCell(Label cell, Set<String> targetMacs) {
+        if (cell == null || targetMacs == null || targetMacs.isEmpty()) {
+            return false;
+        }
+        Object statusObj = cell.getProperties().get(PC_CELL_STATUS_KEY);
+        String status = statusObj == null ? "" : statusObj.toString();
+        if (!"OFFLINE".equalsIgnoreCase(status) || !cell.getStyleClass().contains(PC_CELL_OFFLINE_BASE_CLASS)) {
+            return false;
+        }
+        Object macObj = cell.getProperties().get(PC_CELL_MAC_KEY);
+        String mac = normalizeMac(macObj == null ? null : macObj.toString());
+        return mac != null && targetMacs.contains(mac);
+    }
+
+    private boolean shouldHighlightUpdateCell(Label cell, Set<String> targetMacs) {
+        if (cell == null || targetMacs == null || targetMacs.isEmpty()) {
+            return false;
+        }
+        Object macObj = cell.getProperties().get(PC_CELL_MAC_KEY);
+        String mac = normalizeMac(macObj == null ? null : macObj.toString());
+        return mac != null && targetMacs.contains(mac);
+    }
+
+    private String normalizeMac(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isBlank() || "SYSTEM".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        return trimmed.toUpperCase(Locale.ROOT);
     }
 
     private void showGridSettingsDialog(VBox panel, Long groupId, int totalCount, GridPane pcGrid) {
@@ -800,6 +899,7 @@ public class DashboardClassroomModule {
         if (dashboardId <= 0 || dashboardPanelId == null) {
             return;
         }
+        runBeforePanelMutation();
         if (panelLayoutCacheUpdater != null) {
             panelLayoutCacheUpdater.update(dashboardPanelId, x, y, width, height);
         }
@@ -821,6 +921,17 @@ public class DashboardClassroomModule {
             return value;
         }
         return Math.round(value / DashboardViewModel.GRID_SIZE) * DashboardViewModel.GRID_SIZE;
+    }
+
+    private void runBeforePanelMutation() {
+        if (beforePanelMutation == null) {
+            return;
+        }
+        try {
+            beforePanelMutation.run();
+        } catch (Exception ex) {
+            log.debug("beforePanelMutation callback failed", ex);
+        }
     }
 
     // ─── 컨텍스트 메뉴 ───────────────────────────────────────────────────

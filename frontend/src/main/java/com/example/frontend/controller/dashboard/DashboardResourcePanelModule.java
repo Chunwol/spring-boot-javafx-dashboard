@@ -49,6 +49,7 @@ public class DashboardResourcePanelModule {
     private final BooleanSupplier editModeSupplier;
     private final Supplier<Long> currentDashboardId;
     private final Function<String, double[]> responsiveSizeFn;
+    private final Runnable beforePanelMutation;
     private final Runnable onLoadDashboardPanels;
     private final BiConsumer<String, Boolean> showToast;
 
@@ -67,6 +68,7 @@ public class DashboardResourcePanelModule {
             BooleanSupplier editModeSupplier,
             Supplier<Long> currentDashboardId,
             Function<String, double[]> responsiveSizeFn,
+            Runnable beforePanelMutation,
             Runnable onLoadDashboardPanels,
             BiConsumer<String, Boolean> showToast) {
         this.viewModel = viewModel;
@@ -76,6 +78,7 @@ public class DashboardResourcePanelModule {
         this.editModeSupplier = editModeSupplier;
         this.currentDashboardId = currentDashboardId;
         this.responsiveSizeFn = responsiveSizeFn;
+        this.beforePanelMutation = beforePanelMutation;
         this.onLoadDashboardPanels = onLoadDashboardPanels;
         this.showToast = showToast;
     }
@@ -357,6 +360,7 @@ public class DashboardResourcePanelModule {
             if (currentDashboardId.get() == null) {
                 return;
             }
+            runBeforePanelMutation();
             double[] size = responsiveSizeFn.apply("DISCONNECT");
             dashboardService.createPanelAsync(
                     currentDashboardId.get(),
@@ -381,6 +385,7 @@ public class DashboardResourcePanelModule {
             if (currentDashboardId.get() == null) {
                 return;
             }
+            runBeforePanelMutation();
             double[] size = responsiveSizeFn.apply("OPERATIONS");
             dashboardService.createPanelAsync(
                     currentDashboardId.get(),
@@ -423,6 +428,7 @@ public class DashboardResourcePanelModule {
             if (currentDashboardId.get() == null) {
                 return;
             }
+            runBeforePanelMutation();
             double[] size = responsiveSizeFn.apply("NETWORK");
             dashboardService.createPanelAsync(
                     currentDashboardId.get(),
@@ -449,6 +455,13 @@ public class DashboardResourcePanelModule {
         }
         String label = panelLabel == null || panelLabel.isBlank() ? "패널" : panelLabel + " 패널";
         showToast.accept(label + " 추가됨", false);
+    }
+
+    private void runBeforePanelMutation() {
+        if (beforePanelMutation == null) {
+            return;
+        }
+        beforePanelMutation.run();
     }
 
     private ComboBox<ClassroomSummaryDto> buildClassroomCombo(String prompt) {

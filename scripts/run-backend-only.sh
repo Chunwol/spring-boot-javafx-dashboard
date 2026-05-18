@@ -21,9 +21,7 @@ fi
 
 # Clean up stale processes
 echo "[0/2] Cleaning up stale database/cache processes..."
-pkill -f "postgres" -9 2>/dev/null || true
-pkill -f "redis-server" -9 2>/dev/null || true
-sleep 1
+bash ./scripts/cleanup-runtime.sh --quiet
 
 # Build
 echo "[1/2] Building..."

@@ -42,9 +42,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+import jakarta.annotation.PostConstruct;
 
 /**
  * 스크립트 관리 API
@@ -60,19 +60,37 @@ public class ScriptController {
     private static final Pattern SHA256_HEX = Pattern.compile("^[A-Fa-f0-9]{64}$");
     private static final int MAX_TOTAL_CHUNKS = 200_000;
     private static final int MAX_MISSING_PREVIEW = 100;
+    private static final int LOCK_STRIPE_COUNT = 1024;
+    /** 에이전트 수집 파일 총량 기본 제한: 30GB */
+    private static final long DEFAULT_COLLECT_MAX_BYTES = 30L * 1024 * 1024 * 1024;
 
     private final ScriptArtifactRepository scriptArtifactRepository;
     private final ObjectMapper objectMapper;
-    private final ConcurrentMap<String, Object> uploadLocks = new ConcurrentHashMap<>();
+    private final Object[] uploadLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
+            .mapToObj(i -> new Object())
+            .toArray();
 
-    // TODO: 청크 메타데이터/매니페스트용 Repository 주입 (예: FileChunkRepository, FileManifestRepository)
+    // 청크 메타데이터/매니페스트는 파일 기반(meta.json, _chunk-manifests/*.json)으로 유지한다.
 
     @Value("${app.scripts.dir:storage/scripts}")
     private String scriptsDir;
 
+    @Value("${app.collect.max-total-bytes:" + DEFAULT_COLLECT_MAX_BYTES + "}")
+    private long collectMaxTotalBytes;
+
     public ScriptController(ScriptArtifactRepository scriptArtifactRepository) {
         this.scriptArtifactRepository = scriptArtifactRepository;
         this.objectMapper = new ObjectMapper();
+    }
+
+    @PostConstruct
+    public void init() {
+        try {
+            Path base = Path.of(scriptsDir).toAbsolutePath().normalize();
+            log.info("ScriptController initialized, app.scripts.dir={}", base);
+        } catch (Exception ex) {
+            log.warn("Failed to resolve app.scripts.dir='{}' : {}", scriptsDir, ex.toString());
+        }
     }
 
     /**
@@ -131,7 +149,13 @@ public class ScriptController {
         a.setSizeBytes(file.getSize());
         a.setContentType(file.getContentType());
         a.setCreatedAt(LocalDateTime.now());
-        ScriptArtifact saved = scriptArtifactRepository.save(a);
+        ScriptArtifact saved;
+        try {
+            saved = scriptArtifactRepository.save(a);
+        } catch (Exception ex) {
+            Files.deleteIfExists(target);
+            throw ex;
+        }
 
         return ResponseEntity.ok(Map.of(
                 "id", saved.getId(),
@@ -157,6 +181,9 @@ public class ScriptController {
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("message", "file required"));
         }
+        // 30GB 총량 제한 확인
+        ResponseEntity<?> capacityError = checkCollectCapacity(file.getSize());
+        if (capacityError != null) return capacityError;
 
         String original = StringUtils.hasText(originalFilename)
                 ? originalFilename
@@ -198,7 +225,13 @@ public class ScriptController {
         a.setSizeBytes(file.getSize());
         a.setContentType(file.getContentType());
         a.setCreatedAt(LocalDateTime.now());
-        ScriptArtifact saved = scriptArtifactRepository.save(a);
+        ScriptArtifact saved;
+        try {
+            saved = scriptArtifactRepository.save(a);
+        } catch (Exception ex) {
+            Files.deleteIfExists(target);
+            throw ex;
+        }
 
         return ResponseEntity.ok(Map.of(
                 "id", saved.getId(),
@@ -244,9 +277,7 @@ public class ScriptController {
             return chunkError(HttpStatus.BAD_REQUEST, "EMPTY_CHUNK", "file required", false);
         }
 
-        Object lock = uploadLocks.computeIfAbsent(uploadId, key -> new Object());
-        try {
-            synchronized (lock) {
+        synchronized (lockForUploadId(uploadId)) {
                 Path uploadDir = resolveChunkUploadDir(uploadId, true);
                 Path metadataPath = uploadDir.resolve("meta.json");
 
@@ -308,10 +339,25 @@ public class ScriptController {
                         "resumed", resumed,
                         "complete", uploadedIndexes.size() == totalChunks
                 ));
-            }
-        } finally {
-            uploadLocks.remove(uploadId, lock);
         }
+    }
+
+    /**
+     * 에이전트 전용 대용량 파일 청크 업로드.
+     * AgentTokenInterceptor가 X-Agent-Token을 검증한다.
+     */
+    @PostMapping(value = "/agent/file-chunks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(
+            summary = "에이전트 대용량 파일 청크 업로드",
+            description = "에이전트가 수집한 대용량 파일을 청크 단위로 업로드합니다."
+    )
+    public ResponseEntity<?> uploadChunkFromAgent(
+            @RequestParam("uploadId") String uploadId,
+            @RequestParam("chunkIndex") int chunkIndex,
+            @RequestParam("totalChunks") int totalChunks,
+            @RequestParam("chunkHash") String chunkHash,
+            @RequestPart("file") MultipartFile chunkFile) throws Exception {
+        return uploadChunk(uploadId, chunkIndex, totalChunks, chunkHash, chunkFile);
     }
 
     /**
@@ -340,9 +386,7 @@ public class ScriptController {
             return chunkError(HttpStatus.BAD_REQUEST, "INVALID_TOTAL_CHUNKS", "totalChunks 범위가 올바르지 않습니다.", false);
         }
 
-        Object lock = uploadLocks.computeIfAbsent(uploadId, key -> new Object());
-        try {
-            synchronized (lock) {
+        synchronized (lockForUploadId(uploadId)) {
                 Path uploadDir = resolveChunkUploadDir(uploadId, false);
                 if (!Files.exists(uploadDir) || !Files.isDirectory(uploadDir)) {
                     return chunkError(HttpStatus.NOT_FOUND, "UPLOAD_NOT_FOUND", "uploadId에 해당하는 청크 업로드가 없습니다.", false);
@@ -428,7 +472,13 @@ public class ScriptController {
                 a.setSizeBytes(assembledSizeBytes);
                 a.setContentType("application/octet-stream");
                 a.setCreatedAt(LocalDateTime.now());
-                ScriptArtifact saved = scriptArtifactRepository.save(a);
+                ScriptArtifact saved;
+                try {
+                    saved = scriptArtifactRepository.save(a);
+                } catch (Exception ex) {
+                    Files.deleteIfExists(target);
+                    throw ex;
+                }
 
                 writeManifest(uploadId, metadata, effectiveTotalChunks, finalSha256, assembledSizeBytes, saved.getId(), stored, false);
                 cleanupUploadDir(uploadDir);
@@ -441,10 +491,30 @@ public class ScriptController {
                         "deduplicated", false,
                         "manifestKey", "_chunk-manifests/" + uploadId + ".json"
                 ));
-            }
-        } finally {
-            uploadLocks.remove(uploadId, lock);
         }
+    }
+
+    /**
+     * 에이전트 전용 청크 조립.
+     * 결과 다운로드 URL을 관리자 다운로드 엔드포인트(/agent/uploads/{id}/download)로 표준화한다.
+     */
+    @PostMapping("/agent/file-chunks/assemble")
+    @Operation(
+            summary = "에이전트 청크 조립",
+            description = "에이전트 청크 업로드 완료 후 최종 파일을 조립하고 관리자 다운로드 URL을 반환합니다."
+    )
+    public ResponseEntity<?> assembleChunksFromAgent(
+            @RequestParam("uploadId") String uploadId,
+            @RequestParam("originalFilename") String originalFilename,
+            @RequestParam("totalChunks") int totalChunks,
+            @RequestParam(value = "taskId", required = false) Long taskId) throws Exception {
+        // 청크 총합 크기로 용량 사전 확인
+        long estimatedSize = estimateChunksDirSize(uploadId);
+        ResponseEntity<?> capacityError = checkCollectCapacity(estimatedSize);
+        if (capacityError != null) return capacityError;
+
+        ResponseEntity<?> baseResponse = assembleChunks(uploadId, originalFilename, totalChunks);
+        return remapAsAgentDownload(baseResponse, taskId);
     }
 
     @GetMapping("/scripts/{id}/download")
@@ -515,6 +585,11 @@ public class ScriptController {
     private String sanitizeFilename(String filename) {
         String normalized = StringUtils.hasText(filename) ? filename.trim() : "uploaded.bin";
         return normalized.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private Object lockForUploadId(String uploadId) {
+        int idx = Math.floorMod(uploadId.hashCode(), LOCK_STRIPE_COUNT);
+        return uploadLockStripes[idx];
     }
 
     private Path resolveScriptsBaseDir() throws IOException {
@@ -701,6 +776,69 @@ public class ScriptController {
             body.put("details", details);
         }
         return ResponseEntity.status(status).body(body);
+    }
+
+    private ResponseEntity<?> remapAsAgentDownload(ResponseEntity<?> response, Long taskId) {
+        if (response == null || response.getBody() == null) {
+            return response;
+        }
+        if (!(response.getBody() instanceof Map<?, ?> source)) {
+            return response;
+        }
+        Object id = source.get("id");
+        if (id == null) {
+            return response;
+        }
+        String artifactId = String.valueOf(id).trim();
+        if (artifactId.isBlank()) {
+            return response;
+        }
+
+        Map<String, Object> mapped = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            mapped.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        mapped.put("downloadUrl", "/api/v1/agent/uploads/" + artifactId + "/download");
+        if (taskId != null) {
+            mapped.put("taskId", taskId);
+        }
+        return ResponseEntity.status(response.getStatusCode()).body(mapped);
+    }
+
+    /**
+     * 에이전트 수집 파일 총량이 한도를 초과하면 507 응답, 아니면 null 반환.
+     */
+    private ResponseEntity<?> checkCollectCapacity(long additionalBytes) {
+        long used = scriptArtifactRepository.sumTotalSizeBytes();
+        if (used + additionalBytes > collectMaxTotalBytes) {
+            long usedMb = used / (1024 * 1024);
+            long maxMb = collectMaxTotalBytes / (1024 * 1024);
+            return ResponseEntity.status(507).body(Map.of(
+                    "error", "STORAGE_LIMIT_EXCEEDED",
+                    "message", "저장 공간 초과: 사용=" + usedMb + "MB / 한도=" + maxMb
+                            + "MB. 관리자에서 오래된 파일을 삭제하세요.",
+                    "retryable", false
+            ));
+        }
+        return null;
+    }
+
+    /**
+     * 청크 임시 디렉터리의 합산 크기를 반환한다 (조립 전 용량 추정용).
+     * 디렉터리가 없거나 접근 불가이면 0 반환.
+     */
+    private long estimateChunksDirSize(String uploadId) {
+        try {
+            Path chunkDir = Path.of(scriptsDir, "_chunks", uploadId);
+            if (!Files.exists(chunkDir)) return 0L;
+            try (var stream = Files.walk(chunkDir)) {
+                return stream.filter(Files::isRegularFile)
+                        .mapToLong(p -> { try { return Files.size(p); } catch (IOException e) { return 0L; } })
+                        .sum();
+            }
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     private static class ChunkUploadMetadata {

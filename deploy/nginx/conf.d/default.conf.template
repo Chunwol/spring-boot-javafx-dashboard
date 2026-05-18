@@ -1,0 +1,21 @@
+# HTTP → HTTPS 리다이렉트 + certbot webroot 인증 경로
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # ZeroSSL/certbot webroot 인증 챌린지 파일 제공
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # 그 외 모든 HTTP 요청 → HTTPS 리다이렉트
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+    # 헬스체크용 HTTP 엔드포인트 (optional)
+    location /health {
+        access_log off;
+        return 200 "OK";
+    }
+}

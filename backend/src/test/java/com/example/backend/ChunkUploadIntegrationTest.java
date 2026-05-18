@@ -111,6 +111,36 @@ class ChunkUploadIntegrationTest {
         Assertions.assertArrayEquals(payload, downloaded, "다운로드 파일과 원본 바이트가 다릅니다.");
     }
 
+    @Test
+    void agent_chunk_upload_and_admin_download_flow() throws Exception {
+        String bearerToken = loginAndGetBearerToken();
+        String agentToken = registerAgentAndGetToken();
+
+        byte[] payload = createChunkTestPayload();
+        int chunkSize = 96 * 1024;
+        List<byte[]> chunks = splitChunks(payload, chunkSize);
+        List<String> chunkHashes = chunks.stream().map(this::sha256).toList();
+
+        String uploadId = "agent_up_" + System.currentTimeMillis();
+        int totalChunks = chunks.size();
+
+        for (int i = 0; i < totalChunks; i++) {
+            uploadChunkAsAgent(agentToken, uploadId, i, totalChunks, chunkHashes.get(i), chunks.get(i));
+        }
+
+        Map<String, Object> assembled = assembleAsAgent(agentToken, uploadId, "collected-agent-chunk.zip", totalChunks, 777L);
+        long artifactId = Long.parseLong(String.valueOf(assembled.get("id")));
+        String assembledSha = String.valueOf(assembled.get("sha256"));
+        Assertions.assertEquals(sha256(payload), assembledSha, "에이전트 청크 조립 SHA-256 불일치");
+        Assertions.assertEquals("777", String.valueOf(assembled.get("taskId")), "taskId 전달값 불일치");
+        Assertions.assertTrue(String.valueOf(assembled.getOrDefault("downloadUrl", ""))
+                        .contains("/api/v1/agent/uploads/" + artifactId + "/download"),
+                "에이전트 다운로드 URL 형식이 올바르지 않습니다.");
+
+        byte[] downloaded = downloadCollectedWithBearer(bearerToken, artifactId);
+        Assertions.assertArrayEquals(payload, downloaded, "관리자 다운로드 파일과 원본 바이트가 다릅니다.");
+    }
+
     private String loginAndGetBearerToken() throws Exception {
         String url = baseUrl() + "/auth/login";
         Map<String, Object> payload = Map.of("username", ADMIN_USERNAME, "password", ADMIN_PASSWORD);
@@ -209,12 +239,68 @@ class ChunkUploadIntegrationTest {
         return parseMap(resp.getBody());
     }
 
+    private Map<String, Object> uploadChunkAsAgent(String agentToken,
+                                                   String uploadId,
+                                                   int chunkIndex,
+                                                   int totalChunks,
+                                                   String chunkHash,
+                                                   byte[] chunkBytes) throws Exception {
+        String url = baseUrl() + "/agent/file-chunks"
+                + "?uploadId=" + uploadId
+                + "&chunkIndex=" + chunkIndex
+                + "&totalChunks=" + totalChunks
+                + "&chunkHash=" + chunkHash;
+
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ByteArrayResource(chunkBytes) {
+            @Override
+            public String getFilename() {
+                return "chunk-" + chunkIndex + ".part";
+            }
+        });
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Agent-Token", agentToken);
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        ResponseEntity<String> resp = restTemplate.postForEntity(url, new HttpEntity<>(parts, headers), String.class);
+        Assertions.assertTrue(resp.getStatusCode().is2xxSuccessful(), "에이전트 청크 업로드 실패 index=" + chunkIndex);
+        return parseMap(resp.getBody());
+    }
+
+    private Map<String, Object> assembleAsAgent(String agentToken,
+                                                String uploadId,
+                                                String originalFilename,
+                                                int totalChunks,
+                                                long taskId) throws Exception {
+        String url = baseUrl() + "/agent/file-chunks/assemble"
+                + "?uploadId=" + uploadId
+                + "&originalFilename=" + originalFilename
+                + "&totalChunks=" + totalChunks
+                + "&taskId=" + taskId;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Agent-Token", agentToken);
+
+        ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(null, headers), String.class);
+        Assertions.assertTrue(resp.getStatusCode().is2xxSuccessful(), "에이전트 청크 조립 실패");
+        return parseMap(resp.getBody());
+    }
+
     private byte[] downloadScriptWithAgentToken(String agentToken, long id) {
         String url = baseUrl() + "/scripts/" + id + "/download";
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-Agent-Token", agentToken);
         ResponseEntity<byte[]> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
         Assertions.assertEquals(200, resp.getStatusCode().value(), "스크립트 다운로드 실패");
+        return resp.getBody() == null ? new byte[0] : resp.getBody();
+    }
+
+    private byte[] downloadCollectedWithBearer(String bearerToken, long id) {
+        String url = baseUrl() + "/agent/uploads/" + id + "/download";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+        ResponseEntity<byte[]> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        Assertions.assertEquals(200, resp.getStatusCode().value(), "수집 파일 다운로드 실패");
         return resp.getBody() == null ? new byte[0] : resp.getBody();
     }
 

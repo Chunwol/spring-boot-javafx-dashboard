@@ -61,12 +61,16 @@ if exist "%~dp0agent-watchdog.ps1" (
     exit /b 1
 )
 
-:: ── config.json 병합 업데이트 (agentToken 보존) ────────────────
+:: ── config.json 병합 업데이트 (agentToken 보존)
+:: 기본 생성 시 환경변수 AGENT_SERVER_URL 우선 사용, 없으면 http 기본값을 사용
 if not exist "%~dp0config.json" (
     if not exist "%INSTALL_DIR%\config.json" (
+        rem Allow AGENT_SERVER_URL to override default server URL
+        set "DEFAULT_SERVER_URL=http://localhost:8888"
+        if defined AGENT_SERVER_URL set "DEFAULT_SERVER_URL=%AGENT_SERVER_URL%"
         (
             echo {
-            echo   "serverUrl": "http://192.168.0.1:8080",
+            echo   "serverUrl": "!DEFAULT_SERVER_URL!",
             echo   "installKey": "CHANGE_ME_INSTALL_KEY",
             echo   "agentToken": "",
             echo   "heartbeatIntervalSec": 120,
@@ -88,8 +92,9 @@ if not exist "%~dp0config.json" (
     echo     $dst = [pscustomobject]@{}
     echo }
     echo $token = if ^($dst.PSObject.Properties.Name -contains 'agentToken'^) { [string]$dst.agentToken } else { '' }
+    echo $defaultServerUrl = if ^($env:AGENT_SERVER_URL -and $env:AGENT_SERVER_URL.Trim() -ne ''^) { $env:AGENT_SERVER_URL } else { 'http://localhost:8888' }
     echo $merged = [ordered]@{}
-    echo $merged.serverUrl = if ^($src.PSObject.Properties.Name -contains 'serverUrl'^) { [string]$src.serverUrl } else { 'http://localhost:8080' }
+    echo $merged.serverUrl = if ^($src.PSObject.Properties.Name -contains 'serverUrl'^) { [string]$src.serverUrl } else { $defaultServerUrl }
     echo $merged.installKey = if ^($src.PSObject.Properties.Name -contains 'installKey'^) { [string]$src.installKey } else { '' }
     echo $merged.agentToken = $token
     echo $merged.heartbeatIntervalSec = if ^($src.PSObject.Properties.Name -contains 'heartbeatIntervalSec'^) { [int]$src.heartbeatIntervalSec } else { 120 }
@@ -117,59 +122,94 @@ if %errorLevel% equ 0 (
     echo [OK] 구 버전 서비스 제거 완료
 )
 
-:: ── 작업 스케줄러 등록 (PowerShell 임시 스크립트 방식) ─────────
-echo [INFO] 작업 스케줄러 등록 중...
+:: ── 서비스 설치: NSSM 사용 가능하면 NSSM으로 서비스 등록, 없으면 작업 스케줄러
+echo [INFO] 서비스/작업 스케줄러 설치 선택 중...
 
-set TMPPS=%TEMP%\pcagent-install-%RANDOM%.ps1
-(
-echo $ErrorActionPreference = 'Stop'
-echo $installDir = '%INSTALL_DIR%'
-echo $watchdogScript = Join-Path $installDir 'agent-watchdog.ps1'
-echo.
-echo # 기존 작업 제거
-echo try { Stop-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -ErrorAction SilentlyContinue } catch {}
-echo try { Unregister-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-echo try { Unregister-ScheduledTask -TaskName 'PCAgent' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-echo.
-echo $action = New-ScheduledTaskAction `
-echo     -Execute 'powershell.exe' `
-echo     -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $watchdogScript + '" -InstallDir "' + $installDir + '"') `
-echo     -WorkingDirectory $installDir
-echo.
-echo $trigger = New-ScheduledTaskTrigger -AtStartup
-echo.
-echo $settings = New-ScheduledTaskSettingsSet `
-echo     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-echo     -MultipleInstances IgnoreNew `
-echo     -Hidden `
-echo     -RestartCount 10 `
-echo     -RestartInterval (New-TimeSpan -Minutes 1)
-echo.
-echo $principal = New-ScheduledTaskPrincipal `
-echo     -UserId 'SYSTEM' `
-echo     -LogonType ServiceAccount `
-echo     -RunLevel Highest
-echo.
-echo $null = Register-ScheduledTask `
-echo     -TaskPath '%TASK_PATH%' `
-echo     -TaskName '%TASK_NAME%' `
-echo     -Action $action `
-echo     -Trigger $trigger `
-echo     -Settings $settings `
-echo     -Principal $principal `
-echo     -Force
-echo.
-echo Write-Host '[OK] 작업 스케줄러 등록 완료: %TASK_PATH%%TASK_NAME%'
-) > "%TMPPS%"
+:: 명령행 플래그로 NSSM 사용 강제: install.bat --use-nssm
+set USE_NSSM=0
+if /I "%~1"=="--use-nssm" set USE_NSSM=1
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TMPPS%"
-set PS_EXIT=%errorLevel%
-del "%TMPPS%" >nul 2>&1
+:: NSSM 검색: 스크립트 폴더 또는 PATH
+set "NSSM_PATH="
+if exist "%~dp0nssm.exe" set "NSSM_PATH=%~dp0nssm.exe"
+if not defined NSSM_PATH (
+    for /f "usebackq tokens=*" %%A in (`where nssm 2^>nul`) do set "NSSM_PATH=%%~A"
+)
+if defined NSSM_PATH set USE_NSSM=1
 
-if %PS_EXIT% neq 0 (
-    echo [오류] 작업 스케줄러 등록 실패
-    pause
-    exit /b 1
+if "%USE_NSSM%"=="1" (
+    echo [INFO] NSSM 사용: %NSSM_PATH%
+    :: Java 실행 파일 탐색
+    set "JAVA_EXE="
+    if defined JAVA_HOME set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+    if "%JAVA_EXE%"=="" (
+        for /f "usebackq tokens=*" %%J in (`where java 2^>nul`) do set "JAVA_EXE=%%~J"
+    )
+    if "%JAVA_EXE%"=="" (
+        echo [WARN] java.exe를 찾을 수 없습니다. NSSM 서비스 등록은 실패할 수 있습니다.
+    )
+
+    echo [INFO] NSSM으로 서비스 생성 시도...
+    "%NSSM_PATH%" install PCAgent "%JAVA_EXE%" "-Dpcagent.config.dir=%INSTALL_DIR% -jar %INSTALL_DIR%\%JAR_NAME%" >nul 2>&1 || echo [WARN] NSSM 설치 실패
+    "%NSSM_PATH%" set PCAgent DisplayName "PC Agent" >nul 2>&1
+    "%NSSM_PATH%" set PCAgent Start SERVICE_AUTO_START >nul 2>&1
+    "%NSSM_PATH%" start PCAgent >nul 2>&1 || echo [WARN] NSSM 서비스 시작 실패
+    echo [OK] NSSM 서비스 등록/시작 시도 완료
+) else (
+    :: 기존: PowerShell Scheduled Task 방식
+    echo [INFO] 작업 스케줄러 등록 중...
+
+    set TMPPS=%TEMP%\pcagent-install-%RANDOM%.ps1
+    (
+    echo $ErrorActionPreference = 'Stop'
+    echo $installDir = '%INSTALL_DIR%'
+    echo $watchdogScript = Join-Path $installDir 'agent-watchdog.ps1'
+    echo.
+    echo # 기존 작업 제거
+    echo try { Stop-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -ErrorAction SilentlyContinue } catch {}
+    echo try { Unregister-ScheduledTask -TaskPath '%TASK_PATH%' -TaskName '%TASK_NAME%' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    echo try { Unregister-ScheduledTask -TaskName 'PCAgent' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    echo.
+    echo $action = New-ScheduledTaskAction `
+    echo     -Execute 'powershell.exe' `
+    echo     -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $watchdogScript + '" -InstallDir "' + $installDir + '"') `
+    echo     -WorkingDirectory $installDir
+    echo.
+    echo $trigger = New-ScheduledTaskTrigger -AtStartup
+    echo.
+    echo $settings = New-ScheduledTaskSettingsSet `
+    echo     -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    echo     -MultipleInstances IgnoreNew `
+    echo     -Hidden `
+    echo     -RestartCount 10 `
+    echo     -RestartInterval (New-TimeSpan -Minutes 1)
+    echo.
+    echo $principal = New-ScheduledTaskPrincipal `
+    echo     -UserId 'SYSTEM' `
+    echo     -LogonType ServiceAccount `
+    echo     -RunLevel Highest
+    echo.
+    echo $null = Register-ScheduledTask `
+    echo     -TaskPath '%TASK_PATH%' `
+    echo     -TaskName '%TASK_NAME%' `
+    echo     -Action $action `
+    echo     -Trigger $trigger `
+    echo     -Settings $settings `
+    echo     -Principal $principal `
+    echo     -Force
+    echo.
+    echo Write-Host '[OK] 작업 스케줄러 등록 완료: %TASK_PATH%%TASK_NAME%'
+    ) > "%TMPPS%"
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%TMPPS%"
+    set PS_EXIT=%errorLevel%
+    del "%TMPPS%" >nul 2>&1
+
+    if %PS_EXIT% neq 0 (
+        echo [오류] 작업 스케줄러 등록 실패
+        pause
+        exit /b 1
+    )
 )
 
 :: ── 방화벽 규칙 추가 ──────────────────────────────────────────

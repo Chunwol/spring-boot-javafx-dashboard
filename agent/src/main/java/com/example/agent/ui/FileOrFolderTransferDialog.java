@@ -30,9 +30,8 @@ public class FileOrFolderTransferDialog {
             chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
             int ret = chooser.showOpenDialog(dialog);
             if (ret != JFileChooser.APPROVE_OPTION) return;
-            File[] filesArr = chooser.getSelectedFiles();
-            List<File> files = java.util.Arrays.asList(filesArr);
-            if (files != null && !files.isEmpty()) {
+            List<File> files = java.util.Arrays.asList(chooser.getSelectedFiles());
+            if (!files.isEmpty()) {
                 selectedFiles = files;
                 selectedFolder = null;
                 pathField.setText(files.size() == 1 ? files.get(0).getAbsolutePath() : files.size() + "개 파일 선택됨");
@@ -52,10 +51,16 @@ public class FileOrFolderTransferDialog {
             }
         });
         sendButton.addActionListener(e -> {
+            if (selectedFiles.isEmpty() && selectedFolder == null) {
+                JOptionPane.showMessageDialog(dialog,
+                        "전송할 파일 또는 폴더를 선택하세요.",
+                        "선택 필요", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
             boolean runAfter = runAfterTransferCheck.isSelected();
             if (!selectedFiles.isEmpty()) {
                 onSendFiles.accept(selectedFiles, runAfter);
-            } else if (selectedFolder != null) {
+            } else {
                 onSendFolder.accept(selectedFolder, runAfter);
             }
             dialog.dispose();

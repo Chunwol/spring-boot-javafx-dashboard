@@ -37,9 +37,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'com.github.ben-manes.caffeine:caffeine'
 
-    // Database (SQLite as requested, H2 compatible)
+    // Database
+    runtimeOnly 'org.postgresql:postgresql'
+    // SQLite fallback/test compatibility
     implementation 'org.xerial:sqlite-jdbc:3.45.1.0'
     
     // JWT
@@ -63,9 +67,12 @@ dependencies {
     
     // Dotenv for .env file support
     implementation 'io.github.cdimascio:dotenv-java:3.0.0'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
 
     // Database migrations
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-database-postgresql'
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

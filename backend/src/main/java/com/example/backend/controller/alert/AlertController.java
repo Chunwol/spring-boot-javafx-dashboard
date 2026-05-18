@@ -52,4 +52,13 @@ public class AlertController {
                 .<ResponseEntity<?>>map(alert -> ResponseEntity.ok(AlertDto.from(alert)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
+
+    @PostMapping("/ack-all")
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @Operation(summary = "운영 알림 전체 확인 처리")
+    public Map<String, Integer> acknowledgeAll(Authentication authentication) {
+        String actor = authentication != null ? authentication.getName() : "unknown";
+        int acknowledged = alertCenterService.acknowledgeAllUnread(actor);
+        return Map.of("acknowledged", acknowledged);
+    }
 }

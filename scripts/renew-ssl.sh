@@ -9,9 +9,22 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}/.."
 
+compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    echo "docker compose not found"
+    exit 1
+  fi
+}
+
 # .env 파일 로드
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  . ./.env
+  set +a
 fi
 
 EAB_KID=${ZEROSSL_EAB_KID:?".env에 ZEROSSL_EAB_KID를 설정하세요"}
@@ -27,6 +40,6 @@ docker run --rm \
   --eab-hmac-key "${EAB_HMAC_KEY}"
 
 echo "=== [2/2] Nginx 리로드 ==="
-docker compose exec nginx nginx -s reload
+compose exec nginx nginx -s reload
 
 echo "✅  인증서 갱신 완료!"

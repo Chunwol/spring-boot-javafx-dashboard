@@ -11,6 +11,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
+import javafx.scene.control.CheckBox;
 import javafx.scene.input.KeyCode;
 import javafx.geometry.Rectangle2D;
 import javafx.stage.Screen;
@@ -26,6 +27,8 @@ public class LoginController {
     private static final Preferences PREFS = Preferences.userNodeForPackage(LoginController.class);
     private static final String PREF_SERVER_HOST = "server.host";
     private static final String PREF_SERVER_PORT = "server.port";
+    private static final String PREF_REMEMBER_USER = "remember.user";
+    private static final String PREF_USERNAME_KEY = "username";
 
     @FXML
     private TextField usernameField;
@@ -42,6 +45,9 @@ public class LoginController {
     @FXML
     private Label messageLabel;
 
+    @FXML
+    private CheckBox rememberUserCheck;
+
     private final ApiClient apiClient = ApiClient.getInstance();
 
     private Stage primaryStage;
@@ -54,6 +60,9 @@ public class LoginController {
     public void initialize() {
         hostField.setText(PREFS.get(PREF_SERVER_HOST, apiClient.currentLoginHost()));
         portField.setText(PREFS.get(PREF_SERVER_PORT, Integer.toString(apiClient.currentLoginPort())));
+        // username/remember 설정 로드
+        usernameField.setText(PREFS.get(PREF_USERNAME_KEY, ""));
+        rememberUserCheck.setSelected(PREFS.getBoolean(PREF_REMEMBER_USER, false));
 
         // Enter 키 입력 시 로그인 수행
         passwordField.setOnKeyPressed(event -> {
@@ -107,7 +116,7 @@ public class LoginController {
                     .thenAccept(body -> Platform.runLater(() -> {
                         Object tokenObj = body.get("token");
                         if (tokenObj == null) {
-                            messageLabel.setText("로그인 응답에 토큰이 없습니다.");
+                            messageLabel.setText("로그인 응답이 올바르지 않습니다. 다시 시도해 주세요.");
                             messageLabel.setVisible(true);
                             return;
                         }
@@ -117,25 +126,33 @@ public class LoginController {
                         apiClient.setCurrentUserRole(role.toUpperCase(Locale.ROOT));
                         PREFS.put(PREF_SERVER_HOST, host.trim());
                         PREFS.put(PREF_SERVER_PORT, Integer.toString(port));
+                        // 사용자 기억 옵션 처리
+                        if (rememberUserCheck != null && rememberUserCheck.isSelected()) {
+                            PREFS.put(PREF_USERNAME_KEY, username == null ? "" : username.trim());
+                            PREFS.putBoolean(PREF_REMEMBER_USER, true);
+                        } else {
+                            PREFS.remove(PREF_USERNAME_KEY);
+                            PREFS.putBoolean(PREF_REMEMBER_USER, false);
+                        }
                         try {
                             showDashboard();
                         } catch (Exception ex) {
                             log.warn("Failed to transition to dashboard after login", ex);
-                            messageLabel.setText("화면 전환 오류: " + ex.getMessage());
+                            messageLabel.setText("화면 전환 중 오류가 발생했습니다. 다시 로그인해 주세요.");
                             messageLabel.setVisible(true);
                         }
                     }))
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
-                            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                            messageLabel.setText("로그인 실패: " + cause.getMessage());
+                            String userMessage = ApiClient.userFacingErrorMessage(ex, "로그인 요청을 처리하지 못했습니다.");
+                            messageLabel.setText("로그인 실패: " + userMessage);
                             messageLabel.setVisible(true);
                         });
                         return null;
                     });
         } catch (Exception e) {
             log.warn("Login request failed before async dispatch", e);
-            messageLabel.setText("서버 연결 실패. 백엔드가 실행 중인지 확인하세요.\n" + e.getMessage());
+            messageLabel.setText("서버 연결 실패. 백엔드 실행 상태와 주소/포트를 확인하세요.");
             messageLabel.setVisible(true);
         }
     }
@@ -151,9 +168,15 @@ public class LoginController {
             throw new IllegalStateException("primaryStage가 null입니다. setPrimaryStage 호출 필요");
         }
 
+        // macOS DPI 스케일링을 고려한 보수적인 창 크기 계산
         Rectangle2D bounds = Screen.getPrimary().getVisualBounds();
-        double targetWidth = Math.max(1000, Math.min(1360, bounds.getWidth() - 120));
-        double targetHeight = Math.max(680, Math.min(860, bounds.getHeight() - 120));
+        // macOS Retina: getVisualBounds()가 네이티브 픽셀 기준일 수 있으므로 더 작게 제한
+        double screenWidth = bounds.getWidth();
+        double screenHeight = bounds.getHeight();
+        double maxWidth = Math.min(1280, screenWidth * 0.8);   // 화면의 80% 이하
+        double maxHeight = Math.min(800, screenHeight * 0.8);  // 화면의 80% 이하
+        double targetWidth = Math.max(1000, maxWidth);
+        double targetHeight = Math.max(680, maxHeight);
 
         // hide()로 Stage 레이아웃 캐시를 초기화한 뒤 Scene 교체 → show().
         // hide 없이 setScene만 하면 이전 Scene(460×360) 크기로 내부가 잡히는 문제 발생.
@@ -168,6 +191,11 @@ public class LoginController {
         primaryStage.setScene(scene);
         primaryStage.setWidth(targetWidth);
         primaryStage.setHeight(targetHeight);
+        
+        // macOS에서 전체화면처럼 보이는 문제 방지
+        primaryStage.setFullScreen(false);
+        primaryStage.setIconified(false);
+        
         root.applyCss();
         root.layout();
         primaryStage.centerOnScreen();

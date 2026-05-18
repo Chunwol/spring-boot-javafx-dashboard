@@ -39,7 +39,7 @@ class ApiClientPermissionUxTest {
     @Test
     void viewerWriteDeniedMessageContainsAction() {
         String message = ApiClient.viewerWriteDeniedMessage("원격 명령 실행");
-        assertTrue(message.contains("VIEWER"));
+        assertTrue(message.contains("조회 전용"));
         assertTrue(message.contains("원격 명령 실행"));
     }
 }

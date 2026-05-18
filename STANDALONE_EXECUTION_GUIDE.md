@@ -78,8 +78,18 @@ frontend.env        # 또는 루트에 저장
 ### **backend/.env (또는 backend.env)** 예시:
 ```properties
 # 데이터베이스
-DB_URL=jdbc:sqlite:./db/mydatabase.db
-DB_DRIVER=org.sqlite.JDBC
+DB_URL=jdbc:postgresql://localhost:5432/dashboard_db
+DB_DRIVER=org.postgresql.Driver
+DB_USERNAME=dashboard
+DB_PASSWORD=dashboard
+FLYWAY_ENABLED=true
+FLYWAY_LOCATIONS=classpath:db/pgmigration
+
+# Redis 캐시
+CACHE_PROVIDER=redis
+SPRING_CACHE_TYPE=redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
 
 # 서버 설정
 SERVER_PORT=8888
@@ -306,4 +316,5 @@ scripts/run-dev.sh
 **모든 설정이 완료되었습니다!**
 - Windows: `scripts\run-dev.bat`
 - Mac/Linux: `scripts/run-dev.sh`
+
 

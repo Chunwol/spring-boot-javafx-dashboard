@@ -39,13 +39,13 @@
 				</VBox>
 				<Label fx:id="viewerModeBadgeLabel"
 					   managed="false"
-					   text="VIEWER | 읽기 전용"
+					   text="읽기 전용 (조회 권한)"
 					   visible="false"
 					   styleClass="viewer-readonly-badge" />
 				<HBox alignment="CENTER_LEFT" spacing="6">
 					<children>
 						<ComboBox fx:id="dashboardSelector" prefWidth="200.0" promptText="대시보드 선택" />
-						<MenuButton fx:id="dashboardSettingsMenu" text="⚙ 설정" styleClass="dashboard-menu-button" />
+						<MenuButton fx:id="dashboardSettingsMenu" minWidth="118.0" prefWidth="118.0" text="설정" styleClass="dashboard-menu-button" />
 					</children>
 				</HBox>
 				<Region HBox.hgrow="ALWAYS" />
@@ -93,8 +93,6 @@
 													<children>
 														<ToggleButton fx:id="gridToggleButton" text="격자" styleClass="dashboard-toolbar-mini-toggle" />
 														<ToggleButton fx:id="snapToggleButton" text="스냅" styleClass="dashboard-toolbar-mini-toggle" />
-														<MenuButton fx:id="alignMenuButton" text="정렬" styleClass="dashboard-toolbar-menu" />
-														<MenuButton fx:id="arrangeMenuButton" text="배열" styleClass="dashboard-toolbar-menu" />
 													</children>
 												</HBox>
 												<HBox alignment="CENTER_RIGHT" spacing="4">
@@ -105,6 +103,8 @@
 														<Button fx:id="fitAllButton" text="전체 맞춤" styleClass="dashboard-zoom-btn" />
 													</children>
 												</HBox>
+												<Button fx:id="undoButton" styleClass="btn-icon-action,btn-icon-undo" />
+												<Button fx:id="redoButton" styleClass="btn-icon-action,btn-icon-redo" />
 												<Button fx:id="refreshButton" text="새로고침" styleClass="btn-icon-action,btn-icon-refresh" />
 											</children>
 										</HBox>

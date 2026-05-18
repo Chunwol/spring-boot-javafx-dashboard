@@ -9,6 +9,8 @@ import org.gradle.internal.os.OperatingSystem
 
 group = 'com.example'
 version = '0.0.1-SNAPSHOT'
+def nativeAccessJavaExecArgs = ['--enable-native-access=javafx.graphics']
+def nativeAccessTestArgs = ['--enable-native-access=ALL-UNNAMED']
 
 java {
     sourceCompatibility = '25'
@@ -25,6 +27,7 @@ javafx {
 
 application {
     mainClass = 'com.example.frontend.DashboardApp'
+    applicationDefaultJvmArgs = nativeAccessJavaExecArgs
 }
 
 compileJava {
@@ -64,6 +67,15 @@ dependencies {
 test {
     useJUnitPlatform()
     exclude '**/*UiSmokeTest.class'
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs(nativeAccessJavaExecArgs)
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs(nativeAccessTestArgs)
+    systemProperty 'java.awt.headless', 'false'
 }
 
 tasks.register('unitTest', Test) {

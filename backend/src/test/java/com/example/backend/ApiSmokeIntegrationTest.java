@@ -17,13 +17,17 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +40,9 @@ class ApiSmokeIntegrationTest {
     private static final String AGENT_MAC = "AA:BB:CC:DD:EE:77";
     private static final String AGENT_HOST = "SMOKE-LAB-77";
     private static final String AGENT_IP = "192.168.88.77";
+    private static final String AGENT2_MAC = "AA:BB:CC:DD:EE:78";
+    private static final String AGENT2_HOST = "SMOKE-LAB-78";
+    private static final String AGENT2_IP = "192.168.88.78";
     private static final Path SMOKE_DB_PATH = Path.of("build", "tmp", "smoke-api-" + Instant.now().toEpochMilli() + ".db")
             .toAbsolutePath()
             .normalize();
@@ -88,6 +95,70 @@ class ApiSmokeIntegrationTest {
         uploadAndDownloadScript(bearerToken, agentToken);
     }
 
+    @Test
+    void smoke_chunk_upload_resume_and_assemble() throws Exception {
+        String bearerToken = loginAndGetBearerToken();
+        String agentToken = registerAgentAndGetToken();
+
+        byte[] payload = createSmokeChunkPayload();
+        int chunkSize = 32 * 1024;
+        List<byte[]> chunks = splitChunks(payload, chunkSize);
+        Assertions.assertTrue(chunks.size() >= 3, "청크 시나리오를 위해 최소 3개 이상의 청크가 필요합니다.");
+        List<String> hashes = chunks.stream().map(this::sha256).toList();
+
+        String uploadId = "smoke_chunk_" + System.currentTimeMillis();
+        int totalChunks = chunks.size();
+
+        uploadChunk(bearerToken, uploadId, 0, totalChunks, hashes.get(0), chunks.get(0));
+        uploadChunk(bearerToken, uploadId, 1, totalChunks, hashes.get(1), chunks.get(1));
+
+        Map<String, Object> resumed = uploadChunk(
+                bearerToken, uploadId, 1, totalChunks, hashes.get(1), chunks.get(1));
+        Assertions.assertEquals(Boolean.TRUE, resumed.get("resumed"), "동일 청크 재업로드 resume 처리 실패");
+
+        Map<String, Object> missing = assembleChunkExpectConflict(
+                bearerToken, uploadId, "smoke-chunk.bin", totalChunks);
+        Assertions.assertEquals("MISSING_CHUNKS", stringValue(missing.get("code")), "누락 청크 에러 코드 불일치");
+        Assertions.assertEquals(Boolean.TRUE, missing.get("retryable"), "누락 청크 retryable=true 기대");
+
+        for (int i = 2; i < totalChunks; i++) {
+            uploadChunk(bearerToken, uploadId, i, totalChunks, hashes.get(i), chunks.get(i));
+        }
+
+        Map<String, Object> assembled = assembleChunkSuccess(
+                bearerToken, uploadId, "smoke-chunk.bin", totalChunks);
+        long artifactId = Long.parseLong(String.valueOf(assembled.get("id")));
+        Assertions.assertEquals(sha256(payload), stringValue(assembled.get("sha256")), "조립 파일 SHA-256 불일치");
+
+        byte[] downloaded = downloadScriptWithAgentToken(agentToken, artifactId);
+        Assertions.assertArrayEquals(payload, downloaded, "청크 조립 파일 다운로드 검증 실패");
+    }
+
+    @Test
+    void smoke_ack_result_rejects_non_owner_and_ignores_duplicate_final_result() throws Exception {
+        String bearerToken = loginAndGetBearerToken();
+        String ownerToken = registerAgentAndGetToken(AGENT_MAC, AGENT_HOST, AGENT_IP, "smoke-1.0");
+        String otherToken = registerAgentAndGetToken(AGENT2_MAC, AGENT2_HOST, AGENT2_IP, "smoke-1.0");
+
+        sendHeartbeat(ownerToken, AGENT_MAC, AGENT_HOST, AGENT_IP, "smoke-1.0");
+        long taskId = enqueueRunCmdCommand(bearerToken);
+        long deliveredTaskId = pollHeartbeatCommand(ownerToken);
+        Assertions.assertEquals(taskId, deliveredTaskId, "소유 에이전트에 전달된 taskId 불일치");
+
+        sendAckExpectStatus(otherToken, taskId, 403);
+        sendResultExpectStatus(otherToken, taskId, 0, "forbidden", "", 403);
+
+        sendAck(ownerToken, taskId);
+        sendResult(ownerToken, taskId, 0, "first-result", "");
+        sendResult(ownerToken, taskId, 1, "late-overwrite", "should-ignore");
+
+        Map<String, Object> command = fetchCommand(bearerToken, taskId);
+        Assertions.assertEquals("COMPLETED", stringValue(command.get("status")), "최종 상태는 COMPLETED를 유지해야 합니다.");
+        Assertions.assertTrue(stringValue(command.get("stdout")).contains("first-result"),
+                "중복 결과 보고로 기존 stdout이 덮어써지면 안 됩니다.");
+        Assertions.assertEquals("0", stringValue(command.get("exitCode")), "중복 결과 보고로 exitCode가 변경되면 안 됩니다.");
+    }
+
     private String loginAndGetBearerToken() throws Exception {
         String url = baseUrl() + "/auth/login";
         Map<String, Object> payload = Map.of(
@@ -105,13 +176,20 @@ class ApiSmokeIntegrationTest {
     }
 
     private String registerAgentAndGetToken() throws Exception {
+        return registerAgentAndGetToken(AGENT_MAC, AGENT_HOST, AGENT_IP, "smoke-1.0");
+    }
+
+    private String registerAgentAndGetToken(String macAddress,
+                                            String hostname,
+                                            String ipAddress,
+                                            String agentVersion) throws Exception {
         String url = baseUrl() + "/agent/register";
         Map<String, Object> payload = Map.of(
-                "macAddress", AGENT_MAC,
-                "hostname", AGENT_HOST,
-                "ipAddress", AGENT_IP,
+                "macAddress", macAddress,
+                "hostname", hostname,
+                "ipAddress", ipAddress,
                 "osInfo", "Windows 11",
-                "agentVersion", "smoke-1.0"
+                "agentVersion", agentVersion
         );
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -127,12 +205,20 @@ class ApiSmokeIntegrationTest {
     }
 
     private void sendHeartbeat(String agentToken) throws Exception {
+        sendHeartbeat(agentToken, AGENT_MAC, AGENT_HOST, AGENT_IP, "smoke-1.0");
+    }
+
+    private void sendHeartbeat(String agentToken,
+                               String macAddress,
+                               String hostname,
+                               String ipAddress,
+                               String agentVersion) throws Exception {
         String url = baseUrl() + "/heartbeat";
         Map<String, Object> payload = Map.of(
-                "macAddress", AGENT_MAC,
-                "hostname", AGENT_HOST,
-                "ipAddress", AGENT_IP,
-                "agentVersion", "smoke-1.0",
+                "macAddress", macAddress,
+                "hostname", hostname,
+                "ipAddress", ipAddress,
+                "agentVersion", agentVersion,
                 "inboundKbps", 1.0,
                 "outboundKbps", 2.0
         );
@@ -195,6 +281,19 @@ class ApiSmokeIntegrationTest {
         Assertions.assertTrue(response.getStatusCode().is2xxSuccessful(), "ACK 실패: " + response.getStatusCode());
     }
 
+    private void sendAckExpectStatus(String agentToken, long taskId, int expectedStatus) {
+        String url = baseUrl() + "/agent/commands/" + taskId + "/ack";
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.POST, jsonEntity(Map.of(), agentToken), String.class);
+            Assertions.assertEquals(expectedStatus, response.getStatusCode().value(),
+                    "ACK 응답 상태 코드가 기대와 다릅니다.");
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(expectedStatus, ex.getStatusCode().value(),
+                    "ACK 응답 상태 코드가 기대와 다릅니다.");
+        }
+    }
+
     private void sendResult(String agentToken, long taskId, int exitCode, String stdout, String stderr) {
         String url = baseUrl() + "/agent/commands/" + taskId + "/result";
         Map<String, Object> payload = Map.of(
@@ -204,6 +303,39 @@ class ApiSmokeIntegrationTest {
         );
         ResponseEntity<String> response = restTemplate.postForEntity(url, jsonEntity(payload, agentToken), String.class);
         Assertions.assertTrue(response.getStatusCode().is2xxSuccessful(), "결과 보고 실패: " + response.getStatusCode());
+    }
+
+    private void sendResultExpectStatus(String agentToken,
+                                        long taskId,
+                                        int exitCode,
+                                        String stdout,
+                                        String stderr,
+                                        int expectedStatus) {
+        String url = baseUrl() + "/agent/commands/" + taskId + "/result";
+        Map<String, Object> payload = Map.of(
+                "exitCode", exitCode,
+                "stdout", stdout,
+                "stderr", stderr
+        );
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.POST, jsonEntity(payload, agentToken), String.class);
+            Assertions.assertEquals(expectedStatus, response.getStatusCode().value(),
+                    "결과 보고 응답 상태 코드가 기대와 다릅니다.");
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(expectedStatus, ex.getStatusCode().value(),
+                    "결과 보고 응답 상태 코드가 기대와 다릅니다.");
+        }
+    }
+
+    private Map<String, Object> fetchCommand(String bearerToken, long taskId) throws Exception {
+        String url = baseUrl() + "/commands?taskId=" + taskId;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+        ResponseEntity<String> response = restTemplate.exchange(
+                url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+        Assertions.assertEquals(200, response.getStatusCode().value(), "명령 상태 조회 실패");
+        return parseMap(response.getBody());
     }
 
     private void assertCommandCompleted(String bearerToken, long taskId) throws Exception {
@@ -262,6 +394,86 @@ class ApiSmokeIntegrationTest {
         Assertions.assertArrayEquals(scriptBytes, downloadResponse.getBody(), "다운로드 바이트가 업로드 원본과 다릅니다.");
     }
 
+    private byte[] downloadScriptWithAgentToken(String agentToken, long scriptId) {
+        HttpHeaders downloadHeaders = new HttpHeaders();
+        downloadHeaders.set("X-Agent-Token", agentToken);
+        ResponseEntity<byte[]> downloadResponse = restTemplate.exchange(
+                baseUrl() + "/scripts/" + scriptId + "/download",
+                HttpMethod.GET,
+                new HttpEntity<>(downloadHeaders),
+                byte[].class
+        );
+        Assertions.assertEquals(200, downloadResponse.getStatusCode().value(), "스크립트 다운로드 실패");
+        return downloadResponse.getBody() == null ? new byte[0] : downloadResponse.getBody();
+    }
+
+    private Map<String, Object> uploadChunk(String bearerToken,
+                                            String uploadId,
+                                            int chunkIndex,
+                                            int totalChunks,
+                                            String chunkHash,
+                                            byte[] chunkBytes) throws Exception {
+        String url = baseUrl() + "/file-chunks"
+                + "?uploadId=" + uploadId
+                + "&chunkIndex=" + chunkIndex
+                + "&totalChunks=" + totalChunks
+                + "&chunkHash=" + chunkHash;
+
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("file", new ByteArrayResource(chunkBytes) {
+            @Override
+            public String getFilename() {
+                return "smoke-" + chunkIndex + ".part";
+            }
+        });
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        ResponseEntity<String> response = restTemplate.postForEntity(url, new HttpEntity<>(parts, headers), String.class);
+        Assertions.assertTrue(response.getStatusCode().is2xxSuccessful(), "청크 업로드 실패 index=" + chunkIndex);
+        return parseMap(response.getBody());
+    }
+
+    private Map<String, Object> assembleChunkExpectConflict(String bearerToken,
+                                                            String uploadId,
+                                                            String originalFilename,
+                                                            int totalChunks) throws Exception {
+        String url = baseUrl() + "/file-chunks/assemble"
+                + "?uploadId=" + uploadId
+                + "&originalFilename=" + originalFilename
+                + "&totalChunks=" + totalChunks;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(headers), String.class);
+            Assertions.assertEquals(409, response.getStatusCode().value(), "누락 청크 조립은 409가 기대됩니다.");
+            return parseMap(response.getBody());
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(409, ex.getStatusCode().value(), "누락 청크 조립은 409가 기대됩니다.");
+            return parseMap(ex.getResponseBodyAsString());
+        }
+    }
+
+    private Map<String, Object> assembleChunkSuccess(String bearerToken,
+                                                     String uploadId,
+                                                     String originalFilename,
+                                                     int totalChunks) throws Exception {
+        String url = baseUrl() + "/file-chunks/assemble"
+                + "?uploadId=" + uploadId
+                + "&originalFilename=" + originalFilename
+                + "&totalChunks=" + totalChunks;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+        ResponseEntity<String> response = restTemplate.exchange(
+                url, HttpMethod.POST, new HttpEntity<>(headers), String.class);
+        Assertions.assertTrue(response.getStatusCode().is2xxSuccessful(), "청크 조립 실패");
+        return parseMap(response.getBody());
+    }
+
     private HttpEntity<String> jsonEntity(Map<String, Object> body, String agentToken) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -295,6 +507,37 @@ class ApiSmokeIntegrationTest {
 
     private String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private byte[] createSmokeChunkPayload() {
+        byte[] seed = "API-SMOKE-CHUNK-2026".getBytes(StandardCharsets.UTF_8);
+        byte[] out = new byte[seed.length * 5000];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = seed[i % seed.length];
+        }
+        return out;
+    }
+
+    private List<byte[]> splitChunks(byte[] source, int chunkSize) {
+        List<byte[]> chunks = new ArrayList<>();
+        int pos = 0;
+        while (pos < source.length) {
+            int len = Math.min(chunkSize, source.length - pos);
+            byte[] one = new byte[len];
+            System.arraycopy(source, pos, one, 0, len);
+            chunks.add(one);
+            pos += len;
+        }
+        return chunks;
+    }
+
+    private String sha256(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 계산 실패", e);
+        }
     }
 
     private String baseUrl() {

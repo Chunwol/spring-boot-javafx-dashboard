@@ -1,12 +1,16 @@
 {
   "serverUrl" : "http://localhost:8888",
   "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
-  "agentToken" : "",
+  "agentToken" : "agt_cc28898153ac47bdbffed5fdd2dfe098",
   "tlsPinSha256" : "",
   "githubOwner" : "",
   "githubRepo" : "",
   "internetCheckHost" : "1.1.1.1",
   "internetCheckPort" : 53,
-  "heartbeatIntervalSec" : 120,
-  "jitterSec" : 30
+  "heartbeatIntervalSec" : 12,
+  "jitterSec" : 3,
+  "updatePeerPort" : 18777,
+  "overrideMacAddress" : "",
+  "overrideHostname" : "",
+  "overrideIpAddress" : ""
 }

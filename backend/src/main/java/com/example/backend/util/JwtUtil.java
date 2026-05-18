@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.Date;
 
@@ -25,7 +26,14 @@ public class JwtUtil {
 
     @PostConstruct
     public void init() {
-        key = Keys.hmacShaKeyFor(secret.getBytes());
+        if (secret == null || secret.isBlank()
+                || secret.toLowerCase().contains("change-me")
+                || secret.toLowerCase().contains("changeme")
+                || secret.toLowerCase().contains("default")
+                || secret.length() < 32) {
+            throw new IllegalStateException("JWT secret is not configured securely. Set 'JWT_SECRET' (at least 32 bytes) in environment before starting.");
+        }
+        key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     public String generateToken(String username) {

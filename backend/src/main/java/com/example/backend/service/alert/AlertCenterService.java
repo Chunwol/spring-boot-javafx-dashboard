@@ -56,13 +56,18 @@ public class AlertCenterService {
             if (!alert.getAcknowledged()) {
                 alert.setAcknowledged(true);
                 alert.setAcknowledgedAt(LocalDateTime.now());
-                alert.setAcknowledgedBy((acknowledgedBy == null || acknowledgedBy.isBlank())
-                        ? "unknown"
-                        : acknowledgedBy.trim());
+                alert.setAcknowledgedBy(resolveAcknowledgedBy(acknowledgedBy));
                 operationalAlertRepository.save(alert);
             }
             return alert;
         });
+    }
+
+    @Transactional
+    public int acknowledgeAllUnread(String acknowledgedBy) {
+        return operationalAlertRepository.acknowledgeAllUnread(
+                LocalDateTime.now(),
+                resolveAcknowledgedBy(acknowledgedBy));
     }
 
     private String normalizeSourceMac(String value) {
@@ -85,5 +90,11 @@ public class AlertCenterService {
             return "SYSTEM";
         }
         return value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String resolveAcknowledgedBy(String acknowledgedBy) {
+        return (acknowledgedBy == null || acknowledgedBy.isBlank())
+                ? "unknown"
+                : acknowledgedBy.trim();
     }
 }

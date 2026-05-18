@@ -27,6 +27,7 @@ public class FrontendEnvConfig {
         // frontend/.env 파일 경로 우선 시도
         String[] searchPaths = {
             "frontend/.env",    // 프로젝트 루트에서 frontend 폴더
+            // 백엔드의 .env는 더이상 프론트엔드에서 직접 읽지 않음 (운영상 secrets 공유 금지)
             "frontend.env",      // 프로젝트 루트에 frontend.env 파일
             ".env"               // 호환성: 기본 .env 파일
         };

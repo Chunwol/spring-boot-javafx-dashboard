@@ -38,6 +38,7 @@ db/mydatabase.db
 # Uploads
 uploads/
 tmp/
+backups/
 
 # Maven
 target/
@@ -48,3 +49,19 @@ pom.xml.releaseBackup
 node_modules/
 dist/
 npm-debug.log
+
+# Ignore local scripts config (may contain install tokens)
+scripts/config.json
+
+# Common backup files
+*.bak
+*.orig
+
+# Frontend local env (do not commit frontend/.env)
+frontend/.env
+
+# Docker 이미지 내보내기 파일 (용량 큼)
+deploy/*.tar.gz
+deploy/*.tar
+deploy/.env
+deploy/data/

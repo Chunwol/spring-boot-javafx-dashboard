@@ -49,11 +49,11 @@ public class DashboardPdfService {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pdf-report-dialog-content.fxml"));
             grid = loader.load();
-            weeklyBtn   = (RadioButton) loader.getNamespace().get("weeklyBtn");
-            lastWeekBtn = (RadioButton) loader.getNamespace().get("lastWeekBtn");
-            monthlyBtn  = (RadioButton) loader.getNamespace().get("monthlyBtn");
-            yearCombo   = (ComboBox<Integer>) loader.getNamespace().get("yearCombo");
-            monthCombo  = (ComboBox<Integer>) loader.getNamespace().get("monthCombo");
+            weeklyBtn   = requireNode(loader, "weeklyBtn", RadioButton.class);
+            lastWeekBtn = requireNode(loader, "lastWeekBtn", RadioButton.class);
+            monthlyBtn  = requireNode(loader, "monthlyBtn", RadioButton.class);
+            yearCombo   = requireIntegerCombo(loader, "yearCombo");
+            monthCombo  = requireIntegerCombo(loader, "monthCombo");
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load pdf-report-dialog-content.fxml", e);
         }
@@ -159,5 +159,26 @@ public class DashboardPdfService {
         a.setHeaderText(null);
         a.setContentText(msg);
         a.showAndWait();
+    }
+
+    private static <T> T requireNode(FXMLLoader loader, String key, Class<T> type) {
+        Object node = loader.getNamespace().get(key);
+        if (!type.isInstance(node)) {
+            throw new IllegalStateException("FXML 노드 타입 불일치: " + key);
+        }
+        return type.cast(node);
+    }
+
+    private static ComboBox<Integer> requireIntegerCombo(FXMLLoader loader, String key) {
+        Object node = loader.getNamespace().get(key);
+        if (!(node instanceof ComboBox<?> combo)) {
+            throw new IllegalStateException("FXML 노드 타입 불일치: " + key);
+        }
+        return castIntegerCombo(combo);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ComboBox<Integer> castIntegerCombo(ComboBox<?> combo) {
+        return (ComboBox<Integer>) combo;
     }
 }

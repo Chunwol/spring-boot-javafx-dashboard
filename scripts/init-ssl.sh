@@ -5,9 +5,26 @@
 # ======================================================
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$PROJECT_ROOT"
+
+compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    echo "docker compose not found"
+    exit 1
+  fi
+}
+
 # .env 파일 로드
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  . ./.env
+  set +a
 fi
 
 DOMAIN=${DOMAIN:-pelmon.kro.kr}
@@ -19,7 +36,7 @@ echo "=== [1/4] certbot webroot 디렉토리 준비 ==="
 mkdir -p certbot/www certbot/conf
 
 echo "=== [2/4] Nginx 시작 (HTTP only) ==="
-docker compose up -d nginx
+compose up -d nginx
 
 # Nginx 시작 시간 대기
 sleep 3
@@ -42,7 +59,7 @@ echo "=== [4/4] HTTPS Nginx 설정 활성화 및 리로드 ==="
 cp nginx/conf.d/ssl.conf.disabled nginx/conf.d/ssl.conf
 
 # Nginx 리로드
-docker compose exec nginx nginx -s reload
+compose exec nginx nginx -s reload
 
 echo ""
 echo "✅  HTTPS 설정 완료!"

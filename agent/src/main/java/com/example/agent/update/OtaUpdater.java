@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -26,12 +27,11 @@ import java.security.MessageDigest;
 public class OtaUpdater {
 
     private static final Logger log = LoggerFactory.getLogger(OtaUpdater.class);
-    public static final String CURRENT_VERSION = "1.0.0";
-
     private final OkHttpClient httpClient;
     private final ObjectMapper mapper;
     private final String githubOwner;
     private final String githubRepo;
+    private final String currentVersion;
 
     public OtaUpdater(OkHttpClient httpClient, ObjectMapper mapper,
                       String githubOwner, String githubRepo) {
@@ -39,6 +39,17 @@ public class OtaUpdater {
         this.mapper = mapper;
         this.githubOwner = githubOwner != null ? githubOwner : "";
         this.githubRepo = githubRepo != null ? githubRepo : "";
+        this.currentVersion = resolveCurrentVersion();
+    }
+
+    OtaUpdater(OkHttpClient httpClient, ObjectMapper mapper,
+               String githubOwner, String githubRepo,
+               String currentVersionOverride) {
+        this.httpClient = httpClient;
+        this.mapper = mapper;
+        this.githubOwner = githubOwner != null ? githubOwner : "";
+        this.githubRepo = githubRepo != null ? githubRepo : "";
+        this.currentVersion = sanitizeVersion(currentVersionOverride);
     }
 
     /**
@@ -57,12 +68,12 @@ public class OtaUpdater {
                 return;
             }
 
-            if (!isNewer(release.tagName, CURRENT_VERSION)) {
-                log.info("OTA: 현재 버전 {} 이 최신입니다.", CURRENT_VERSION);
+            if (!isNewer(release.tagName, currentVersion)) {
+                log.info("OTA: 현재 버전 {} 이 최신입니다.", currentVersion);
                 return;
             }
 
-            log.info("OTA: 새 버전 {} 발견 (현재 {}), 업데이트 시작...", release.tagName, CURRENT_VERSION);
+            log.info("OTA: 새 버전 {} 발견 (현재 {}), 업데이트 시작...", release.tagName, currentVersion);
 
             if (release.downloadUrl == null) {
                 log.warn("OTA: 다운로드 URL 없음 → 업데이트 취소");
@@ -100,13 +111,8 @@ public class OtaUpdater {
             String osName = System.getProperty("os.name", "").toLowerCase();
             ProcessBuilder pb;
             if (osName.contains("win")) {
-                // Windows: PowerShell로 대기 후 이동 (cmd timeout은 파이프라인 문제 있음)
-                pb = new ProcessBuilder(
-                        "powershell.exe", "-NoProfile", "-Command",
-                        "Start-Sleep -Seconds 3; Move-Item -Force -Path '" +
-                        newFile.toAbsolutePath() + "' -Destination '" +
-                        selfPath.toAbsolutePath() + "'"
-                );
+                // Windows: 임시 스크립트 파일 + 인자 전달로 경로 문자열 인젝션/이스케이프 문제를 제거한다.
+                pb = buildWindowsSwapProcess(newFile, selfPath);
             } else {
                 pb = new ProcessBuilder(
                         "sh", "-c",
@@ -136,7 +142,7 @@ public class OtaUpdater {
         Request req = new Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "PCAgent/" + CURRENT_VERSION)
+                .header("User-Agent", "PCAgent/" + currentVersion)
                 .build();
 
         try (Response resp = httpClient.newCall(req).execute()) {
@@ -168,7 +174,7 @@ public class OtaUpdater {
     private void downloadFile(String url, Path dest) throws IOException {
         Request req = new Request.Builder()
                 .url(url)
-                .header("User-Agent", "PCAgent/" + CURRENT_VERSION)
+                .header("User-Agent", "PCAgent/" + currentVersion)
                 .build();
         try (Response resp = httpClient.newCall(req).execute()) {
             if (!resp.isSuccessful() || resp.body() == null)
@@ -182,11 +188,68 @@ public class OtaUpdater {
 
     private String fetchTextContent(String url) throws IOException {
         Request req = new Request.Builder().url(url)
-                .header("User-Agent", "PCAgent/" + CURRENT_VERSION).build();
+                .header("User-Agent", "PCAgent/" + currentVersion).build();
         try (Response resp = httpClient.newCall(req).execute()) {
             if (!resp.isSuccessful() || resp.body() == null) return "";
             return resp.body().string();
         }
+    }
+
+    private ProcessBuilder buildWindowsSwapProcess(Path source, Path target) throws IOException {
+        Path script = Files.createTempFile("pcagent-ota-swap-", ".ps1");
+        String scriptBody = """
+                param(
+                  [Parameter(Mandatory=$true)][string]$Source,
+                  [Parameter(Mandatory=$true)][string]$Target
+                )
+                Start-Sleep -Seconds 3
+                Move-Item -LiteralPath $Source -Destination $Target -Force
+                """;
+        Files.writeString(script, scriptBody, StandardCharsets.UTF_8);
+        script.toFile().deleteOnExit();
+
+        return new ProcessBuilder(
+                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", script.toAbsolutePath().toString(),
+                source.toAbsolutePath().toString(),
+                target.toAbsolutePath().toString()
+        );
+    }
+
+    private String resolveCurrentVersion() {
+        String systemValue = System.getProperty("pcagent.version");
+        if (systemValue != null && !systemValue.isBlank()) {
+            return sanitizeVersion(systemValue);
+        }
+
+        String envValue = System.getenv("AGENT_VERSION");
+        if (envValue != null && !envValue.isBlank()) {
+            return sanitizeVersion(envValue);
+        }
+
+        try {
+            Package pkg = OtaUpdater.class.getPackage();
+            if (pkg != null) {
+                String implementationVersion = pkg.getImplementationVersion();
+                if (implementationVersion != null && !implementationVersion.isBlank()) {
+                    return sanitizeVersion(implementationVersion);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        return "dev";
+    }
+
+    static String sanitizeVersion(String version) {
+        if (version == null || version.isBlank()) {
+            return "dev";
+        }
+        return version.trim();
+    }
+
+    String currentVersion() {
+        return currentVersion;
     }
 
     private static String sha256Hex(Path file) throws Exception {

@@ -14,6 +14,7 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +28,7 @@ public class AgentTokenService {
      * 10분 주기로 배치 저장한다.
      */
     private final Map<String, LocalDateTime> lastUsedBuffer = new ConcurrentHashMap<>();
+    private final AtomicBoolean flushRunning = new AtomicBoolean(false);
 
     /** plainToken → SHA-256 해시 후 DB 조회, revoked 확인 */
     @Transactional(readOnly = true)
@@ -50,6 +52,10 @@ public class AgentTokenService {
     @Scheduled(fixedRate = 600_000)
     @Transactional
     public void flushLastUsed() {
+        if (!flushRunning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
         if (lastUsedBuffer.isEmpty()) return;
         // remove(mac, usedAt)로 비교 삭제하면 flush 중 새로 들어온 더 최신 값은 보존된다.
         lastUsedBuffer.forEach((mac, usedAt) -> {
@@ -60,6 +66,9 @@ public class AgentTokenService {
                 tokenRepository.save(tok);
             });
         });
+        } finally {
+            flushRunning.set(false);
+        }
     }
 
     @Transactional

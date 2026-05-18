@@ -15,6 +15,7 @@
                 <TableColumn fx:id="hostnameCol" text="호스트명" prefWidth="120.0" />
                 <TableColumn fx:id="roleCol" text="역할" prefWidth="70.0" />
                 <TableColumn fx:id="statusCol" text="상태" prefWidth="80.0" />
+                <TableColumn fx:id="agentVersionCol" text="에이전트 버전" prefWidth="110.0" />
                 <TableColumn fx:id="beatCol" text="마지막 하트비트" prefWidth="160.0" />
             </columns>
             <columnResizePolicy>

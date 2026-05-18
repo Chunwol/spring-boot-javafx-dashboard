@@ -21,9 +21,7 @@ fi
 
 # Clean up stale processes (optional for agent, but good practice)
 echo "[0/2] Cleaning up any stale database/cache processes..."
-pkill -f "postgres" -9 2>/dev/null || true
-pkill -f "redis-server" -9 2>/dev/null || true
-sleep 1
+bash ./scripts/cleanup-runtime.sh --quiet
 
 # Check if JAR exists
 if [ ! -f "agent/build/libs/agent-1.0.0.jar" ]; then

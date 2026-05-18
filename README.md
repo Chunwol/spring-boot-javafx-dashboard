@@ -81,15 +81,18 @@ scripts\disable-dashboard-autostart.bat
 
 **Mac/Linux/Git Bash:**
 ```bash
+scripts/mac-preflight.sh
+
 scripts/run-dev.sh
 ```
 
 이 명령은 자동으로:
-- PostgreSQL/Redis 설치/실행 상태 점검 및 자동 부트스트랩
-- 백엔드 내장 DB 백업 스케줄러(기본 매일 01:00) 설정 확인
+- 로컬 PostgreSQL/Redis 관련 스테일 프로세스 정리
 - 전체 프로젝트를 빌드
 - 백엔드를 포트 8888에서 시작
 - 프론트엔드를 시작
+
+참고: Mac/Linux에서는 PostgreSQL/Redis 서비스가 별도로 설치되어 있거나 Docker 등으로 준비되어 있어야 합니다.
 
 #### 3️⃣ 개별 실행 (필요시)
 
@@ -222,6 +225,27 @@ scripts\run-frontend-dev.bat        REM 터미널 2
 - **Backend API**: http://localhost:8888
 - **Frontend**: JavaFX GUI 클라이언트 (독립 창)
 
+### macOS에서 프론트엔드 창이 전체화면처럼 보이는 경우
+
+**증상**: 프론트엔드 JavaFX 창이 화면 전체를 차지하거나 비정상 크기로 시작
+
+**원인**:
+- macOS Retina 디스플레이의 DPI 스케일링으로 인한 화면 크기 계산 오류
+- Stage 설정에서 전체화면 모드 미비활성화
+
+**해결방법** (이미 적용됨):
+- 화면 크기 계산을 화면의 80% 이하로 제한 (보수적 크기 설정)
+- `primaryStage.setFullScreen(false)`로 명시적으로 전체화면 비활성화
+- `primaryStage.centerOnScreen()`으로 화면 중앙에 배치
+
+만약 문제가 계속 발생하면, 다음 중 하나를 시도해 보세요:
+1. 시스템 환경설정 > 디스플레이에서 "더 넓은 화면"/"기본" 설정 확인
+2. 프론트엔드 재빌드: `./gradlew :frontend:clean :frontend:run`
+3. JVM 옵션 추가: 위 명령 대신 아래로 실행
+   ```bash
+   ./gradlew :frontend:run -Pargs="-Dapple.awt.fullscreenutilization=false"
+   ```
+
 ## 운영 스모크 테스트
 
 백엔드가 실행 중인 상태에서 아래 스크립트로 핵심 운영 시나리오를 자동 점검할 수 있습니다.
@@ -251,8 +275,12 @@ Windows PowerShell:
 - 포트 바인딩 충돌
 
 **해결방법**:
-1. 백엔드 스크립트(`run-backend.bat`)를 사용하여 시작하면 자동으로 기존 프로세스가 정리됩니다
-2. 수동으로 정리하려면 PowerShell에서 다음 실행:
+1. 백엔드 스크립트를 사용하여 시작하면 자동으로 기존 프로세스가 정리됩니다
+   - Mac/Linux/Git Bash: `./scripts/run-backend-only.sh`
+   - Windows: `scripts\run-backend-only.bat`
+2. 수동으로 정리하려면 환경에 맞게 다음 중 하나를 실행:
+   - Mac/Linux/Git Bash: `./scripts/cleanup-runtime.sh --quiet`
+   - Windows PowerShell:
    ```powershell
    # PostgreSQL 프로세스 종료
    Get-Process -Name "postgres" -ErrorAction SilentlyContinue | ForEach-Object { taskkill /PID $_.Id /F }
@@ -264,7 +292,7 @@ Windows PowerShell:
    Remove-Item ".runtime\redis\redis-runtime.pid" -Force -ErrorAction SilentlyContinue
    Remove-Item ".runtime\postgres\data\postmaster.pid" -Force -ErrorAction SilentlyContinue
    ```
-3. 이후 `run-backend.bat`로 다시 시작
+3. 이후 해당 OS의 백엔드 스크립트로 다시 시작
 
 ## 기여
 
@@ -332,17 +360,17 @@ chmod +x scripts/release-all.sh
 #### 3단계: Docker Compose 스택 시작
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 #### 4단계: 상태 확인
 
 ```bash
 # 컨테이너 실행 상태
-docker-compose ps
+docker compose ps
 
 # 로그 확인
-docker-compose logs -f backend
+docker compose logs -f backend
 ```
 
 ### 배포 문서
@@ -404,13 +432,13 @@ docker exec nginx /opt/renew-ssl.sh
 
 ```bash
 # 실시간 로그
-docker-compose logs -f
+docker compose logs -f
 
 # 리소스 사용량
 docker stats
 
 # 컨테이너 상태
-docker-compose ps
+docker compose ps
 ```
 
 ### 배포 완료 확인

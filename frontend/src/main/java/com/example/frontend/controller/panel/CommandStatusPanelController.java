@@ -1,6 +1,7 @@
 package com.example.frontend.controller.panel;
 
 import com.example.frontend.service.ApiClient;
+import com.example.frontend.util.ApiUrlUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,8 @@ import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.input.MouseButton;
 import javafx.stage.FileChooser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -33,6 +36,47 @@ import java.util.concurrent.TimeUnit;
 public class CommandStatusPanelController {
 
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final Logger log = LoggerFactory.getLogger(CommandStatusPanelController.class);
+    private static final String FETCH_STATUS_QUERY = "QUEUED,DELIVERED,ACKED,COMPLETED,FAILED";
+    private static final String ALL_FILTER = "전체";
+
+    private enum CommandStatus {
+        QUEUED("QUEUED", "대기중"),
+        DELIVERED("DELIVERED", "전송됨"),
+        ACKED("ACKED", "실행중"),
+        COMPLETED("COMPLETED", "완료"),
+        FAILED("FAILED", "실패"),
+        UNKNOWN("", "");
+
+        private final String code;
+        private final String label;
+
+        CommandStatus(String code, String label) {
+            this.code = code;
+            this.label = label;
+        }
+
+        static CommandStatus fromRaw(String rawStatus) {
+            if (rawStatus == null || rawStatus.isBlank()) {
+                return UNKNOWN;
+            }
+            String normalized = rawStatus.trim().toUpperCase(Locale.ROOT);
+            for (CommandStatus status : values()) {
+                if (status.code.equals(normalized)) {
+                    return status;
+                }
+            }
+            return UNKNOWN;
+        }
+
+        boolean isActive() {
+            return this == QUEUED || this == DELIVERED || this == ACKED;
+        }
+
+        String label() {
+            return label;
+        }
+    }
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final ObjectMapper objectMapper = ApiClient.getInstance().getObjectMapper();
@@ -47,6 +91,10 @@ public class CommandStatusPanelController {
     private TextField searchField;
     @FXML
     private ComboBox<String> statusFilterCombo;
+    @FXML
+    private ComboBox<String> typeFilterCombo;
+    @FXML
+    private ComboBox<String> roomFilterCombo;
     @FXML
     private ComboBox<String> sortCombo;
     @FXML
@@ -89,15 +137,27 @@ public class CommandStatusPanelController {
 
         if (statusFilterCombo != null) {
             statusFilterCombo.setItems(FXCollections.observableArrayList(
-                    "전체",
+                    ALL_FILTER,
                     "진행중",
                     "완료",
                     "실패",
                     "검증중",
                     "시점저장필요"
             ));
-            statusFilterCombo.setValue("전체");
+            statusFilterCombo.setValue(ALL_FILTER);
             statusFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        }
+
+        if (typeFilterCombo != null) {
+            typeFilterCombo.setItems(FXCollections.observableArrayList(ALL_FILTER));
+            typeFilterCombo.setValue(ALL_FILTER);
+            typeFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        }
+
+        if (roomFilterCombo != null) {
+            roomFilterCombo.setItems(FXCollections.observableArrayList(ALL_FILTER));
+            roomFilterCombo.setValue(ALL_FILTER);
+            roomFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
         }
 
         if (sortCombo != null) {
@@ -117,7 +177,9 @@ public class CommandStatusPanelController {
             clearButton.getStyleClass().add("btn-sm");
             clearButton.setOnAction(e -> {
                 if (searchField != null) searchField.clear();
-                if (statusFilterCombo != null) statusFilterCombo.setValue("전체");
+                if (statusFilterCombo != null) statusFilterCombo.setValue(ALL_FILTER);
+                if (typeFilterCombo != null) typeFilterCombo.setValue(ALL_FILTER);
+                if (roomFilterCombo != null) roomFilterCombo.setValue(ALL_FILTER);
                 if (sortCombo != null) sortCombo.setValue("최신순");
             });
         }
@@ -143,7 +205,7 @@ public class CommandStatusPanelController {
 
     /** 서버에서 최근 명령 목록을 가져와 UI를 갱신한다. */
     public void refresh() {
-        apiClient.getPagedList("/commands?status=QUEUED,DELIVERED,ACKED,COMPLETED,FAILED&size=200",
+        apiClient.getPagedList("/commands?status=" + FETCH_STATUS_QUERY + "&size=200",
                 new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(commands -> Platform.runLater(() -> updateUI(commands)))
                 .exceptionally(ex -> {
@@ -190,6 +252,7 @@ public class CommandStatusPanelController {
             statusCol.setCellFactory(col -> new TableCell<>() {
                 @Override protected void updateItem(String item, boolean empty) {
                     super.updateItem(item, empty);
+                    Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
                     if (empty || item == null) {
                         setText(null);
                         getStyleClass().removeAll("status-warning", "status-completed", "status-delivered", "status-acked", "status-failed");
@@ -197,16 +260,23 @@ public class CommandStatusPanelController {
                         setText(item);
                         getStyleClass().removeAll("status-warning", "status-completed", "status-delivered", "status-acked", "status-failed");
                         if (item.contains("시점저장")) getStyleClass().add("status-warning");
-                        else if (item.contains("COMPLETED")) getStyleClass().add("status-completed");
-                        else if (item.contains("DELIVERED")) getStyleClass().add("status-delivered");
-                        else if (item.contains("ACKED")) getStyleClass().add("status-acked");
-                        else if (item.contains("FAILED")) getStyleClass().add("status-failed");
+                        else if (row != null) {
+                            switch (resolveCommandStatus(row)) {
+                                case COMPLETED -> getStyleClass().add("status-completed");
+                                case DELIVERED -> getStyleClass().add("status-delivered");
+                                case ACKED -> getStyleClass().add("status-acked");
+                                case FAILED -> getStyleClass().add("status-failed");
+                                default -> {
+                                    // Keep default text style for queued/unknown states.
+                                }
+                            }
+                        }
                     }
                 }
             });
 
             detailCol.setCellFactory(col -> new TableCell<>() {
-                private final Button button = new Button("보기");
+                private final Button button = new Button("상세 보기");
                 {
                     button.getStyleClass().addAll("btn-neutral", "btn-sm");
                 }
@@ -219,10 +289,12 @@ public class CommandStatusPanelController {
                     }
                     String downloadUrl = resolveCollectDownloadUrl(row);
                     if (downloadUrl != null && !downloadUrl.isBlank()) {
-                        button.setText("다운로드");
+                        button.setText("결과 다운로드");
+                        button.setTooltip(new Tooltip("수집 결과 파일을 다운로드합니다."));
                         button.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
                     } else {
-                        button.setText("보기");
+                        button.setText("상세 보기");
+                        button.setTooltip(new Tooltip("명령 실행 상세 정보를 확인합니다."));
                         button.setOnAction(e -> showCommandDetail(row));
                     }
                     setGraphic(button);
@@ -247,12 +319,13 @@ public class CommandStatusPanelController {
     private void updateUI(List<Map<String, Object>> commands) {
         List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(120).toList();
         latestCommands = recent;
+        refreshFilterCombos(recent);
 
-        long queued = recent.stream().filter(c -> "QUEUED".equals(normalizeStatus(asText(c, "status")))).count();
-        long delivered = recent.stream().filter(c -> "DELIVERED".equals(normalizeStatus(asText(c, "status")))).count();
-        long acked = recent.stream().filter(c -> "ACKED".equals(normalizeStatus(asText(c, "status")))).count();
-        long completed = recent.stream().filter(c -> "COMPLETED".equals(normalizeStatus(asText(c, "status")))).count();
-        long failed = recent.stream().filter(c -> "FAILED".equals(normalizeStatus(asText(c, "status")))).count();
+        long queued = recent.stream().filter(c -> resolveCommandStatus(c) == CommandStatus.QUEUED).count();
+        long delivered = recent.stream().filter(c -> resolveCommandStatus(c) == CommandStatus.DELIVERED).count();
+        long acked = recent.stream().filter(c -> resolveCommandStatus(c) == CommandStatus.ACKED).count();
+        long completed = recent.stream().filter(c -> resolveCommandStatus(c) == CommandStatus.COMPLETED).count();
+        long failed = recent.stream().filter(c -> resolveCommandStatus(c) == CommandStatus.FAILED).count();
         long verifying = recent.stream()
             .filter(c -> Set.of("PENDING_OFFLINE", "PENDING_ONLINE").contains(asText(c, "verificationStatus")))
             .count();
@@ -281,6 +354,8 @@ public class CommandStatusPanelController {
         List<Map<String, Object>> filtered = latestCommands.stream()
                 .filter(this::matchesSearch)
                 .filter(this::matchesStatusFilter)
+                .filter(this::matchesTypeFilter)
+                .filter(this::matchesRoomFilter)
                 .sorted(commandComparator())
                 .toList();
         commandTable.setItems(FXCollections.observableArrayList(filtered));
@@ -310,19 +385,74 @@ public class CommandStatusPanelController {
     }
 
     private boolean matchesStatusFilter(Map<String, Object> row) {
-        String filter = statusFilterCombo == null || statusFilterCombo.getValue() == null
-                ? "전체"
-                : statusFilterCombo.getValue();
-        String status = normalizeStatus(asText(row, "status"));
+        String filter = selectedFilterValue(statusFilterCombo);
+        CommandStatus status = resolveCommandStatus(row);
         String detailed = extractDetailedStatus(row);
         return switch (filter) {
-            case "진행중" -> Set.of("QUEUED", "DELIVERED", "ACKED").contains(status);
-            case "완료" -> "COMPLETED".equals(status) && !detailed.contains("확인중") && !detailed.contains("시점저장");
-            case "실패" -> "FAILED".equals(status);
+            case "진행중" -> status.isActive();
+            case "완료" -> status == CommandStatus.COMPLETED && !detailed.contains("확인중") && !detailed.contains("시점저장");
+            case "실패" -> status == CommandStatus.FAILED;
             case "검증중" -> Set.of("PENDING_OFFLINE", "PENDING_ONLINE").contains(asText(row, "verificationStatus"));
             case "시점저장필요" -> "PENDING".equals(asText(row, "scmateResetStatus"));
             default -> true;
         };
+    }
+
+    private boolean matchesTypeFilter(Map<String, Object> row) {
+        String filter = selectedFilterValue(typeFilterCombo);
+        if (ALL_FILTER.equals(filter)) {
+            return true;
+        }
+        return filter.equalsIgnoreCase(extractCommandDisplayType(row));
+    }
+
+    private boolean matchesRoomFilter(Map<String, Object> row) {
+        String filter = selectedFilterValue(roomFilterCombo);
+        if (ALL_FILTER.equals(filter)) {
+            return true;
+        }
+        return filter.equals(extractGroupName(row));
+    }
+
+    private String selectedFilterValue(ComboBox<String> combo) {
+        if (combo == null || combo.getValue() == null || combo.getValue().isBlank()) {
+            return ALL_FILTER;
+        }
+        return combo.getValue();
+    }
+
+    private void refreshFilterCombos(List<Map<String, Object>> recent) {
+        refreshFilterCombo(typeFilterCombo, recent.stream()
+                .map(this::extractCommandDisplayType)
+                .toList());
+        refreshFilterCombo(roomFilterCombo, recent.stream()
+                .map(this::extractGroupName)
+                .toList());
+    }
+
+    private void refreshFilterCombo(ComboBox<String> combo, List<String> values) {
+        if (combo == null) {
+            return;
+        }
+
+        String current = selectedFilterValue(combo);
+        Set<String> uniqueValues = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (String value : values) {
+            if (value == null) {
+                continue;
+            }
+            String normalized = value.trim();
+            if (normalized.isBlank() || "-".equals(normalized)) {
+                continue;
+            }
+            uniqueValues.add(normalized);
+        }
+
+        List<String> items = new ArrayList<>();
+        items.add(ALL_FILTER);
+        items.addAll(uniqueValues);
+        combo.setItems(FXCollections.observableArrayList(items));
+        combo.setValue(items.contains(current) ? current : ALL_FILTER);
     }
 
     private Comparator<Map<String, Object>> commandComparator() {
@@ -367,7 +497,8 @@ public class CommandStatusPanelController {
             String normalized = value.trim().replace(" ", "T");
             try {
                 return LocalDateTime.parse(normalized);
-            } catch (Exception ignored) {
+            } catch (java.time.format.DateTimeParseException ex) {
+                // Try next candidate timestamp.
             }
         }
         return LocalDateTime.MIN;
@@ -381,12 +512,12 @@ public class CommandStatusPanelController {
         if ("PENDING".equals(asText(row, "scmateResetStatus"))) {
             return 1;
         }
-        return switch (normalizeStatus(asText(row, "status"))) {
-            case "ACKED" -> 2;
-            case "DELIVERED" -> 3;
-            case "QUEUED" -> 4;
-            case "FAILED" -> 5;
-            case "COMPLETED" -> 6;
+        return switch (resolveCommandStatus(row)) {
+            case ACKED -> 2;
+            case DELIVERED -> 3;
+            case QUEUED -> 4;
+            case FAILED -> 5;
+            case COMPLETED -> 6;
             default -> 9;
         };
     }
@@ -407,9 +538,14 @@ public class CommandStatusPanelController {
         return status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
     }
 
+    private CommandStatus resolveCommandStatus(Map<String, Object> row) {
+        return CommandStatus.fromRaw(asText(row, "status"));
+    }
+
     /** 상세 상태 추출: SCMATE 상태 포함 */
     private String extractDetailedStatus(Map<String, Object> row) {
-        String status = normalizeStatus(asText(row, "status"));
+        String rawStatus = normalizeStatus(asText(row, "status"));
+        CommandStatus commandStatus = resolveCommandStatus(row);
         String scmateStatus = asText(row, "scmateResetStatus");
         String verificationStatus = asText(row, "verificationStatus");
         String type = asText(row, "commandType", "type");
@@ -429,13 +565,9 @@ public class CommandStatusPanelController {
         }
         
         // 기본 상태
-        return switch(status) {
-            case "QUEUED" -> "대기중";
-            case "DELIVERED" -> "전송됨";
-            case "ACKED" -> "실행중";
-            case "COMPLETED" -> "완료";
-            case "FAILED" -> "실패";
-            default -> status;
+        return switch(commandStatus) {
+            case QUEUED, DELIVERED, ACKED, COMPLETED, FAILED -> commandStatus.label();
+            default -> rawStatus.isBlank() ? "-" : rawStatus;
         };
     }
 
@@ -488,7 +620,8 @@ public class CommandStatusPanelController {
                 return null;
             }
             return objectMapper.readTree(payloadJson);
-        } catch (Exception ignored) {
+        } catch (Exception ex) {
+            log.debug("Failed to parse payloadJson", ex);
             return null;
         }
     }
@@ -593,7 +726,7 @@ public class CommandStatusPanelController {
 
             dialog.getDialogPane().setContent(content);
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Failed to load command detail dialog", e);
             dialog.getDialogPane().setContent(new Label("다이얼로그 로드 실패: " + e.getMessage()));
         }
         dialog.showAndWait();
@@ -645,15 +778,12 @@ public class CommandStatusPanelController {
     }
 
     private String suggestDownloadFilename(Map<String, Object> row) {
-        try {
-            JsonNode payload = parsePayload(row);
-            if (payload != null && payload.has("outputName")) {
-                String n = payload.get("outputName").asText("").trim();
-                if (!n.isBlank()) {
-                    return n.toLowerCase(Locale.ROOT).endsWith(".zip") ? n : n + ".zip";
-                }
+        JsonNode payload = parsePayload(row);
+        if (payload != null && payload.has("outputName")) {
+            String n = payload.get("outputName").asText("").trim();
+            if (!n.isBlank()) {
+                return n.toLowerCase(Locale.ROOT).endsWith(".zip") ? n : n + ".zip";
             }
-        } catch (Exception ignored) {
         }
         String taskId = asText(row, "taskId");
         return (taskId == null || taskId.isBlank()) ? "collected.zip" : "collected-" + taskId + ".zip";
@@ -707,20 +837,7 @@ public class CommandStatusPanelController {
     }
 
     private String normalizeDownloadRequestPath(String downloadUrl) {
-        String u = downloadUrl == null ? "" : downloadUrl.trim();
-        if (u.isBlank()) {
-            return "";
-        }
-        if (u.startsWith("http://") || u.startsWith("https://")) {
-            return u;
-        }
-        if (u.startsWith("/api/v1/")) {
-            return u.substring("/api/v1".length());
-        }
-        if (u.startsWith("/")) {
-            return u;
-        }
-        return "/" + u;
+        return ApiUrlUtil.normalizeDownloadPath(downloadUrl);
     }
 
     private void setLabelText(Map<String, Object> ns, String fxId, String value) {

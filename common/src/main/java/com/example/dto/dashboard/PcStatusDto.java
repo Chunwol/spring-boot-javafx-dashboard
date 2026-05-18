@@ -36,6 +36,9 @@ public class PcStatusDto {
     @Schema(description = "PC 역할", example = "STUDENT", allowableValues = {"STUDENT", "TEACHER"})
     private String role;
 
+    @Schema(description = "에이전트 버전", example = "1.2.0")
+    private String agentVersion;
+
     @Schema(description = "고장 사유", example = "메인보드 불량")
     private String brokenNote;
 }

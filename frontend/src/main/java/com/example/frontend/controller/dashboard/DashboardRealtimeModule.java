@@ -7,6 +7,8 @@ import org.springframework.messaging.converter.StringMessageConverter;
 import org.springframework.messaging.simp.stomp.*;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
+import com.example.frontend.service.ApiClient;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 
 import java.lang.reflect.Type;
 import java.util.concurrent.Executors;
@@ -44,6 +46,11 @@ public class DashboardRealtimeModule {
     private Runnable onDashboardMessage;
     private Consumer<String> onAlertMessage;
     private Runnable onConnectionLost;
+    private Runnable onConnected;
+
+    public void setOnConnected(Runnable onConnected) {
+        this.onConnected = onConnected;
+    }
 
     public DashboardRealtimeModule() {
         this(com.example.frontend.service.ApiClient.getInstance().getWsUrl());
@@ -117,7 +124,19 @@ public class DashboardRealtimeModule {
         stompClient = new WebSocketStompClient(wsClient);
         stompClient.setMessageConverter(new StringMessageConverter());
 
-        stompClient.connectAsync(wsUrl, new StompSessionHandlerAdapter() {
+        // Attach Authorization header if API client has a bearer token
+        StompHeaders connectHeaders = new StompHeaders();
+        try {
+            String token = ApiClient.getInstance().getBearerToken();
+            if (token != null && !token.isBlank()) {
+                connectHeaders.add("Authorization", "Bearer " + token);
+            }
+        } catch (Exception e) {
+            // best-effort: do not fail connect if token retrieval fails
+            log.debug("Failed to retrieve bearer token for WS connect: {}", e.getMessage());
+        }
+
+        stompClient.connectAsync(wsUrl, new WebSocketHttpHeaders(), connectHeaders, new StompSessionHandlerAdapter() {
 
             @Override
             public void afterConnected(StompSession session, StompHeaders headers) {
@@ -125,6 +144,10 @@ public class DashboardRealtimeModule {
                 connecting.set(false);
                 log.info("[WS] Connected to {}", wsUrl);
                 subscribeTopics(session);
+                // Notify listener that connection is established
+                if (onConnected != null) {
+                    Platform.runLater(onConnected);
+                }
             }
 
             @Override

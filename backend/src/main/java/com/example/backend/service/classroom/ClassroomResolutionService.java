@@ -27,7 +27,7 @@ public class ClassroomResolutionService {
     }
 
     /**
-     * IP → 그룹 ID 변환. Caffeine 캐시로 반복적인 full table scan을 방지.
+     * IP → 그룹 ID 변환. Spring Cache(환경별 Redis/Caffeine)로 반복적인 full table scan을 방지.
      * 만료 정책은 application.yml(app.cache.ip-range.*)에서 제어한다.
      */
     @Cacheable(value = "ipRangeCache", key = "#ip")

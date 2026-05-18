@@ -4,19 +4,39 @@ spring:
   profiles:
     active: ${APP_PROFILE:default}
   datasource:
-    url: ${DB_URL:jdbc:sqlite:db/mydatabase.db}
-    driver-class-name: ${DB_DRIVER:org.sqlite.JDBC}
-    username: ${DB_USERNAME:}
-    password: ${DB_PASSWORD:}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/dashboard_db}
+    driver-class-name: ${DB_DRIVER:org.postgresql.Driver}
+    username: ${DB_USERNAME:${POSTGRES_USER:dashboard}}
+    password: ${DB_PASSWORD:${POSTGRES_PASSWORD:dashboard}}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:40}
+      minimum-idle: ${DB_POOL_MIN_IDLE:10}
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1800000}
+      validation-timeout: ${DB_POOL_VALIDATION_TIMEOUT_MS:5000}
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: ${JPA_DDL_AUTO:validate}
     properties:
-      hibernate.dialect: org.hibernate.community.dialect.SQLiteDialect
+      hibernate.dialect: ${JPA_HIBERNATE_DIALECT:org.hibernate.dialect.PostgreSQLDialect}
+      hibernate.jdbc.time_zone: UTC
+      hibernate.jdbc.batch_size: ${JPA_BATCH_SIZE:50}
+      hibernate.order_inserts: true
+      hibernate.order_updates: true
     show-sql: ${JPA_SHOW_SQL:false}
   flyway:
-    enabled: true
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: ${FLYWAY_LOCATIONS:classpath:db/pgmigration}
     validate-on-migrate: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT_MS:5000ms}
+  cache:
+    type: ${SPRING_CACHE_TYPE:redis}
   mail:
     host: ${MAIL_HOST:smtp.example.com}
     port: ${MAIL_PORT:587}
@@ -31,9 +51,16 @@ spring:
       max-request-size: ${MAX_FILE_SIZE:20971520}
 
 server:
+  address: ${SERVER_HOST:0.0.0.0}
   port: ${SERVER_PORT:8888}
   servlet:
     context-path: /
+  tomcat:
+    threads:
+      max: ${SERVER_TOMCAT_MAX_THREADS:400}
+      min-spare: ${SERVER_TOMCAT_MIN_SPARE_THREADS:50}
+    max-connections: ${SERVER_TOMCAT_MAX_CONNECTIONS:8192}
+    accept-count: ${SERVER_TOMCAT_ACCEPT_COUNT:200}
   # Nginx 리버스 프록시의 X-Forwarded-Proto/For 헤더 신뢰
   forward-headers-strategy: NATIVE
   
@@ -42,21 +69,53 @@ scheduler:
   initial-delay: 5000
 
 app:
+  runtime:
+    async:
+      core-pool-size: ${APP_ASYNC_CORE_POOL_SIZE:12}
+      max-pool-size: ${APP_ASYNC_MAX_POOL_SIZE:64}
+      queue-capacity: ${APP_ASYNC_QUEUE_CAPACITY:4000}
+      await-termination-seconds: ${APP_ASYNC_AWAIT_TERMINATION_SECONDS:30}
+    scheduler:
+      pool-size: ${APP_SCHEDULER_POOL_SIZE:4}
+      await-termination-seconds: ${APP_SCHEDULER_AWAIT_TERMINATION_SECONDS:30}
+    websocket:
+      inbound-core-pool-size: ${APP_WS_INBOUND_CORE_POOL_SIZE:8}
+      inbound-max-pool-size: ${APP_WS_INBOUND_MAX_POOL_SIZE:32}
+      inbound-queue-capacity: ${APP_WS_INBOUND_QUEUE_CAPACITY:4000}
+      outbound-core-pool-size: ${APP_WS_OUTBOUND_CORE_POOL_SIZE:8}
+      outbound-max-pool-size: ${APP_WS_OUTBOUND_MAX_POOL_SIZE:32}
+      outbound-queue-capacity: ${APP_WS_OUTBOUND_QUEUE_CAPACITY:4000}
+      message-size-limit-bytes: ${APP_WS_MESSAGE_SIZE_LIMIT_BYTES:1048576}
+      send-buffer-size-limit-bytes: ${APP_WS_SEND_BUFFER_SIZE_LIMIT_BYTES:2097152}
+      send-time-limit-ms: ${APP_WS_SEND_TIME_LIMIT_MS:20000}
   security:
     admin-users: ${ADMIN_USERS:${DEFAULT_ADMIN_USERNAME:admin}}
     viewer-users: ${VIEWER_USERS:${DEFAULT_VIEWER_USERNAME:}}
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
+  collect:
+    max-total-bytes: ${COLLECT_ARTIFACT_MAX_TOTAL_BYTES:32212254720}
+  http-redirect:
+    enabled: ${APP_HTTP_REDIRECT_ENABLED:true}
+    port: ${APP_HTTP_REDIRECT_PORT:8888}
   file-distribution:
     default-wave-size: ${FD_DEFAULT_WAVE_SIZE:20}
     max-wave-size: ${FD_MAX_WAVE_SIZE:100}
+    default-ramp-up-factor: ${FD_DEFAULT_RAMP_UP_FACTOR:1.8}
+    peer-port: ${FD_PEER_PORT:18777}
+    max-peer-candidates: ${FD_MAX_PEER_CANDIDATES:20}
+    peer-shared-secret: ${FD_PEER_SHARED_SECRET:change-me-peer-shared-secret}
     fail-threshold: ${FD_FAIL_THRESHOLD:0.20}
+    auto-rollback-enabled: ${FD_AUTO_ROLLBACK_ENABLED:true}
+    auto-catchup-on-heartbeat: ${FD_AUTO_CATCHUP_ON_HEARTBEAT:true}
+    auto-catchup-failure-cooldown-seconds: ${FD_AUTO_CATCHUP_FAILURE_COOLDOWN_SECONDS:300}
     security:
       enabled: ${FD_SECURITY_ENABLED:false}
       shared-secret: ${FD_SHARED_SECRET:change-me-file-distribution-secret}
       max-skew-seconds: ${FD_SIGNATURE_MAX_SKEW_SECONDS:60}
       require-https: ${FD_REQUIRE_HTTPS:true}
   cache:
+    provider: ${CACHE_PROVIDER:redis}
     ip-range:
       maximum-size: ${IP_RANGE_CACHE_MAX_SIZE:10000}
       expire-minutes: ${IP_RANGE_CACHE_EXPIRE_MINUTES:10}
@@ -64,8 +123,10 @@ app:
     secret: ${JWT_SECRET:your-secret-key-change-me-in-production}
     expiration: ${JWT_EXPIRATION:86400000}
   heartbeat:
-    timeout-minutes: ${HEARTBEAT_TIMEOUT_MINUTES:5}
+    timeout-minutes: ${HEARTBEAT_TIMEOUT_MINUTES:2}
     interval-seconds: ${HEARTBEAT_INTERVAL_SECONDS:120}
+    offline-scan-fixed-rate-ms: ${HEARTBEAT_OFFLINE_SCAN_FIXED_RATE_MS:60000}
+    offline-scan-initial-delay-ms: ${HEARTBEAT_OFFLINE_SCAN_INITIAL_DELAY_MS:30000}
     persist-interval-seconds: ${HEARTBEAT_PERSIST_INTERVAL_SECONDS:30}
   command:
     timeout-seconds: ${COMMAND_TIMEOUT_SECONDS:45}
@@ -75,6 +136,8 @@ app:
   traffic:
     alert-threshold-mbps: ${TRAFFIC_ALERT_THRESHOLD_MBPS:100}
     log-min-interval-seconds: ${TRAFFIC_LOG_MIN_INTERVAL_SECONDS:30}
+  dashboard:
+    traffic-lookback-seconds: ${DASHBOARD_TRAFFIC_LOOKBACK_SECONDS:0}
   audit:
     flush-interval-ms: ${AUDIT_FLUSH_INTERVAL_MS:2000}
     flush-batch-size: ${AUDIT_FLUSH_BATCH_SIZE:200}
@@ -85,6 +148,28 @@ app:
     requests-per-minute: ${RATELIMIT_REQUESTS_PER_MINUTE:600}
     requests-per-hour: ${RATELIMIT_REQUESTS_PER_HOUR:30000}
     concurrent-requests: ${RATELIMIT_CONCURRENT_REQUESTS:100}
+  backup:
+    enabled: ${DB_BACKUP_ENABLED:true}
+    cron: ${DB_BACKUP_CRON:0 0 1 * * *}
+    zone: ${DB_BACKUP_ZONE:Asia/Seoul}
+    dir: ${DB_BACKUP_DIR:./backups/postgres}
+    keep-days: ${DB_BACKUP_KEEP_DAYS:14}
+    pg-dump-path: ${PG_DUMP_PATH:pg_dump}
+    timeout-minutes: ${DB_BACKUP_TIMEOUT_MINUTES:30}
+    lock-key: ${DB_BACKUP_LOCK_KEY:94503177}
+  metrics:
+    alert:
+      command-failure-rate: ${METRICS_ALERT_COMMAND_FAILURE_RATE:0.25}
+      transfer-failure-rate: ${METRICS_ALERT_TRANSFER_FAILURE_RATE:0.25}
+      request-error-rate: ${METRICS_ALERT_REQUEST_ERROR_RATE:0.15}
+      forbidden-rate: ${METRICS_ALERT_FORBIDDEN_RATE:0.40}
+      ack-p95-ms: ${METRICS_ALERT_ACK_P95_MS:20000}
+      result-p95-ms: ${METRICS_ALERT_RESULT_P95_MS:45000}
+      online-ratio-min: ${METRICS_ALERT_ONLINE_RATIO_MIN:0.70}
+      window-seconds: ${METRICS_ALERT_WINDOW_SECONDS:300}
+      min-command-samples: ${METRICS_ALERT_MIN_COMMAND_SAMPLES:10}
+      min-transfer-samples: ${METRICS_ALERT_MIN_TRANSFER_SAMPLES:10}
+      min-request-samples: ${METRICS_ALERT_MIN_REQUEST_SAMPLES:20}
 
 agent:
   install-key: ${AGENT_INSTALL_KEY:INST-CHANGE-ME-BEFORE-DEPLOY}
@@ -105,3 +190,24 @@ springdoc:
   api-docs:
     path: /v3/api-docs
   show-actuator: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+    prometheus:
+      enabled: true
+  health:
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  metrics:
+    tags:
+      application: ${APP_NAME:Classroom Dashboard}

@@ -18,7 +18,11 @@ if [ ! -f "gradlew" ]; then
     exit 1
 fi
 
-echo "Building Agent JAR..."
+# Clean up stale processes (agent doesn't use DB but good for consistency)
+echo "[0/1] Cleaning up stale processes..."
+bash ./scripts/cleanup-runtime.sh --quiet
+
+echo "[1/1] Building Agent JAR..."
 ./gradlew :agent:build -x test
 
 echo ""

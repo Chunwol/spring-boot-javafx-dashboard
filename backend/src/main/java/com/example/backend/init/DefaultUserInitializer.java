@@ -26,7 +26,7 @@ public class DefaultUserInitializer implements ApplicationRunner {
     @Value("${DEFAULT_ADMIN_EMAIL:admin@example.com}")
     private String defaultAdminEmail;
 
-    @Value("${DEFAULT_ADMIN_SYNC_ON_STARTUP:true}")
+    @Value("${DEFAULT_ADMIN_SYNC_ON_STARTUP:false}")
     private boolean defaultAdminSyncOnStartup;
 
     @Value("${DEFAULT_VIEWER_USERNAME:}")
@@ -40,6 +40,18 @@ public class DefaultUserInitializer implements ApplicationRunner {
 
     @Value("${DEFAULT_VIEWER_SYNC_ON_STARTUP:false}")
     private boolean defaultViewerSyncOnStartup;
+
+    @Value("${DEFAULT_USER_USERNAME:}")
+    private String defaultUserUsername;
+
+    @Value("${DEFAULT_USER_PASSWORD:}")
+    private String defaultUserPassword;
+
+    @Value("${DEFAULT_USER_EMAIL:user@example.com}")
+    private String defaultUserEmail;
+
+    @Value("${DEFAULT_USER_SYNC_ON_STARTUP:false}")
+    private boolean defaultUserSyncOnStartup;
 
     public DefaultUserInitializer(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
@@ -58,6 +70,12 @@ public class DefaultUserInitializer implements ApplicationRunner {
             syncUserFromEnv(defaultViewerUsername, defaultViewerPassword, defaultViewerEmail, "viewer");
         } else {
             logger.info("DEFAULT_VIEWER_SYNC_ON_STARTUP is false. Skipping viewer sync.");
+        }
+
+        if (defaultUserSyncOnStartup) {
+            syncUserFromEnv(defaultUserUsername, defaultUserPassword, defaultUserEmail, "user");
+        } else {
+            logger.info("DEFAULT_USER_SYNC_ON_STARTUP is false. Skipping user sync.");
         }
     }
 

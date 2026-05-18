@@ -30,8 +30,10 @@ public class AgentConfigValidator {
         }
 
         // Validate installKey
-        if (config.getInstallKey() == null || config.getInstallKey().isBlank()) {
-            errors.add("installKey is required");
+        // agentToken이 비어 있을 때만 installKey가 필요하다.
+        boolean hasAgentToken = config.getAgentToken() != null && !config.getAgentToken().isBlank();
+        if (!hasAgentToken && (config.getInstallKey() == null || config.getInstallKey().isBlank())) {
+            errors.add("installKey is required when agentToken is empty");
         }
 
         // Validate heartbeat interval

@@ -36,9 +36,13 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers(
+                    "/actuator/health",
+                    "/actuator/health/**",
                     "/api/v1/auth/login",
                     "/api/v1/agent/register",
                     "/api/v1/agent/uploads",
+                    "/api/v1/agent/file-chunks",
+                    "/api/v1/agent/file-chunks/**",
                     "/api/v1/heartbeat",
                     "/api/v1/heartbeat/**",
                     "/api/v1/scripts/*/download",
@@ -47,6 +51,7 @@ public class SecurityConfig {
                     "/swagger-ui.html",
                     "/v3/api-docs/**"
                 ).permitAll()
+                .requestMatchers("/actuator/prometheus").hasRole("ADMIN")
                 // 에이전트 명령 엔드포인트: AgentTokenInterceptor에서 토큰 검증 (인증 불필요 but filter 통과)
                 .requestMatchers("/api/v1/agent/commands/**").permitAll()
                 // 조회용 API는 ADMIN/USER/VIEWER 허용

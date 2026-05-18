@@ -93,7 +93,7 @@ tasks.register('deployPackage', Zip) {
 
     // 설정 및 배포 스크립트 포함
     from("${rootDir}/scripts") {
-        include 'config.json'
+        include 'config.json', 'config.template.json'
         include 'install.bat'
         include 'uninstall.bat'
         include 'agent-watchdog.ps1'

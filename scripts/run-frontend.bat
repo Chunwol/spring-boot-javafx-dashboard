@@ -22,4 +22,6 @@ echo Press Ctrl+C to stop
 echo.
 
 java -jar frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
+set EXIT_CODE=%ERRORLEVEL%
 endlocal
+exit /b %EXIT_CODE%

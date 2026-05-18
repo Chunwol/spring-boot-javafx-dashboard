@@ -147,6 +147,7 @@ public class PcStatusService {
         dto.setGroupId(pc.getGroupId());
         dto.setStatus(pc.getStatus());
         dto.setRole(pc.getRole());
+        dto.setAgentVersion(pc.getAgentVersion());
         dto.setBrokenNote(pc.getBrokenNote());
         dto.setLastSeen(pc.getLastSeen());
         return dto;

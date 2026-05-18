@@ -13,7 +13,7 @@ echo.
 
 REM 0. Clean up stale processes
 echo [0/6] Cleaning up stale database/cache processes...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$redisProcs = Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue; if ($redisProcs) { $redisProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }; $postgresProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue; if ($postgresProcs) { $postgresProcs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\cleanup-runtime.ps1" -NoBanner
 echo.
 
 REM 1. Common module

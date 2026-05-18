@@ -43,4 +43,17 @@ class DashboardPanelDtoTest {
         assertThat(dto.getPanelType()).isNull();
         assertThat(dto.isVisible()).isFalse();
     }
+
+    @Test
+    void deserializesZIndexWithBackwardCompatibleAliases() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        DashboardPanelDto camelCase = mapper.readValue("{\"zIndex\":7}", DashboardPanelDto.class);
+        DashboardPanelDto lowerCase = mapper.readValue("{\"zindex\":8}", DashboardPanelDto.class);
+        DashboardPanelDto snakeCase = mapper.readValue("{\"z_index\":9}", DashboardPanelDto.class);
+
+        assertThat(camelCase.getZIndex()).isEqualTo(7);
+        assertThat(lowerCase.getZIndex()).isEqualTo(8);
+        assertThat(snakeCase.getZIndex()).isEqualTo(9);
+    }
 }

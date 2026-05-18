@@ -60,16 +60,21 @@ REM Start frontend in new terminal window
 echo [4/5] Starting Frontend in new window...
 start "Frontend - JavaFX GUI" cmd /c "cd /d "%PROJECT_ROOT%" && gradlew.bat :frontend:run"
 
+echo [5/5] Starting Agent in new window...
+start "Agent - PCAgent" /D "%PROJECT_ROOT%" cmd /c scripts\run-agent.bat
+
 echo.
 echo ============================================================
 echo === Services Running ===
 echo ============================================================
 echo Backend:  http://localhost:8888
 echo Frontend: Check Frontend window
+echo Agent:    scripts\run-agent.bat
 echo.
 echo To stop:
 echo   - Close Backend window
 echo   - Close Frontend window
+echo   - Close Agent window
 echo ============================================================
 echo.
 

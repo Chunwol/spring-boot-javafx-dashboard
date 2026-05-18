@@ -2,9 +2,11 @@ package com.example.backend.service.scheduler;
 
 import com.example.backend.model.command.CommandQueue;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.alert.OperationalAlertRepository;
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.service.status.OperationalMetricsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,8 +22,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class SchedulerServiceTest {
@@ -29,7 +35,10 @@ class SchedulerServiceTest {
     @Mock TrafficLogsRepository trafficRepo;
     @Mock PcMasterRepository pcRepo;
     @Mock CommandQueueRepository commandQueueRepository;
+    @Mock OperationalAlertRepository operationalAlertRepository;
+    @Mock OperationalMetricsService operationalMetricsService;
     @Mock ApplicationEventPublisher eventPublisher;
+    @Mock ObjectMapper objectMapper;
 
     @InjectMocks SchedulerService schedulerService;
 
@@ -40,6 +49,12 @@ class SchedulerServiceTest {
         ReflectionTestUtils.setField(schedulerService, "commandVerifyOfflineTimeoutSeconds", 120L);
         ReflectionTestUtils.setField(schedulerService, "commandVerifyOfflineSilenceSeconds", 40L);
         ReflectionTestUtils.setField(schedulerService, "commandVerifyOnlineTimeoutSeconds", 240L);
+
+        ObjectMapper realMapper = new ObjectMapper();
+        lenient().when(objectMapper.readTree(anyString()))
+                .thenAnswer(invocation -> realMapper.readTree(invocation.getArgument(0, String.class)));
+        lenient().when(operationalMetricsService.snapshot()).thenReturn(java.util.Map.of());
+        lenient().when(operationalMetricsService.snapshotRecent(anyInt())).thenReturn(java.util.Map.of());
     }
 
     @Test
@@ -71,7 +86,7 @@ class SchedulerServiceTest {
         pc.setStatus("OFFLINE");
 
         when(commandQueueRepository.findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
-                List.of("PENDING_OFFLINE", "PENDING_ONLINE"))).thenReturn(List.of(cmd));
+                List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_REBOOT_CONFIRM"))).thenReturn(List.of(cmd));
         when(pcRepo.findById(cmd.getMacAddress())).thenReturn(Optional.of(pc));
 
         schedulerService.reconcilePowerStateVerificationNow();
@@ -100,7 +115,7 @@ class SchedulerServiceTest {
         pc.setLastSeen(past.minusMinutes(2));
 
         when(commandQueueRepository.findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
-                List.of("PENDING_OFFLINE", "PENDING_ONLINE"))).thenReturn(List.of(cmd));
+                List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_REBOOT_CONFIRM"))).thenReturn(List.of(cmd));
         when(pcRepo.findById(cmd.getMacAddress())).thenReturn(Optional.of(pc));
 
         schedulerService.reconcilePowerStateVerificationNow();
@@ -110,5 +125,40 @@ class SchedulerServiceTest {
         assertThat(captor.getValue().getStatus()).isEqualTo("FAILED");
         assertThat(captor.getValue().getVerificationStatus()).isEqualTo("FAILED");
         assertThat(captor.getValue().getStderr()).contains("did not come back online");
+    }
+
+    @Test
+    void reconcilePowerStateVerification_agentUpdateConfirmed_acknowledgesAlert() {
+        CommandQueue cmd = new CommandQueue();
+        cmd.setTaskId(12L);
+        cmd.setMacAddress("AA:11:BB:22:CC:33");
+        cmd.setCommandType("AGENT_UPDATE");
+        cmd.setVerificationStatus("PENDING_REBOOT_CONFIRM");
+        cmd.setPayloadJson("{\"targetVersion\":\"1.2.0\",\"preUpdateSessionId\":\"session-old\"}");
+        cmd.setCompletedAt(LocalDateTime.now().minusMinutes(5));
+
+        PcMaster pc = new PcMaster();
+        pc.setMacAddress(cmd.getMacAddress());
+        pc.setStatus("ONLINE");
+        pc.setAgentVersion("1.2.0");
+        pc.setLastAgentSessionId("session-new");
+        pc.setLastSeen(LocalDateTime.now());
+
+        when(commandQueueRepository.findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
+                List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_REBOOT_CONFIRM"))).thenReturn(List.of(cmd));
+        when(pcRepo.findById(cmd.getMacAddress())).thenReturn(Optional.of(pc));
+
+        schedulerService.reconcilePowerStateVerificationNow();
+
+        ArgumentCaptor<CommandQueue> commandCaptor = ArgumentCaptor.forClass(CommandQueue.class);
+        verify(commandQueueRepository).save(commandCaptor.capture());
+        assertThat(commandCaptor.getValue().getVerificationStatus()).isEqualTo("CONFIRMED");
+        assertThat(commandCaptor.getValue().getVerificationCompletedAt()).isNotNull();
+
+        verify(operationalAlertRepository).acknowledgeUnreadBySourceAndType(
+                org.mockito.ArgumentMatchers.eq(cmd.getMacAddress()),
+                org.mockito.ArgumentMatchers.eq("UPDATE_REBOOT_REQUIRED"),
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class),
+                org.mockito.ArgumentMatchers.eq("system-auto"));
     }
 }

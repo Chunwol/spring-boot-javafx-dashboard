@@ -94,7 +94,12 @@ docker build -t dashboard-backend:latest -f Dockerfile .
 docker run -d --name backend \
   -e SERVER_PORT=8888 \
   -e JWT_SECRET=your_secret_key \
-  -v ./backend/db:/app/db \
+  -e DB_URL=jdbc:postgresql://postgres:5432/dashboard_db \
+  -e DB_DRIVER=org.postgresql.Driver \
+  -e DB_USERNAME=dashboard \
+  -e DB_PASSWORD=dashboard \
+  -e REDIS_HOST=redis \
+  -e REDIS_PORT=6379 \
   -v ./backend/uploads:/app/uploads \
   -p 8888:8888 \
   dashboard-backend:latest
@@ -111,7 +116,11 @@ JWT_SECRET=your_jwt_secret_key_here
 AGENT_INSTALL_KEY=your_agent_install_key_here
 
 # Database
-DATABASE_URL=jdbc:sqlite:/app/db/mydatabase.db
+DB_URL=jdbc:postgresql://postgres:5432/dashboard_db
+DB_DRIVER=org.postgresql.Driver
+DB_USERNAME=dashboard
+DB_PASSWORD=dashboard
+FLYWAY_LOCATIONS=classpath:db/pgmigration
 
 # 기타
 ALLOWED_ORIGINS=https://pelmon.kro.kr
@@ -120,9 +129,9 @@ WEBSOCKET_URL=wss://pelmon.kro.kr/ws
 
 #### 데이터베이스
 
-- **위치**: `/app/db/mydatabase.db` (볼륨 마운트)
-- **초기화**: `scripts/init-sql/init-db.sql` 실행 필요
-- **포맷**: SQLite
+- **엔진**: PostgreSQL 16+
+- **초기화**: Flyway (`backend/src/main/resources/db/migration/postgresql/V1__baseline.sql`)
+- **캐시**: Redis 7+
 
 #### API 엔드포인트
 
@@ -463,7 +472,7 @@ CREATE INDEX idx_heartbeat_pc ON heartbeat(pc_id);
 - [ ] HTTPS 인증서 자동 갱신 확인
 - [ ] 백엔드 포트 8888이 외부에 노출되지 않음
 - [ ] Nginx X-Forwarded-* 헤더 활성화 확인
-- [ ] 데이터베이스 백업 정책 수립
+- [x] 데이터베이스 백업 정책 수립 (일일 자동 백업 + 빈 DB 자동 복구)
 - [ ] 방화벽 규칙: 80, 443 외부 접근 허용, 8888 차단
 
 ---
@@ -473,10 +482,13 @@ CREATE INDEX idx_heartbeat_pc ON heartbeat(pc_id);
 ### 백업
 
 ```bash
-# 데이터베이스 백업
-docker exec backend cp -r /app/db /backup/db_$(date +%Y%m%d)
+# Windows 로컬 실행(권장)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/db-backup.ps1
 
-# 업로드 파일 백업
+# Docker 환경에서 수동 PostgreSQL 백업 예시
+docker exec -e PGPASSWORD=$DB_PASSWORD postgres pg_dump -U $DB_USERNAME -d $POSTGRES_DB -F c > db_$(date +%Y%m%d).dump
+
+# 업로드 파일 백업 (Docker)
 docker exec backend cp -r /app/uploads /backup/uploads_$(date +%Y%m%d)
 ```
 
@@ -538,3 +550,4 @@ docker stats
 
 **마지막 업데이트**: 2026-03-18
 **담당자**: DevOps Team
+

@@ -4,6 +4,7 @@ import com.example.dto.dashboard.PcStatusDto;
 import com.example.frontend.config.FrontendEnvConfig;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.ApiClientException;
+import com.example.frontend.util.ApiUrlUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -65,7 +66,7 @@ public class DashboardPcManagementModule {
     private static final long LARGE_TRANSFER_WARNING_BYTES = 8L * 1024L * 1024L * 1024L; // 8GB+
     private static final double ESTIMATED_TRANSFER_MB_PER_SEC = 30.0;
     private static final int REMOTE_LIST_PAGE_SIZE = 200;
-    private static final int REMOTE_LIST_POLL_INTERVAL_MS = 500;
+    private static final int REMOTE_LIST_POLL_INTERVAL_MS = 150;
     private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
     private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
     private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";
@@ -192,6 +193,7 @@ public class DashboardPcManagementModule {
             TableColumn<PcStatusDto, String> hostnameCol = (TableColumn<PcStatusDto, String>) ns.get("hostnameCol");
             TableColumn<PcStatusDto, Void> roleCol = (TableColumn<PcStatusDto, Void>) ns.get("roleCol");
             TableColumn<PcStatusDto, Void> statusCol = (TableColumn<PcStatusDto, Void>) ns.get("statusCol");
+            TableColumn<PcStatusDto, String> agentVersionCol = (TableColumn<PcStatusDto, String>) ns.get("agentVersionCol");
             TableColumn<PcStatusDto, String> beatCol = (TableColumn<PcStatusDto, String>) ns.get("beatCol");
 
             pcTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
@@ -202,6 +204,10 @@ public class DashboardPcManagementModule {
                 c.getValue().getIpAddress() != null ? c.getValue().getIpAddress() : "-"));
             hostnameCol.setCellValueFactory(c -> Bindings.createStringBinding(() ->
                 c.getValue().getPcName() != null ? c.getValue().getPcName() : "-"));
+            agentVersionCol.setCellValueFactory(c -> Bindings.createStringBinding(() -> {
+                String version = c.getValue().getAgentVersion();
+                return version != null && !version.isBlank() ? version : "-";
+            }));
             beatCol.setCellValueFactory(c -> Bindings.createStringBinding(() ->
                 c.getValue().getLastSeen() != null ? c.getValue().getLastSeen().toString() : "-"));
 
@@ -222,6 +228,20 @@ public class DashboardPcManagementModule {
                     PcStatusDto pc = getTableRow().getItem();
                     Label lbl = new Label(pc.isOnline() ? "● 온라인" : "○ 오프라인");
                     lbl.getStyleClass().add(pc.isOnline() ? "pcmgmt-status-online" : "pcmgmt-status-offline");
+                    setGraphic(lbl);
+                }
+            });
+            agentVersionCol.setCellFactory(col -> new TableCell<>() {
+                @Override protected void updateItem(String item, boolean empty) {
+                    super.updateItem(item, empty);
+                    if (empty || item == null || item.isBlank() || "-".equals(item)) {
+                        setText(null);
+                        setGraphic(null);
+                        return;
+                    }
+                    Label lbl = new Label(item);
+                    lbl.getStyleClass().add("code-tag");
+                    setText(null);
                     setGraphic(lbl);
                 }
             });
@@ -1176,10 +1196,10 @@ public class DashboardPcManagementModule {
                 destinationPathLocal.setVisible(custom);
                 destinationPathLocal.setManaged(custom);
             });
-            CheckBox runAfterTransferLocal = new CheckBox("전송 후 실행 (파일 전송 시)");
+            CheckBox runAfterTransferLocal = new CheckBox("전송 후 실행");
             boolean preselectedRunAfter = transferSource != null && transferSource.preRunAfter();
             runAfterTransferLocal.setSelected(preselectedRunAfter);
-            runAfterTransferLocal.setDisable(!transferCommand || transferSource == null || !"file".equals(transferSource.sourceType()));
+            runAfterTransferLocal.setDisable(!transferCommand);
 
             Label hintLabel = styledLabel(
                 transferCommand
@@ -1536,7 +1556,7 @@ public class DashboardPcManagementModule {
 
                         AtomicLong lastUpdate = new AtomicLong(0);
                         updateProgress(progress, agentLabel, "다운로드 시작...", 0, -1, done.get(), total, startMs);
-                        apiClient.downloadToFile(downloadUrl, savePath, (received, totalBytes) -> {
+                        apiClient.downloadToFile(ApiUrlUtil.normalizeDownloadPath(downloadUrl), savePath, (received, totalBytes) -> {
                             long now = System.currentTimeMillis();
                             if (now - lastUpdate.get() > 200) { // 200ms 마다 UI 업데이트
                                 lastUpdate.set(now);
@@ -1573,12 +1593,10 @@ public class DashboardPcManagementModule {
                     // 진행 창을 Stage로 찾아 닫기
                     overallBarStageClose(progress);
                 }
-                showAlert(
+                showCollectResultDialog(
                         finalFailed == 0 ? "수집 완료" : "수집 부분 완료",
-                        String.format("성공: %d대%s\n\n저장된 파일:\n%s",
-                                finalDone,
-                                finalFailed > 0 ? " / 실패: " + finalFailed + "대" : "",
-                                detail.isBlank() ? "(없음)" : detail),
+                        finalDone, finalFailed,
+                        detail.isBlank() ? "(없음)" : detail,
                         finalFailed == 0 ? Alert.AlertType.INFORMATION : Alert.AlertType.WARNING
                 );
             });
@@ -1793,12 +1811,20 @@ public class DashboardPcManagementModule {
         // ─── 하단 상태바 ─────────────────────────────────────────
         Label driveStatusLabel = new Label("로딩 중...");
         driveStatusLabel.getStyleClass().add("rfe-status-text");
+        driveStatusLabel.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(driveStatusLabel, Priority.ALWAYS);
+
         Label estimateLabel = new Label("선택 예상 전송량: -");
         estimateLabel.getStyleClass().add("rfe-status-text");
+        estimateLabel.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(estimateLabel, Priority.ALWAYS);
 
-        Separator statSep = new Separator(Orientation.VERTICAL);
-        HBox statusBar = new HBox(12, driveStatusLabel, statSep, estimateLabel);
-        statusBar.setAlignment(Pos.CENTER_LEFT);
+        HBox driveRow    = new HBox(driveStatusLabel);
+        HBox estimateRow = new HBox(estimateLabel);
+        driveRow.setAlignment(Pos.CENTER_LEFT);
+        estimateRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox statusBar = new VBox(2, driveRow, estimateRow);
         statusBar.getStyleClass().add("rfe-status-bar");
         statusBar.setPadding(new Insets(5, 12, 5, 12));
 
@@ -1897,10 +1923,20 @@ public class DashboardPcManagementModule {
             if (dialog.getDialogPane() == null || dialog.getDialogPane().getScene() == null) {
                 return;
             }
-            if (currentPath[0] != null && !currentPath[0].isBlank()) {
-                return;
-            }
-            Platform.runLater(refresh);
+            // currentPath[0] 읽기를 UI 스레드에서 수행 — 스케줄러 스레드의 가시성 문제 방지
+            Platform.runLater(() -> {
+                if (currentPath[0] != null && !currentPath[0].isBlank()) {
+                    return;
+                }
+                int epoch = browseEpoch[0];
+                loadRemoteEntriesAsync(
+                        browsePc, "", 0, REMOTE_LIST_PAGE_SIZE, false,
+                        currentPathField, remoteList, currentPath, usbOnlyCheck,
+                        driveStatusLabel, driveSnapshotRef, usbDriveRoots,
+                        loadMoreButton, pagingStatusLabel, loadingLabel,
+                        nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
+                );
+            });
         }, 4, 4, TimeUnit.SECONDS);
         dialog.setOnHidden(evt -> refreshScheduler.shutdownNow());
 
@@ -1930,6 +1966,8 @@ public class DashboardPcManagementModule {
         });
 
         remoteList.setOnMouseClicked(ev -> {
+            // 더블클릭 시에만 이동 — 단순 클릭은 선택만 수행
+            if (ev.getClickCount() < 2) return;
             // 셀에서 직접 item 취득 — getSelectedItem()은 MOUSE_PRESSED~CLICKED 사이에
             // setItems()가 끼어들면 null이 될 수 있어 셀 기반으로 우회
             javafx.scene.Node n = (javafx.scene.Node) ev.getTarget();
@@ -2229,11 +2267,13 @@ public class DashboardPcManagementModule {
         if (currentPath == null || currentPath.isBlank()) {
             return entry.name;
         }
+        // "C:" is a relative path in Java — normalize to "C:\" before resolving.
+        String base = currentPath.matches("[A-Za-z]:") ? currentPath + "\\" : currentPath;
         try {
-            return Path.of(currentPath).resolve(entry.name).normalize().toString();
+            return Path.of(base).resolve(entry.name).normalize().toString();
         } catch (Exception ex) {
-            String sep = currentPath.endsWith("\\") || currentPath.endsWith("/") ? "" : "\\";
-            return currentPath + sep + entry.name;
+            String sep = base.endsWith("\\") || base.endsWith("/") ? "" : "\\";
+            return base + sep + entry.name;
         }
     }
 
@@ -2540,11 +2580,12 @@ public class DashboardPcManagementModule {
 
         addFileBtn.setOnAction(e -> {
             FileChooser fc = new FileChooser();
-            fc.setTitle("파일 선택");
-            File f = fc.showOpenDialog(null);
-            if (f != null) {
-                SelectableTransferItem item = new SelectableTransferItem("file", f.getName(), f.getAbsolutePath(), true, "", f.length(), false);
-                items.add(item);
+            fc.setTitle("파일 선택 (다중 선택 가능)");
+            List<File> chosen = fc.showOpenMultipleDialog(null);
+            if (chosen != null && !chosen.isEmpty()) {
+                for (File f : chosen) {
+                    items.add(new SelectableTransferItem("file", f.getName(), f.getAbsolutePath(), true, "", f.length(), false));
+                }
                 refreshItemsList(itemsList, items);
             }
         });
@@ -2621,9 +2662,10 @@ public class DashboardPcManagementModule {
                 runCheck   = (CheckBox) loader.getNamespace().get("runCheck");
             } catch (Exception ex) {
                 itemRow  = new HBox(10);
-                nameLabel = new Label(); nameLabel.setPrefWidth(260); nameLabel.getStyleClass().add("pcmgmt-transfer-item-name");
-                sizeLabel = new Label(); sizeLabel.setPrefWidth(90);  sizeLabel.getStyleClass().add("pcmgmt-transfer-item-size");
-                typeLabel = new Label(); typeLabel.setPrefWidth(50);  typeLabel.getStyleClass().add("pcmgmt-transfer-item-type");
+                nameLabel = new Label(); nameLabel.setMinWidth(120); nameLabel.setMaxWidth(Double.MAX_VALUE);
+                HBox.setHgrow(nameLabel, Priority.ALWAYS); nameLabel.getStyleClass().add("pcmgmt-transfer-item-name");
+                sizeLabel = new Label(); sizeLabel.setMinWidth(80); sizeLabel.setPrefWidth(90);  sizeLabel.getStyleClass().add("pcmgmt-transfer-item-size");
+                typeLabel = new Label(); typeLabel.setMinWidth(40); typeLabel.setPrefWidth(50);  typeLabel.getStyleClass().add("pcmgmt-transfer-item-type");
                 runCheck  = new CheckBox("실행");
                 itemRow.getChildren().addAll(nameLabel, sizeLabel, typeLabel, runCheck);
             }
@@ -2720,6 +2762,39 @@ public class DashboardPcManagementModule {
         }
 
         return tmpZip;
+    }
+
+    /** 수집 완료 결과를 스크롤 가능한 TextArea로 표시 (긴 경로 짤림 방지) */
+    private void showCollectResultDialog(String title, int done, int failed, String pathDetail, Alert.AlertType type) {
+        Alert alert = new Alert(type);
+        alert.setTitle(title);
+        alert.setHeaderText(String.format("성공: %d대%s", done,
+                failed > 0 ? " / 실패: " + failed + "대" : ""));
+
+        TextArea area = new TextArea("저장된 파일:\n" + pathDetail);
+        area.setEditable(false);
+        area.setWrapText(false);
+        area.setPrefRowCount(Math.min(savedPathsLineCount(pathDetail), 12));
+        area.setPrefColumnCount(60);
+        area.setStyle("-fx-font-family: monospace; -fx-font-size: 12px;");
+
+        area.setMaxWidth(Double.MAX_VALUE);
+        area.setMaxHeight(Double.MAX_VALUE);
+        GridPane.setVgrow(area, Priority.ALWAYS);
+        GridPane.setHgrow(area, Priority.ALWAYS);
+
+        GridPane expContent = new GridPane();
+        expContent.setMaxWidth(Double.MAX_VALUE);
+        expContent.add(area, 0, 0);
+
+        alert.getDialogPane().setExpandableContent(expContent);
+        alert.getDialogPane().setExpanded(true);
+        alert.getDialogPane().setPrefWidth(680);
+        alert.showAndWait();
+    }
+
+    private int savedPathsLineCount(String detail) {
+        return (int) detail.chars().filter(c -> c == '\n').count() + 1;
     }
 
     private void showAlert(String title, String content, Alert.AlertType type) {

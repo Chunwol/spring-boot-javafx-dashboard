@@ -36,8 +36,12 @@
         <HBox alignment="CENTER_LEFT" spacing="8">
             <children>
                 <TextField fx:id="searchField" prefWidth="260" promptText="검색: PC명, IP, MAC, 명령" />
-                <Label text="필터" styleClass="meta-key" />
+                <Label text="상태" styleClass="meta-key" />
                 <ComboBox fx:id="statusFilterCombo" prefWidth="150" promptText="상태 선택" />
+                <Label text="종류" styleClass="meta-key" />
+                <ComboBox fx:id="typeFilterCombo" prefWidth="130" promptText="종류 선택" />
+                <Label text="강의실" styleClass="meta-key" />
+                <ComboBox fx:id="roomFilterCombo" prefWidth="150" promptText="강의실 선택" />
                 <Label text="정렬" styleClass="meta-key" />
                 <ComboBox fx:id="sortCombo" prefWidth="140" promptText="정렬 기준" />
                 <Button fx:id="clearButton" text="초기화" styleClass="btn-neutral" />

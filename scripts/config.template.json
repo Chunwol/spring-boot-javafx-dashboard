@@ -1,0 +1,12 @@
+{
+  "serverUrl" : "https://REPLACE_WITH_BACKEND_URL",
+  "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
+  "agentToken" : "",
+  "tlsPinSha256" : "",
+  "githubOwner" : "",
+  "githubRepo" : "",
+  "internetCheckHost" : "1.1.1.1",
+  "internetCheckPort" : 53,
+  "heartbeatIntervalSec" : 12,
+  "jitterSec" : 3
+}

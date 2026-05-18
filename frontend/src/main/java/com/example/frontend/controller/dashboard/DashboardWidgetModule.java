@@ -208,7 +208,7 @@ public class DashboardWidgetModule {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/widget-text-add-dialog-content.fxml"));
             input = loader.load();
         } catch (IOException e) {
-            e.printStackTrace();
+            log.warn("Failed to load text widget dialog", e);
             new Alert(Alert.AlertType.ERROR, "다이얼로그 로드 실패: " + e.getMessage()).showAndWait();
             return;
         }

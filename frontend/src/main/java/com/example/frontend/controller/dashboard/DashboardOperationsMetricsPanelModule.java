@@ -52,6 +52,7 @@ public class DashboardOperationsMetricsPanelModule {
     private final BiConsumer<String, Boolean> showToast;
     private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final Function<String, double[]> responsiveSizeFn;
+    private final Runnable beforePanelMutation;
     private final Runnable onPanelsChanged;
 
     @FunctionalInterface
@@ -78,6 +79,7 @@ public class DashboardOperationsMetricsPanelModule {
             BiConsumer<String, Boolean> showToast,
             PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             Function<String, double[]> responsiveSizeFn,
+            Runnable beforePanelMutation,
             Runnable onPanelsChanged) {
         this.dashboardService = dashboardService;
         this.classroomContainer = classroomContainer;
@@ -88,6 +90,7 @@ public class DashboardOperationsMetricsPanelModule {
         this.showToast = showToast;
         this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.responsiveSizeFn = responsiveSizeFn;
+        this.beforePanelMutation = beforePanelMutation;
         this.onPanelsChanged = onPanelsChanged;
     }
 
@@ -216,6 +219,7 @@ public class DashboardOperationsMetricsPanelModule {
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
+                runBeforePanelMutation();
                 dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
             }
         });
@@ -287,6 +291,7 @@ public class DashboardOperationsMetricsPanelModule {
         if (dashboardId == null) {
             return;
         }
+        runBeforePanelMutation();
         dashboardService.updatePanelPositionAsync(
                 dashboardId,
                 panelId,
@@ -305,6 +310,13 @@ public class DashboardOperationsMetricsPanelModule {
             );
         }
         showToast.accept(toastMessage, false);
+    }
+
+    private void runBeforePanelMutation() {
+        if (beforePanelMutation == null) {
+            return;
+        }
+        beforePanelMutation.run();
     }
 
     private void refreshSnapshot(boolean force, boolean notifyOnFailure) {
@@ -363,6 +375,10 @@ public class DashboardOperationsMetricsPanelModule {
         Map<String, Object> command = toMap(snapshot.get("command"));
         Map<String, Object> token = toMap(snapshot.get("token"));
         Map<String, Object> cache = toMap(snapshot.get("cache"));
+        Map<String, Object> operational = toMap(snapshot.get("operational"));
+        Map<String, Object> latency = toMap(operational.get("latency"));
+        Map<String, Object> transfer = toMap(operational.get("transfer"));
+        Map<String, Object> request = toMap(operational.get("request"));
         Map<String, Object> pressure = toMap(snapshot.get("pressure"));
 
         long totalPc = toLong(pc.get("total"));
@@ -381,6 +397,15 @@ public class DashboardOperationsMetricsPanelModule {
         long cacheSize = toLong(cache.get("estimatedSize"));
         double hitRate = toDouble(cache.get("hitRate"));
 
+        double commandFailureRate = toDouble(latency.get("failureRate"));
+        double ackP95Ms = toDouble(latency.get("ackP95Ms"));
+        double resultP95Ms = toDouble(latency.get("resultP95Ms"));
+        double uploadMbps = toDouble(transfer.get("uploadAvgMbps"));
+        double downloadMbps = toDouble(transfer.get("downloadAvgMbps"));
+        double transferFailureRate = toDouble(transfer.get("failureRate"));
+        double forbiddenRate = toDouble(request.get("forbiddenRate"));
+        double requestErrorRate = toDouble(request.get("errorRate"));
+
         if (refs.updatedAtLabel() != null) {
             refs.updatedAtLabel().setText(formatSnapshotTime(snapshot.get("timestamp")));
         }
@@ -394,16 +419,32 @@ public class DashboardOperationsMetricsPanelModule {
             refs.commandQueueLabel().setText("대기 " + queued + " | 진행 " + inFlight);
         }
         if (refs.commandFailureLabel() != null) {
-            refs.commandFailureLabel().setText("완료 " + completed + " | 실패 " + failed);
+            refs.commandFailureLabel().setText(String.format("완료 %d | 실패 %d | 실패율 %.1f%%",
+                    completed,
+                    failed,
+                    commandFailureRate * 100.0));
         }
         if (refs.staleLabel() != null) {
-            refs.staleLabel().setText("전달지연 " + staleDelivered + " | ACK지연 " + staleAcked);
+            refs.staleLabel().setText(String.format("전달지연 %d | ACK지연 %d | ACK P95 %.0fms | 결과 P95 %.0fms",
+                    staleDelivered,
+                    staleAcked,
+                    ackP95Ms,
+                    resultP95Ms));
         }
         if (refs.tokenLabel() != null) {
-            refs.tokenLabel().setText("활성 " + activeToken + " | 폐기 " + revokedToken);
+            refs.tokenLabel().setText(String.format("활성 %d | 폐기 %d | 403 %.1f%% | API 에러 %.1f%%",
+                    activeToken,
+                    revokedToken,
+                    forbiddenRate * 100.0,
+                    requestErrorRate * 100.0));
         }
         if (refs.cacheLabel() != null) {
-            refs.cacheLabel().setText(String.format("hit %.1f%% | size %d", hitRate * 100.0, cacheSize));
+            refs.cacheLabel().setText(String.format("hit %.1f%% | size %d | up/down %.1f/%.1f Mbps | 전송실패 %.1f%%",
+                    hitRate * 100.0,
+                    cacheSize,
+                    uploadMbps,
+                    downloadMbps,
+                    transferFailureRate * 100.0));
         }
 
         String queuePressure = normalizePressure(pressure.get("queuePressure"));

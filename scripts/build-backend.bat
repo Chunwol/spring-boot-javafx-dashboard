@@ -11,7 +11,11 @@ echo === Build Backend Only
 echo ============================================================
 echo.
 
-echo Building Backend JAR...
+echo [0/1] Cleaning up stale database/cache processes...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\cleanup-runtime.ps1" -NoBanner
+echo.
+
+echo [1/1] Building Backend JAR...
 call gradlew.bat :backend:bootJar -x test
 if !errorlevel! neq 0 (
     echo [ERROR] Backend build failed

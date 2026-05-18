@@ -40,6 +40,7 @@
                 <TableColumn fx:id="agentStatusCol" text="상태" prefWidth="80.0" />
                 <TableColumn fx:id="agentTokenCol" text="토큰" prefWidth="70.0" />
                 <TableColumn fx:id="agentOrphanCol" text="등록상태" prefWidth="80.0" />
+                <TableColumn fx:id="agentVersionCol" text="에이전트 버전" prefWidth="110.0" />
                 <TableColumn fx:id="agentLastSeenCol" text="마지막 접속" prefWidth="150.0" />
                 <TableColumn fx:id="agentActionCol" text="관리" prefWidth="140.0" styleClass="table-col-center" />
             </columns>

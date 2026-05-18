@@ -11,7 +11,11 @@ echo === Build Agent Module Only
 echo ============================================================
 echo.
 
-echo Building Agent JAR...
+echo [0/1] Cleaning up stale processes...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\cleanup-runtime.ps1" -NoBanner
+echo.
+
+echo [1/1] Building Agent JAR...
 call gradlew.bat :agent:build -x test
 if !errorlevel! neq 0 (
     echo [ERROR] Agent build failed

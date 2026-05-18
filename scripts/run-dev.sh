@@ -29,9 +29,7 @@ fi
 
 # Clean up stale processes before starting
 echo -e "${YELLOW}[0/4] Cleaning up stale database/cache processes...${NC}"
-pkill -f "postgres" -9 2>/dev/null || true
-pkill -f "redis-server" -9 2>/dev/null || true
-sleep 1
+bash ./scripts/cleanup-runtime.sh --quiet
 
 # Bootstrap PostgreSQL/Redis if available
 if [ -f "scripts/backend-bootstrap.ps1" ]; then
@@ -56,7 +54,11 @@ echo ""
 # Function to gracefully shutdown on Ctrl+C
 cleanup() {
     echo -e "\n${YELLOW}Shutting down services...${NC}"
-    jobs -p | xargs -r kill 2>/dev/null || true
+    local pids
+    pids=$(jobs -p)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs kill 2>/dev/null || true
+    fi
     sleep 1
     echo -e "${GREEN}Shutdown complete${NC}"
     exit 0

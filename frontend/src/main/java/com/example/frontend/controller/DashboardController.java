@@ -6,12 +6,19 @@ import com.example.dto.dashboard.DashboardPanelDto;
 import com.example.dto.dashboard.DashboardRefreshDto;
 import com.example.dto.dashboard.LayoutBackup;
 import com.example.dto.dashboard.NetworkTrafficDto;
+import com.example.frontend.controller.dashboard.DashboardAlertApiClient;
+import com.example.frontend.controller.dashboard.DashboardAlertCoordinator;
+import com.example.frontend.controller.dashboard.DashboardAlertPopupBuilder;
+import com.example.frontend.controller.dashboard.DashboardAlertSupport;
 import com.example.frontend.controller.dashboard.DashboardCanvasModule;
 import com.example.frontend.controller.dashboard.DashboardClassroomModule;
 import com.example.frontend.controller.dashboard.DashboardInteractionService;
 import com.example.frontend.controller.dashboard.DashboardManagementModule;
 import com.example.frontend.controller.dashboard.DashboardDisconnectStatusPanelModule;
+import com.example.frontend.controller.dashboard.DashboardStatusSummarySupport;
 import com.example.frontend.controller.dashboard.DashboardOperationsMetricsPanelModule;
+import com.example.frontend.controller.dashboard.DashboardLayoutActionModule;
+import com.example.frontend.controller.dashboard.DashboardSessionActionModule;
 import com.example.frontend.controller.dashboard.DashboardRealtimeModule;
 import com.example.frontend.controller.dashboard.DashboardResourcePanelModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
@@ -34,7 +41,6 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXMLLoader;
 import javafx.animation.PauseTransition;
-import javafx.animation.RotateTransition;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
@@ -50,7 +56,6 @@ import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.ContextMenu;
-import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.MenuButton;
@@ -61,13 +66,13 @@ import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -86,11 +91,16 @@ import java.net.http.HttpClient;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -99,9 +109,30 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DashboardController {
 
     private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
-    private static final DateTimeFormatter ALERT_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
-    private static final int ALERT_FETCH_LIMIT = 30;
+    private static final int ALERT_FETCH_LIMIT = 200;
+    private static final long OFFLINE_ALERT_BLINK_WINDOW_SECONDS = 120L;
+    private static final long OFFLINE_ALERT_BLINK_INTERVAL_MS = 2000L;
     private static final Logger log = LoggerFactory.getLogger(DashboardController.class);
+
+    public DashboardController() {
+        this(ApiClient.getInstance(), null, null);
+    }
+
+    DashboardController(DashboardAlertApiClient dashboardAlertApiClient, DashboardAlertCoordinator alertCoordinator) {
+        this(ApiClient.getInstance(), dashboardAlertApiClient, alertCoordinator);
+        }
+
+        DashboardController(ApiClient apiClient,
+                DashboardAlertApiClient dashboardAlertApiClient,
+                DashboardAlertCoordinator alertCoordinator) {
+        this.apiClient = apiClient == null ? ApiClient.getInstance() : apiClient;
+        this.dashboardAlertApiClient = dashboardAlertApiClient == null
+            ? new DashboardAlertApiClient(this.apiClient)
+                : dashboardAlertApiClient;
+        this.alertCoordinator = alertCoordinator == null
+                ? new DashboardAlertCoordinator()
+                : alertCoordinator;
+    }
 
     @FXML
     private VBox rootVBox;
@@ -188,16 +219,16 @@ public class DashboardController {
     private Button refreshButton;
 
     @FXML
+    private Button undoButton;
+
+    @FXML
+    private Button redoButton;
+
+    @FXML
     private ToggleButton gridToggleButton;
 
     @FXML
     private ToggleButton snapToggleButton;
-
-    @FXML
-    private MenuButton alignMenuButton;
-
-    @FXML
-    private MenuButton arrangeMenuButton;
 
     @FXML
     private Button zoomOutButton;
@@ -236,6 +267,10 @@ public class DashboardController {
     private DashboardViewModel dashboardViewModel;
     private DashboardUIService dashboardUIService;
     private DashboardLayoutService dashboardLayoutService;
+    private DashboardLayoutActionModule layoutActionModule;
+    private DashboardSessionActionModule sessionActionModule;
+    private final ApiClient apiClient;
+    private final DashboardAlertApiClient dashboardAlertApiClient;
     private final DashboardInteractionService dashboardInteractionService = new DashboardInteractionService();
 
     private Pane classroomContainer;
@@ -283,9 +318,9 @@ public class DashboardController {
     private final DashboardPanelManager panelManager = new DashboardPanelManager();
     private final Map<Long, VBox> textItemMap = new HashMap<>();
     private final Map<Long, VBox> imageItemMap = new HashMap<>();
-    private final List<DashboardAlertItem> alertItems = new ArrayList<>();
+    private final DashboardAlertCoordinator alertCoordinator;
     private ContextMenu alertContextMenu;
-    private long unreadAlertCount = 0L;
+    private boolean offlineAlertBlinkHighlightPhase = false;
     private DashboardNetworkPanelModule networkPanelModule;
     private DashboardOperationsMetricsPanelModule operationsMetricsPanelModule;
 
@@ -300,9 +335,18 @@ public class DashboardController {
     private volatile boolean shutdownRequested = false;
     private final AtomicBoolean snapshotRefreshInFlight = new AtomicBoolean(false);
     private final AtomicBoolean serverDisconnectHandled = new AtomicBoolean(false);
+    private final AtomicBoolean offlineNotified = new AtomicBoolean(false);
+    private volatile boolean undoRestoreInFlight = false;
+    private final Deque<List<DashboardPanelDto>> undoHistory = new ArrayDeque<>();
+    private final Deque<List<DashboardPanelDto>> redoHistory = new ArrayDeque<>();
 
     private boolean isViewerMode() {
-        return ApiClient.getInstance().isViewerRole();
+        return apiClient.isViewerRole();
+    }
+
+    /** USER 역할: 대시보드 탭만 표시, 나머지 모두 숨김 */
+    private boolean isUserMode() {
+        return apiClient.isUserRole();
     }
 
     private boolean ensureWritePermission(String actionName) {
@@ -319,10 +363,11 @@ public class DashboardController {
     }
 
     private void applyRoleUiState() {
-        String role = ApiClient.getInstance().getCurrentUserRole();
+        String role = apiClient.getCurrentUserRole();
         if (role == null || role.isBlank()) {
             role = "USER";
         }
+        String roleLabel = resolveRoleDisplayName(role);
         boolean viewer = isViewerMode();
 
         if (dashboardSubtitleLabel != null) {
@@ -330,22 +375,35 @@ public class DashboardController {
                 dashboardSubtitleBaseText = dashboardSubtitleLabel.getText();
             }
             String base = dashboardSubtitleBaseText == null ? "" : dashboardSubtitleBaseText;
-            dashboardSubtitleLabel.setText(viewer ? base + " | 읽기 전용" : base);
+            dashboardSubtitleLabel.setText(viewer ? base + " | 조회 전용" : base);
         }
 
         if (viewerModeBadgeLabel != null) {
-            viewerModeBadgeLabel.setText("VIEWER | 읽기 전용");
+            viewerModeBadgeLabel.setText("읽기 전용 (조회 권한)");
             viewerModeBadgeLabel.setVisible(viewer);
             viewerModeBadgeLabel.setManaged(viewer);
         }
 
         if (statusRoleLabel != null) {
             statusRoleLabel.getStyleClass().remove("statusbar-role-readonly");
-            statusRoleLabel.setText(viewer ? "역할 VIEWER | 읽기 전용" : "역할 " + role.toUpperCase(java.util.Locale.ROOT));
+            statusRoleLabel.setText("역할: " + (viewer ? "읽기 전용 (조회)" : roleLabel));
             if (viewer) {
                 statusRoleLabel.getStyleClass().add("statusbar-role-readonly");
             }
         }
+        updateUndoButtonState();
+    }
+
+    private String resolveRoleDisplayName(String role) {
+        if (role == null || role.isBlank()) {
+            return "사용자";
+        }
+        return switch (role.trim().toUpperCase(Locale.ROOT)) {
+            case "ADMIN" -> "관리자";
+            case "VIEWER" -> "읽기 전용";
+            case "USER" -> "사용자";
+            default -> role.trim().toUpperCase(Locale.ROOT);
+        };
     }
 
     private void removeTabIfPresent(Tab tab) {
@@ -388,6 +446,8 @@ public class DashboardController {
             dashboardMainSplitPane.setDividerPositions(0.0);
         }
 
+        updateUndoButtonState();
+
         removeTabIfPresent(pcManagementTab);
         removeTabIfPresent(commandTab);
         removeTabIfPresent(settingsTab);
@@ -400,8 +460,20 @@ public class DashboardController {
     @FXML
     public void initialize() {
         dashboardViewModel = new DashboardViewModel();
-        ApiClient.getInstance().setConnectionFailureHandler(this::handleServerConnectionLost);
-        ApiClient.getInstance().setAuthFailureHandler(this::handleSessionExpired);
+        apiClient.setConnectionFailureHandler(this::handleServerConnectionLost);
+        apiClient.setAuthFailureHandler(this::handleSessionExpired);
+        // Reconnect WebSocket when token changes (e.g., after login/logout)
+        apiClient.setTokenChangeHandler(() -> Platform.runLater(() -> {
+            try {
+                if (realtimeModule != null) {
+                    try { realtimeModule.stop(); } catch (Exception ignored) {}
+                    realtimeModule = null;
+                }
+            } catch (Exception ex) {
+                log.debug("Failed to reset realtime module on token change: {}", ex.getMessage());
+            }
+            connectWebSocket();
+        }));
 
         if (rootVBox == null) {
             return;
@@ -486,6 +558,10 @@ public class DashboardController {
         }), 0, 1, TimeUnit.SECONDS);
 
         scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::refreshDashboardSnapshot), 0, 30, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::pulseOfflineAlertBlink),
+                0,
+                OFFLINE_ALERT_BLINK_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
 
         connectWebSocket();
         loadAlertSnapshot();
@@ -525,6 +601,19 @@ public class DashboardController {
     }
 
     private void initializeTopBar() {
+        initializeTopBarLabelsAccessibility();
+        if (dashboardSelector == null) {
+            return;
+        }
+
+        initializeDashboardSelectorControl();
+        configureDashboardSettingsMenu(dashboardSettingsMenu);
+        initializeTopBarActionButtons();
+        initializeTopStatusBar();
+        bindDashboardDeleteMenuState();
+    }
+
+    private void initializeTopBarLabelsAccessibility() {
         if (dashboardTitleLabel != null) {
             AccessibilityHelper.makeAccessible(dashboardTitleLabel, "통합 강의실 관제");
         }
@@ -532,36 +621,33 @@ public class DashboardController {
             dashboardSubtitleBaseText = dashboardSubtitleLabel.getText();
             AccessibilityHelper.makeAccessible(dashboardSubtitleLabel, "실시간 모니터링, 원격 제어, 리포팅");
         }
-        if (dashboardSelector == null) {
-            return;
-        }
+    }
 
+    private void initializeDashboardSelectorControl() {
         dashboardSelector.setPromptText("대시보드 선택");
         dashboardSelector.setPrefWidth(200);
         AccessibilityHelper.makeAccessible(dashboardSelector, "대시보드 선택", "사용할 대시보드를 선택합니다");
-        dashboardSelector.setCellFactory(param -> new ListCell<>() {
-            @Override
-            protected void updateItem(DashboardInfoDto item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getName());
-            }
-        });
-        dashboardSelector.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(DashboardInfoDto item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getName());
-            }
-        });
+        dashboardSelector.setCellFactory(param -> createDashboardSelectorCell());
+        dashboardSelector.setButtonCell(createDashboardSelectorCell());
         dashboardSelector.valueProperty().addListener((obs, oldValue, newValue) -> {
             if (newValue != null) {
                 setCurrentDashboardId(newValue.getId());
                 loadDashboardPanels();
             }
         });
+    }
 
-        configureDashboardSettingsMenu(dashboardSettingsMenu);
+    private ListCell<DashboardInfoDto> createDashboardSelectorCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(DashboardInfoDto item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.getName());
+            }
+        };
+    }
 
+    private void initializeTopBarActionButtons() {
         if (alertsButton != null) {
             configureAlertButton(alertsButton);
         }
@@ -575,7 +661,9 @@ public class DashboardController {
             logoutButton.setGraphic(icon);
             AccessibilityHelper.makeAccessible(logoutButton, "로그아웃", "현재 사용자 세션을 종료합니다");
         }
+    }
 
+    private void initializeTopStatusBar() {
         statusSummaryLabel = new Label();
         connectivityLabel = new Label();
         clockLabel = new Label();
@@ -583,7 +671,9 @@ public class DashboardController {
         loadStatusBarFromFxml();
         attachStatusBarIfNeeded();
         applyRoleUiState();
+    }
 
+    private void bindDashboardDeleteMenuState() {
         // 설정 메뉴의 삭제 항목 초기화 및 리스너 등록
         MenuItem deleteMenuItem = dashboardSettingsMenu == null
                 ? null
@@ -622,6 +712,20 @@ public class DashboardController {
         if (settingsMenu == null) {
             return;
         }
+        Label settingsMenuLabel = new Label("설정");
+        settingsMenuLabel.getStyleClass().add("dashboard-menu-button-text");
+        settingsMenuLabel.setMouseTransparent(true);
+        settingsMenu.setText("");
+        settingsMenu.setGraphic(settingsMenuLabel);
+        settingsMenu.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        settingsMenu.setMnemonicParsing(false);
+        settingsMenu.setTextFill(Color.WHITE);
+        if (!settingsMenu.getStyleClass().contains("dashboard-menu-button")) {
+            settingsMenu.getStyleClass().add("dashboard-menu-button");
+        }
+        settingsMenu.setMinWidth(118);
+        settingsMenu.setPrefWidth(118);
+        settingsMenu.setAccessibleText("대시보드 설정");
         if (isViewerMode()) {
             settingsMenu.getItems().clear();
             settingsMenu.setDisable(true);
@@ -629,22 +733,29 @@ public class DashboardController {
             settingsMenu.setVisible(false);
             return;
         }
+        settingsMenu.setDisable(false);
+        settingsMenu.setManaged(true);
+        settingsMenu.setVisible(true);
         settingsMenu.getItems().clear();
 
         // 대시보드 추가
-        MenuItem addItem = new MenuItem("+ 대시보드 추가");
+        MenuItem addItem = new MenuItem("대시보드 추가");
+        addItem.getStyleClass().add("dashboard-settings-menu-item");
         addItem.setOnAction(e -> handleCreateDashboard());
 
         // 대시보드 삭제
-        MenuItem deleteItem = new MenuItem("🗑 대시보드 삭제");
+        MenuItem deleteItem = new MenuItem("대시보드 삭제");
+        deleteItem.getStyleClass().add("dashboard-settings-menu-item");
         deleteItem.setOnAction(e -> handleDeleteDashboard());
 
         // 레이아웃 백업
-        MenuItem backupItem = new MenuItem("💾 레이아웃 백업");
+        MenuItem backupItem = new MenuItem("레이아웃 백업");
+        backupItem.getStyleClass().add("dashboard-settings-menu-item");
         backupItem.setOnAction(e -> handleLayoutBackup());
 
         // 레이아웃 복원
-        MenuItem restoreItem = new MenuItem("↩ 레이아웃 복원");
+        MenuItem restoreItem = new MenuItem("레이아웃 복원");
+        restoreItem.getStyleClass().add("dashboard-settings-menu-item");
         restoreItem.setOnAction(e -> handleLayoutRestore());
 
         settingsMenu.getItems().addAll(addItem, deleteItem, new SeparatorMenuItem(), backupItem, restoreItem);
@@ -704,10 +815,7 @@ public class DashboardController {
                 return;
             }
             try {
-                moveToLoginScreen(null, false);
-                // 상태바 재생성
-                loadStatusBarFromFxml();
-                attachStatusBarIfNeeded();
+                moveToLoginScreen(null, true);
             } catch (Exception ex) {
                 dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
             }
@@ -720,118 +828,36 @@ public class DashboardController {
      * @param shouldShutdown true면 Dashboard 정리 작업 수행
      */
     private void moveToLoginScreen(String alertMessage, boolean shouldShutdown) throws Exception {
-        ApiClient.getInstance().setBearerToken(null);
-
-        if (shouldShutdown) {
-            shutdown();
-        }
-
-        var fxmlUrl = getClass().getResource("/fxml/login.fxml");
-        if (fxmlUrl == null) {
-            dashboardUIService.showToast("로그인 화면을 찾을 수 없습니다.", true);
+        if (sessionActionModule == null) {
+            safeShowToast("세션 모듈이 초기화되지 않았습니다.", true);
+            if (shouldShutdown) {
+                shutdown();
+            }
             return;
         }
-
-        FXMLLoader loader = new FXMLLoader(fxmlUrl);
-        Parent loginRoot = loader.load();
-        LoginController loginController = loader.getController();
-
-        javafx.stage.Window window = rootVBox != null && rootVBox.getScene() != null
-            ? rootVBox.getScene().getWindow()
-            : null;
-
-        if (!(window instanceof Stage stage)) {
-            dashboardUIService.showToast("윈도우 핸들을 찾을 수 없습니다.", true);
-            return;
-        }
-
-        loginController.setPrimaryStage(stage);
-        Scene loginScene = new Scene(loginRoot, 420, 320);
-        var css = getClass().getResource("/dashboard-theme.css");
-        if (css != null) {
-            loginScene.getStylesheets().add(css.toExternalForm());
-        }
-
-        stage.setScene(loginScene);
-        stage.setTitle("스마트 강의실 대시보드 - 로그인");
-        stage.setMinWidth(420);
-        stage.setMinHeight(320);
-        stage.setMaximized(false);
-        stage.setWidth(460);
-        stage.setHeight(360);
-        stage.centerOnScreen();
-
-        // alertMessage가 있으면 Warning Alert 표시
-        if (alertMessage != null && !alertMessage.isEmpty()) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("서버 연결 실패");
-            alert.setHeaderText("서버 연결이 끊어졌습니다.");
-            alert.setContentText(alertMessage);
-            alert.show();
-        }
+        sessionActionModule.moveToLoginScreen(resolveRootWindow(), alertMessage, shouldShutdown);
     }
 
     private void handleLayoutBackup() {
         if (!ensureWritePermission("레이아웃 백업")) {
             return;
         }
-        Long dashboardId = currentDashboardId();
-        if (dashboardId == null) {
-            dashboardUIService.showToast("대시보드를 선택해주세요.", true);
+        if (layoutActionModule == null) {
+            safeShowToast("레이아웃 모듈이 초기화되지 않았습니다.", true);
             return;
         }
-
-        TextInputDialog dialog = new TextInputDialog("백업_" + System.currentTimeMillis());
-        dialog.setTitle("백업");
-        dialog.setHeaderText("레이아웃 백업 이름 입력");
-        dialog.setContentText("백업이름:");
-        dialog.showAndWait().ifPresent(name -> {
-            if (name.trim().isEmpty()) {
-                dashboardUIService.showToast("백업 이름을 입력해주세요.", true);
-                return;
-            }
-
-            Object layoutData = getCurrentLayoutData();
-            dashboardLayoutService.backupCurrentLayout(dashboardId, name.trim(), layoutData)
-                .thenAccept(path -> Platform.runLater(() -> {
-                    dashboardUIService.showToast("백업 완료: " + new java.io.File(path).getName(), false);
-                }))
-                .exceptionally(ex -> {
-                    Platform.runLater(() -> dashboardUIService.showToast(
-                            "백업 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
-                            true));
-                    return null;
-                });
-        });
+        layoutActionModule.backupCurrentLayout();
     }
 
     private void handleLayoutRestore() {
         if (!ensureWritePermission("레이아웃 복원")) {
             return;
         }
-        Long dashboardId = currentDashboardId();
-        if (dashboardId == null) {
-            dashboardUIService.showToast("대시보드를 선택해주세요.", true);
+        if (layoutActionModule == null) {
+            safeShowToast("레이아웃 모듈이 초기화되지 않았습니다.", true);
             return;
         }
-
-        Window owner = rootVBox.getScene() != null ? rootVBox.getScene().getWindow() : null;
-        dashboardLayoutService.restoreLayoutFromFile(owner, dashboardId)
-            .thenAccept(backup -> {
-                if (backup == null) {
-                    return;
-                }
-                Platform.runLater(() -> {
-                    applyRestoredLayout(backup);
-                    dashboardUIService.showToast("레이아웃이 복원되었습니다.", false);
-                });
-            })
-            .exceptionally(ex -> {
-                Platform.runLater(() -> dashboardUIService.showToast(
-                        "복원 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
-                        true));
-                return null;
-            });
+        layoutActionModule.restoreLayout();
     }
 
     private Object getCurrentLayoutData() {
@@ -872,12 +898,26 @@ public class DashboardController {
 
     private void handleKeyboardShortcuts(javafx.scene.input.KeyEvent event) {
         if (isViewerMode() && event.isControlDown()
-                && (event.getCode() == KeyCode.S || event.getCode() == KeyCode.Z)) {
+                && (event.getCode() == KeyCode.S || event.getCode() == KeyCode.Z || event.getCode() == KeyCode.Y)) {
+            event.consume();
+            return;
+        }
+        // F11: Toggle fullscreen
+        if (event.getCode() == KeyCode.F11) {
+            if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
+                stage.setFullScreen(!stage.isFullScreen());
+            }
             event.consume();
             return;
         }
         // Escape: Toggle edit mode off if active
         if (event.getCode() == KeyCode.ESCAPE) {
+            if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage
+                    && stage.isFullScreen()) {
+                stage.setFullScreen(false);
+                event.consume();
+                return;
+            }
             if (dashboardViewModel.isEditMode()) {
                 dashboardViewModel.toggleEditMode();
             }
@@ -888,9 +928,18 @@ public class DashboardController {
             handleLayoutBackup();
             event.consume();
         }
-        // Ctrl+Z: Undo (restore from last backup)
+        // Ctrl+Shift+Z / Ctrl+Y: Redo
+        else if (event.isControlDown() && event.getCode() == KeyCode.Z && event.isShiftDown()) {
+            redoLastPanelMutation();
+            event.consume();
+        }
+        else if (event.isControlDown() && event.getCode() == KeyCode.Y) {
+            redoLastPanelMutation();
+            event.consume();
+        }
+        // Ctrl+Z: Undo
         else if (event.isControlDown() && event.getCode() == KeyCode.Z) {
-            handleLayoutRestore();
+            undoLastPanelMutation();
             event.consume();
         }
     }
@@ -900,63 +949,87 @@ public class DashboardController {
             return;
         }
         boolean viewerMode = isViewerMode();
+        boolean userMode   = isUserMode();
+        initializeDashboardTabContent();
+        initializePcManagementTab(viewerMode || userMode);  // USER·VIEWER 모두 숨김
+        initializeNetworkTab(userMode);                     // USER만 숨김
+        initializeCommandTab(viewerMode || userMode);       // USER·VIEWER 모두 숨김
+        initializeSettingsTab(viewerMode || userMode);      // USER·VIEWER 모두 숨김
+    }
 
+    private void initializeDashboardTabContent() {
         if (dashboardTab != null) {
             dashboardTab.setContent(createMainDashboardView());
         }
+    }
 
-        if (pcManagementTab != null) {
-            if (viewerMode) {
-                removeTabIfPresent(pcManagementTab);
-            } else {
-                if (pcManagementSlot != null) {
-                    pcManagementSlot.getChildren().setAll(createPcManagementView());
-                }
-                pcManagementTab.setOnSelectionChanged(event -> {
-                    if (pcManagementTab.isSelected() && pcManagementModule != null) {
-                        pcManagementModule.reloadData();
-                    }
-                });
-            }
+    private void initializePcManagementTab(boolean viewerMode) {
+        if (pcManagementTab == null) {
+            return;
         }
+        if (viewerMode) {
+            removeTabIfPresent(pcManagementTab);
+            return;
+        }
+        if (pcManagementSlot != null) {
+            pcManagementSlot.getChildren().setAll(createPcManagementView());
+        }
+        pcManagementTab.setOnSelectionChanged(event -> {
+            if (pcManagementTab.isSelected() && pcManagementModule != null) {
+                pcManagementModule.reloadData();
+            }
+        });
+    }
 
+    private void initializeNetworkTab(boolean userMode) {
+        if (networkTab == null) {
+            return;
+        }
+        if (userMode) {
+            removeTabIfPresent(networkTab);
+            return;
+        }
         networkPanelController = new NetworkPanelController(null);
-        if (networkTab != null) {
-            if (networkSlot != null) {
-                networkSlot.getChildren().setAll(networkPanelController.getPanel());
-            }
-            networkTab.setOnSelectionChanged(event -> {
-                if (networkTab.isSelected()) {
-                    refreshNetworkTabData();
-                }
-            });
+        if (networkSlot != null) {
+            networkSlot.getChildren().setAll(networkPanelController.getPanel());
         }
+        networkTab.setOnSelectionChanged(event -> {
+            if (networkTab.isSelected()) {
+                refreshNetworkTabData();
+            }
+        });
+    }
 
-        if (commandTab != null) {
-            if (viewerMode) {
-                removeTabIfPresent(commandTab);
-            } else {
-                commandStatusPanelController = new CommandStatusPanelController();
-                if (commandSlot != null) {
-                    commandSlot.getChildren().setAll(commandStatusPanelController.getPanel());
-                }
-            }
+    private void initializeCommandTab(boolean viewerMode) {
+        if (commandTab == null) {
+            return;
         }
+        if (viewerMode) {
+            removeTabIfPresent(commandTab);
+            return;
+        }
+        commandStatusPanelController = new CommandStatusPanelController();
+        if (commandSlot != null) {
+            commandSlot.getChildren().setAll(commandStatusPanelController.getPanel());
+        }
+    }
 
-        if (settingsTab != null) {
-            if (viewerMode) {
-                removeTabIfPresent(settingsTab);
-            } else {
-                if (settingsSlot != null) {
-                    settingsSlot.getChildren().setAll(createManagementView());
-                }
-                settingsTab.setOnSelectionChanged(event -> {
-                    if (settingsTab.isSelected() && managementModule != null) {
-                        managementModule.reloadData();
-                    }
-                });
-            }
+    private void initializeSettingsTab(boolean viewerMode) {
+        if (settingsTab == null) {
+            return;
         }
+        if (viewerMode) {
+            removeTabIfPresent(settingsTab);
+            return;
+        }
+        if (settingsSlot != null) {
+            settingsSlot.getChildren().setAll(createManagementView());
+        }
+        settingsTab.setOnSelectionChanged(event -> {
+            if (settingsTab.isSelected() && managementModule != null) {
+                managementModule.reloadData();
+            }
+        });
     }
 
     private Node createManagementView() {
@@ -978,45 +1051,69 @@ public class DashboardController {
         this.mainSplitPane = dashboardMainSplitPane;
         initializeMainDashboardShell();
 
+        initializeDashboardCoreModules();
+        attachLeftPane();
+        initializeDashboardServices();
+        initializeOverlayPanelModules();
+
+        applyEditModeUiState();
+        return dashboardMainSplitPane;
+    }
+
+    private void initializeDashboardCoreModules() {
+        initializeWidgetModule();
+        initializeClassroomModule();
+        initializeResourcePanelModule();
+    }
+
+    private void initializeWidgetModule() {
         widgetModule = new DashboardWidgetModule(
                 objectMapper,
-            currentApiBaseUrl(),
+                currentApiBaseUrl(),
                 classroomContainer,
                 textItemMap,
                 imageItemMap,
-            this::isEditModeActive,
-            this::isSnapToGridEnabled,
+                this::isEditModeActive,
+                this::isSnapToGridEnabled,
                 this::refreshPanelListAndDashboard
         );
         widgetModule.setDashboardIdSupplier(() -> currentDashboardId() == null ? -1L : currentDashboardId());
         // 텍스트/이미지는 loadDashboardPanels()에서 대시보드 컨텍스트와 함께 로드됩니다.
+    }
 
+    private void initializeClassroomModule() {
         classroomModule = new DashboardClassroomModule(
                 objectMapper,
-            currentApiBaseUrl(),
+                currentApiBaseUrl(),
                 classroomContainer,
                 panelManager,
-            this::isEditModeActive,
-            this::refreshDashboardSnapshot,
-            () -> currentDashboardId() == null ? -1L : currentDashboardId(),
+                this::isEditModeActive,
+                this::refreshDashboardSnapshot,
+                () -> currentDashboardId() == null ? -1L : currentDashboardId(),
                 this::loadDashboardPanels,
-            this::safeShowToast,
-            this::updateCachedPanelPosition,
-            this::isSnapToGridEnabled
+                this::captureUndoSnapshot,
+                this::safeShowToast,
+                this::updateCachedPanelPosition,
+                this::isSnapToGridEnabled
         );
+    }
 
+    private void initializeResourcePanelModule() {
         resourcePanelModule = new DashboardResourcePanelModule(
-            dashboardViewModel,
-            classroomModule,
-            widgetModule,
-            dashboardService,
-            this::isEditModeActive,
-            this::currentDashboardId,
-            this::getResponsiveDefaultSize,
-            this::loadDashboardPanels,
-            this::safeShowToast
+                dashboardViewModel,
+                classroomModule,
+                widgetModule,
+                dashboardService,
+                this::isEditModeActive,
+                this::currentDashboardId,
+                this::getResponsiveDefaultSize,
+                this::captureUndoSnapshot,
+                this::loadDashboardPanels,
+                this::safeShowToast
         );
+    }
 
+    private void attachLeftPane() {
         VBox leftPane = buildLeftPane();
         this.leftToolPane = leftPane;
         if (leftPaneSlot != null) {
@@ -1025,19 +1122,37 @@ public class DashboardController {
         if (dashboardMainSplitPane != null) {
             dashboardMainSplitPane.setDividerPositions(0.20);
         }
+    }
 
-            dashboardUIService = new DashboardUIService(
+    private void initializeDashboardServices() {
+        dashboardUIService = new DashboardUIService(
                 toastContainer,
                 classroomContainer,
                 dashboardScrollPane,
                 canvasModule,
                 editOnlyToolbar,
                 leftEditControls
-            );
+        );
 
-            dashboardLayoutService = new DashboardLayoutService(objectMapper, ApiClient.getInstance().getBaseUrl());
+        dashboardLayoutService = new DashboardLayoutService(objectMapper, apiClient.getBaseUrl());
+        layoutActionModule = new DashboardLayoutActionModule(
+                dashboardLayoutService,
+                dashboardUIService,
+                this::currentDashboardId,
+                this::resolveRootWindow,
+                this::getCurrentLayoutData,
+                this::applyRestoredLayout
+        );
+        sessionActionModule = new DashboardSessionActionModule(
+                apiClient,
+                this::shutdown,
+                this::safeShowToast,
+                getClass()
+        );
+    }
 
-            networkPanelModule = new DashboardNetworkPanelModule(
+    private void initializeOverlayPanelModules() {
+        networkPanelModule = new DashboardNetworkPanelModule(
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
@@ -1047,10 +1162,11 @@ public class DashboardController {
                 (msg, err) -> dashboardUIService.showToast(msg, err),
                 this::updateCachedPanelPosition,
                 this::getResponsiveDefaultSize,
+                this::captureUndoSnapshot,
                 this::loadDashboardPanels
-            );
+        );
 
-            disconnectStatusPanelModule = new DashboardDisconnectStatusPanelModule(
+        disconnectStatusPanelModule = new DashboardDisconnectStatusPanelModule(
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
@@ -1060,10 +1176,11 @@ public class DashboardController {
                 (msg, err) -> dashboardUIService.showToast(msg, err),
                 this::updateCachedPanelPosition,
                 this::getResponsiveDefaultSize,
+                this::captureUndoSnapshot,
                 this::loadDashboardPanels
-            );
+        );
 
-            operationsMetricsPanelModule = new DashboardOperationsMetricsPanelModule(
+        operationsMetricsPanelModule = new DashboardOperationsMetricsPanelModule(
                 dashboardService,
                 classroomContainer,
                 dashboardInteractionService,
@@ -1073,11 +1190,9 @@ public class DashboardController {
                 (msg, err) -> dashboardUIService.showToast(msg, err),
                 this::updateCachedPanelPosition,
                 this::getResponsiveDefaultSize,
+                this::captureUndoSnapshot,
                 this::loadDashboardPanels
-            );
-
-        applyEditModeUiState();
-        return dashboardMainSplitPane;
+        );
     }
 
     private VBox buildLeftPane() {
@@ -1086,7 +1201,7 @@ public class DashboardController {
         return leftPane;
     }
 
-        private void initializeMainDashboardShell() {
+    private void initializeMainDashboardShell() {
         canvasModule = new DashboardCanvasModule(
                 this::isEditModeActive,
                 this::saveNodePosition,
@@ -1111,6 +1226,10 @@ public class DashboardController {
             }
         });
 
+        initializeMainDashboardToolbarControls();
+    }
+
+    private void initializeMainDashboardToolbarControls() {
         if (bgColorPicker != null) {
             configureBackgroundColorPicker(bgColorPicker);
         }
@@ -1126,6 +1245,12 @@ public class DashboardController {
         if (fullScreenButton != null) {
             configureFullScreenButton(fullScreenButton);
         }
+        if (undoButton != null) {
+            configureUndoButton(undoButton);
+        }
+        if (redoButton != null) {
+            configureRedoButton(redoButton);
+        }
         if (refreshButton != null) {
             configureRefreshButton(refreshButton);
         }
@@ -1134,12 +1259,6 @@ public class DashboardController {
         }
         if (snapToggleButton != null) {
             configureSnapToggleButton(snapToggleButton);
-        }
-        if (alignMenuButton != null) {
-            configureAlignMenu(alignMenuButton);
-        }
-        if (arrangeMenuButton != null) {
-            configureArrangeMenu(arrangeMenuButton);
         }
         if (zoomOutButton != null) {
             configureZoomOutButton(zoomOutButton);
@@ -1156,6 +1275,7 @@ public class DashboardController {
     }
 
     private void configureEditModeToggleButton(ToggleButton editModeBtn) {
+        editModeBtn.setTooltip(new Tooltip("패널의 위치와 크기를 편집합니다."));
         if (isViewerMode()) {
             editModeBtn.setSelected(false);
             editModeBtn.setDisable(true);
@@ -1163,12 +1283,14 @@ public class DashboardController {
         }
         editModeBtn.setOnAction(e -> {
             dashboardViewModel.setEditMode(editModeBtn.isSelected());
+            clearUndoSnapshot();
             applyEditModeUiState();
             dashboardUIService.showToast(isEditModeActive() ? "편집 모드 켜짐" : "편집 모드 꺼짐", false);
         });
     }
 
     private void configureFocusModeToggleButton(ToggleButton focusModeBtn) {
+        focusModeBtn.setTooltip(new Tooltip("좌측 패널을 숨기고 대시보드에 집중합니다."));
         focusModeBtn.setOnAction(e -> {
             dashboardViewModel.setFocusMode(focusModeBtn.isSelected());
             if (leftToolPane != null) {
@@ -1182,6 +1304,7 @@ public class DashboardController {
     }
 
     private void configureDashboardOnlyToggleButton(ToggleButton dashboardOnlyBtn) {
+        dashboardOnlyBtn.setTooltip(new Tooltip("상단 바와 좌측 패널을 숨겨 대시보드만 표시합니다."));
         dashboardOnlyBtn.setSelected(isDashboardOnlyModeActive());
         dashboardOnlyBtn.setOnAction(e -> {
             dashboardViewModel.setDashboardOnlyMode(dashboardOnlyBtn.isSelected());
@@ -1196,7 +1319,7 @@ public class DashboardController {
             if (dashboardMainSplitPane != null && !isDashboardOnlyModeActive()) {
                 dashboardMainSplitPane.setDividerPositions(0.20);
             }
-            dashboardUIService.showToast(isDashboardOnlyModeActive() ? "대시보드만 모드" : "일반 모드", false);
+            dashboardUIService.showToast(isDashboardOnlyModeActive() ? "대시보드 전용 모드" : "일반 모드", false);
         });
     }
 
@@ -1206,6 +1329,8 @@ public class DashboardController {
         icon.setIconSize(14);
         icon.setIconColor(Color.WHITE);
         fullScreenBtn.setGraphic(icon);
+        fullScreenBtn.setAccessibleText("전체 화면 전환");
+        fullScreenBtn.setTooltip(new Tooltip("전체 화면으로 전환하거나 해제합니다."));
         fullScreenBtn.setOnAction(e -> {
             if (rootVBox != null && rootVBox.getScene() != null && rootVBox.getScene().getWindow() instanceof Stage stage) {
                 stage.setFullScreen(!stage.isFullScreen());
@@ -1219,12 +1344,41 @@ public class DashboardController {
         icon.setIconSize(14);
         icon.setIconColor(Color.WHITE);
         refreshBtn.setGraphic(icon);
+        refreshBtn.setText("");
+        refreshBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        refreshBtn.setAccessibleText("새로고침");
+        refreshBtn.setTooltip(new Tooltip("대시보드 데이터를 새로고침합니다."));
         refreshBtn.setOnAction(e -> {
-            RotateTransition rotate = new RotateTransition(Duration.millis(450), refreshBtn);
-            rotate.setByAngle(360);
-            rotate.play();
             refreshDashboardSnapshot();
         });
+    }
+
+    private void configureUndoButton(Button undoBtn) {
+        undoBtn.getStyleClass().add("btn-icon-undo");
+        FontIcon icon = new FontIcon("mdi2u-undo");
+        icon.setIconSize(14);
+        icon.setIconColor(Color.WHITE);
+        undoBtn.setGraphic(icon);
+        undoBtn.setText("");
+        undoBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        undoBtn.setAccessibleText("마지막 변경 되돌리기");
+        undoBtn.setTooltip(new Tooltip("마지막 편집 변경을 되돌립니다."));
+        undoBtn.setOnAction(e -> undoLastPanelMutation());
+        updateUndoButtonState();
+    }
+
+    private void configureRedoButton(Button redoBtn) {
+        redoBtn.getStyleClass().add("btn-icon-redo");
+        FontIcon icon = new FontIcon("mdi2r-redo");
+        icon.setIconSize(14);
+        icon.setIconColor(Color.WHITE);
+        redoBtn.setGraphic(icon);
+        redoBtn.setText("");
+        redoBtn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        redoBtn.setAccessibleText("다시 실행");
+        redoBtn.setTooltip(new Tooltip("되돌린 편집 변경을 다시 적용합니다."));
+        redoBtn.setOnAction(e -> redoLastPanelMutation());
+        updateUndoButtonState();
     }
 
     private void configureBackgroundColorPicker(ColorPicker bgColorPicker) {
@@ -1250,6 +1404,7 @@ public class DashboardController {
     }
 
     private void configureGridToggleButton(ToggleButton gridToggleBtn) {
+        gridToggleBtn.setTooltip(new Tooltip("격자선을 표시하거나 숨깁니다."));
         gridToggleBtn.setOnAction(e -> {
             if (canvasModule != null) {
                 canvasModule.drawGrid(gridToggleBtn.isSelected());
@@ -1259,48 +1414,29 @@ public class DashboardController {
 
     private void configureSnapToggleButton(ToggleButton snapToggleBtn) {
         snapToggleBtn.setSelected(isSnapToGridEnabled());
+        snapToggleBtn.setTooltip(new Tooltip("패널 이동 시 격자에 맞춰 정렬합니다."));
         snapToggleBtn.setOnAction(e -> dashboardViewModel.setSnapToGrid(snapToggleBtn.isSelected()));
     }
 
-    private void configureAlignMenu(MenuButton alignMenu) {
-        alignMenu.getItems().clear();
-        MenuItem alignLeft = new MenuItem("왼쪽");
-        alignLeft.setOnAction(e -> canvasModule.alignSelectedNodes("LEFT"));
-        MenuItem alignRight = new MenuItem("오른쪽");
-        alignRight.setOnAction(e -> canvasModule.alignSelectedNodes("RIGHT"));
-        MenuItem alignTop = new MenuItem("위");
-        alignTop.setOnAction(e -> canvasModule.alignSelectedNodes("TOP"));
-        MenuItem alignBottom = new MenuItem("아래");
-        alignBottom.setOnAction(e -> canvasModule.alignSelectedNodes("BOTTOM"));
-        alignMenu.getItems().addAll(alignLeft, alignRight, alignTop, alignBottom);
-    }
-
-    private void configureArrangeMenu(MenuButton arrangeMenu) {
-        arrangeMenu.getItems().clear();
-        MenuItem gridArrange = new MenuItem("격자");
-        gridArrange.setOnAction(e -> arrangePanels("GRID"));
-        MenuItem rowArrange = new MenuItem("행");
-        rowArrange.setOnAction(e -> arrangePanels("ROW"));
-        MenuItem colArrange = new MenuItem("열");
-        colArrange.setOnAction(e -> arrangePanels("COLUMN"));
-        arrangeMenu.getItems().addAll(gridArrange, rowArrange, colArrange);
-    }
-
     private void configureZoomOutButton(Button zoomOutBtn) {
+        zoomOutBtn.setTooltip(new Tooltip("화면을 축소합니다."));
         zoomOutBtn.setOnAction(e -> dashboardViewModel.zoomOut());
     }
 
     private void configureZoomResetButton(Button zoomResetBtn) {
+        zoomResetBtn.setTooltip(new Tooltip("확대/축소 배율을 기본값으로 되돌립니다."));
         zoomResetBtn.setOnAction(e -> dashboardViewModel.resetZoom());
         zoomResetButton = zoomResetBtn;
     }
 
     private void configureZoomInButton(Button zoomInBtn) {
+        zoomInBtn.setTooltip(new Tooltip("화면을 확대합니다."));
         zoomInBtn.setOnAction(e -> dashboardViewModel.zoomIn());
     }
 
     private void configureFitAllButton(Button fitAllBtn) {
-        fitAllBtn.setOnAction(e -> dashboardUIService.fitAllPanelsToViewport(new ArrayList<>(classroomContainer.getChildren())));
+        fitAllBtn.setTooltip(new Tooltip("모든 패널이 보이도록 자동 배치합니다."));
+        fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
     }
 
     private void applyEditModeUiState() {
@@ -1327,6 +1463,7 @@ public class DashboardController {
         if (resourcePanelModule != null) {
             resourcePanelModule.refreshListView();
         }
+        updateUndoButtonState();
     }
 
     private void toggleAlertPopup() {
@@ -1352,112 +1489,27 @@ public class DashboardController {
         if (alertContextMenu == null) {
             return;
         }
-
-        VBox container = new VBox(8);
-        container.getStyleClass().add("alerts-menu-container");
-
-        HBox header = new HBox(8);
-        Label title = new Label("운영 경보");
-        title.getStyleClass().add("alerts-menu-title");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        Button refreshButton = new Button("새로고침");
-        refreshButton.getStyleClass().add("alerts-menu-refresh-btn");
-        refreshButton.setOnAction(event -> {
-            event.consume();
-            loadAlertSnapshot();
-            refreshUnreadAlertCount();
-        });
-        header.getChildren().addAll(title, spacer, refreshButton);
-
-        VBox alertList = new VBox(6);
-        if (alertItems.isEmpty()) {
-            Label emptyLabel = new Label("현재 표시할 경보가 없습니다.");
-            emptyLabel.getStyleClass().add("alerts-empty-label");
-            alertList.getChildren().add(emptyLabel);
-        } else {
-            for (DashboardAlertItem item : alertItems) {
-                alertList.getChildren().add(buildAlertCard(item));
-            }
-        }
-
-        ScrollPane scrollPane = new ScrollPane(alertList);
-        scrollPane.getStyleClass().add("alerts-list-scroll");
-        scrollPane.setFitToWidth(true);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scrollPane.setPrefViewportHeight(330);
-        scrollPane.setPrefWidth(420);
-
-        container.getChildren().addAll(header, scrollPane);
-        CustomMenuItem rootItem = new CustomMenuItem(container, false);
-        alertContextMenu.getItems().setAll(rootItem);
-    }
-
-    private VBox buildAlertCard(DashboardAlertItem item) {
-        VBox card = new VBox(6);
-        card.getStyleClass().add("alerts-item");
-        if (item.isCritical()) {
-            card.getStyleClass().add("alerts-item-critical");
-        }
-
-        Label messageLabel = new Label(item.getMessage() == null ? "(내용 없음)" : item.getMessage());
-        messageLabel.getStyleClass().add("alerts-item-message");
-        messageLabel.setWrapText(true);
-
-        HBox metaRow = new HBox(8);
-        Label severityLabel = new Label(severityDisplayText(item.getSeverity()));
-        severityLabel.getStyleClass().add(severityStyleClass(item.getSeverity()));
-
-        String source = item.getSourceMac();
-        if (source == null || source.isBlank()) {
-            source = "SYSTEM";
-        }
-        Label sourceLabel = new Label(source);
-        sourceLabel.getStyleClass().add("alerts-item-meta");
-
-        Label timeLabel = new Label(formatAlertTime(item.getCreatedAt()));
-        timeLabel.getStyleClass().add("alerts-item-meta");
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        metaRow.getChildren().addAll(severityLabel, sourceLabel, timeLabel, spacer);
-
-        if (!item.isAcknowledged()) {
-            if (isViewerMode()) {
-                Label pendingLabel = new Label("미확인");
-                pendingLabel.getStyleClass().add("alerts-item-meta");
-                metaRow.getChildren().add(pendingLabel);
-            } else {
-                Button ackButton = new Button("확인");
-                ackButton.getStyleClass().add("alerts-ack-button");
-                ackButton.setOnAction(event -> {
-                    event.consume();
-                    acknowledgeAlert(item);
-                });
-                metaRow.getChildren().add(ackButton);
-            }
-        } else {
-            Label acknowledgedLabel = new Label("확인됨");
-            acknowledgedLabel.getStyleClass().add("alerts-acknowledged");
-            metaRow.getChildren().add(acknowledgedLabel);
-        }
-
-        card.getChildren().addAll(messageLabel, metaRow);
-        return card;
+        alertContextMenu.getItems().setAll(
+                DashboardAlertPopupBuilder.buildRootMenuItem(
+                        alertCoordinator.getAlertItems(),
+                        isViewerMode(),
+                        () -> {
+                            loadAlertSnapshot();
+                            refreshUnreadAlertCount();
+                        },
+                        this::acknowledgeAllAlerts,
+                        this::acknowledgeAlert
+                )
+        );
     }
 
     private void loadAlertSnapshot() {
-        ApiClient.getInstance()
-                .getJson("/alerts?limit=" + ALERT_FETCH_LIMIT, new TypeReference<List<DashboardAlertItem>>() {})
+        dashboardAlertApiClient
+                .fetchAlertSnapshot(ALERT_FETCH_LIMIT)
                 .thenAccept(items -> Platform.runLater(() -> {
-                    alertItems.clear();
-                    if (items != null) {
-                        alertItems.addAll(items);
-                    }
-                    if (alertContextMenu != null && alertContextMenu.isShowing()) {
-                        renderAlertPopup();
-                    }
+                    alertCoordinator.replaceAlertSnapshot(items);
+                    applyOfflineAlertBlinkState();
+                    refreshAlertPopupIfVisible();
                 }))
                 .exceptionally(ex -> {
                     log.debug("운영 경보 목록 조회 실패: {}", ex.getMessage());
@@ -1466,15 +1518,10 @@ public class DashboardController {
     }
 
     private void refreshUnreadAlertCount() {
-        ApiClient.getInstance()
-                .getJson("/alerts/unread-count", new TypeReference<Map<String, Object>>() {})
-                .thenAccept(payload -> Platform.runLater(() -> {
-                    Object unread = payload == null ? null : payload.get("unread");
-                    if (unread instanceof Number number) {
-                        unreadAlertCount = Math.max(0L, number.longValue());
-                    } else {
-                        unreadAlertCount = 0L;
-                    }
+        dashboardAlertApiClient
+                .fetchUnreadCount()
+                .thenAccept(count -> Platform.runLater(() -> {
+                    alertCoordinator.setUnreadAlertCount(count);
                     refreshAlertBadge();
                 }))
                 .exceptionally(ex -> {
@@ -1492,18 +1539,11 @@ public class DashboardController {
             return;
         }
 
-        ApiClient.getInstance()
-                .postJson("/alerts/" + item.getId() + "/ack", Map.of())
-                .thenAccept(resp -> Platform.runLater(() -> {
-                    item.setAcknowledged(true);
-                    item.setAcknowledgedAt(LocalDateTime.now());
-                    if (unreadAlertCount > 0) {
-                        unreadAlertCount--;
-                    }
-                    refreshAlertBadge();
-                    if (alertContextMenu != null && alertContextMenu.isShowing()) {
-                        renderAlertPopup();
-                    }
+        dashboardAlertApiClient
+            .acknowledgeAlert(item.getId())
+            .thenRun(() -> Platform.runLater(() -> {
+                    alertCoordinator.acknowledgeAlert(item, LocalDateTime.now());
+                    refreshAlertUiState();
                     safeShowToast("경보를 확인 처리했습니다.", false);
                     refreshUnreadAlertCount();
                 }))
@@ -1514,109 +1554,89 @@ public class DashboardController {
                 });
     }
 
+    private void acknowledgeAllAlerts() {
+        if (isViewerMode()) {
+            safeShowToast(ApiClient.viewerWriteDeniedMessage("경보 전체 확인 처리"), true);
+            return;
+        }
+        dashboardAlertApiClient
+                .acknowledgeAllAlerts()
+                .thenRun(() -> Platform.runLater(() -> {
+                    int updated = alertCoordinator.acknowledgeAll(LocalDateTime.now());
+                    refreshAlertUiState();
+                    if (updated > 0) {
+                        safeShowToast(updated + "건 경보를 확인 처리했습니다.", false);
+                    } else {
+                        safeShowToast("미확인 경보가 없습니다.", false);
+                    }
+                    refreshUnreadAlertCount();
+                }))
+                .exceptionally(ex -> {
+                    String message = ApiClient.userFacingErrorMessage(ex, "경보 전체 확인 처리에 실패했습니다.");
+                    Platform.runLater(() -> safeShowToast(message, true));
+                    return null;
+                });
+    }
+
     private void handleRealtimeAlertPayload(String alertPayload) {
-        DashboardAlertItem alertItem = parseAlertPayload(alertPayload);
+        DashboardAlertItem alertItem = DashboardAlertSupport.parseAlertPayload(alertPayload, objectMapper, log);
         if (alertItem == null || alertItem.getMessage() == null || alertItem.getMessage().isBlank()) {
             return;
         }
 
         Platform.runLater(() -> {
-            boolean addedUnread = upsertAlert(alertItem);
-            if (addedUnread) {
-                unreadAlertCount++;
-            }
-            refreshAlertBadge();
-            if (alertContextMenu != null && alertContextMenu.isShowing()) {
-                renderAlertPopup();
-            }
+            alertCoordinator.applyRealtimeAlert(alertItem, ALERT_FETCH_LIMIT);
+            refreshAlertUiState();
             safeShowToast("실시간 알림: " + alertItem.getMessage(), alertItem.isCritical());
             refreshUnreadAlertCount();
         });
     }
 
-    private DashboardAlertItem parseAlertPayload(String alertPayload) {
-        if (alertPayload == null || alertPayload.isBlank()) {
-            return null;
-        }
-        String raw = alertPayload.trim();
-        if (raw.startsWith("{")) {
-            try {
-                return objectMapper.readValue(raw, DashboardAlertItem.class);
-            } catch (Exception e) {
-                log.debug("경보 JSON 파싱 실패, plain-text로 처리: {}", e.getMessage());
-            }
-        }
-        DashboardAlertItem fallback = new DashboardAlertItem();
-        fallback.setMessage(raw);
-        fallback.setSeverity("WARNING");
-        fallback.setAlertType("SYSTEM");
-        fallback.setSourceMac("SYSTEM");
-        fallback.setCreatedAt(LocalDateTime.now());
-        fallback.setAcknowledged(false);
-        return fallback;
+    private void pulseOfflineAlertBlink() {
+        offlineAlertBlinkHighlightPhase = !offlineAlertBlinkHighlightPhase;
+        applyOfflineAlertBlinkState();
     }
 
-    private boolean upsertAlert(DashboardAlertItem incoming) {
-        Long incomingId = incoming.getId();
-        if (incomingId != null) {
-            for (int i = 0; i < alertItems.size(); i++) {
-                DashboardAlertItem existing = alertItems.get(i);
-                if (Objects.equals(existing.getId(), incomingId)) {
-                    boolean wasUnread = !existing.isAcknowledged();
-                    alertItems.remove(i);
-                    alertItems.add(0, incoming);
-                    return !incoming.isAcknowledged() && !wasUnread;
-                }
-            }
+    private void applyOfflineAlertBlinkState() {
+        if (classroomModule == null) {
+            return;
         }
-        alertItems.add(0, incoming);
-        while (alertItems.size() > ALERT_FETCH_LIMIT) {
-            alertItems.remove(alertItems.size() - 1);
+        classroomModule.applyAlertBlink(
+                DashboardAlertSupport.collectBlinkingOfflineAlertMacs(
+                        alertCoordinator.getAlertItems(),
+                        OFFLINE_ALERT_BLINK_WINDOW_SECONDS,
+                        LocalDateTime.now()
+                ),
+                DashboardAlertSupport.collectBlinkingUpdateAlertMacs(alertCoordinator.getAlertItems()),
+                offlineAlertBlinkHighlightPhase
+        );
+    }
+
+    private void refreshAlertUiState() {
+        refreshAlertBadge();
+        applyOfflineAlertBlinkState();
+        refreshAlertPopupIfVisible();
+    }
+
+    private void refreshAlertPopupIfVisible() {
+        if (alertContextMenu != null && alertContextMenu.isShowing()) {
+            renderAlertPopup();
         }
-        return !incoming.isAcknowledged();
     }
 
     private void refreshAlertBadge() {
         if (alertsBadgeLabel == null) {
             return;
         }
-        long count = Math.max(0, unreadAlertCount);
-        if (count <= 0) {
+        String badgeText = alertCoordinator.formatBadgeText();
+        if (badgeText == null) {
             alertsBadgeLabel.setVisible(false);
             alertsBadgeLabel.setManaged(false);
             return;
         }
-        alertsBadgeLabel.setText(count > 99 ? "99+" : String.valueOf(count));
+        alertsBadgeLabel.setText(badgeText);
         alertsBadgeLabel.setVisible(true);
         alertsBadgeLabel.setManaged(true);
-    }
-
-    private String formatAlertTime(LocalDateTime dateTime) {
-        if (dateTime == null) {
-            return "-";
-        }
-        return dateTime.format(ALERT_TIME_FORMAT);
-    }
-
-    private String severityDisplayText(String severity) {
-        if (severity == null || severity.isBlank()) {
-            return "WARNING";
-        }
-        String normalized = severity.trim().toUpperCase(java.util.Locale.ROOT);
-        return switch (normalized) {
-            case "INFO" -> "INFO";
-            case "CRITICAL" -> "CRITICAL";
-            default -> "WARNING";
-        };
-    }
-
-    private String severityStyleClass(String severity) {
-        String normalized = severity == null ? "" : severity.trim().toUpperCase(java.util.Locale.ROOT);
-        return switch (normalized) {
-            case "INFO" -> "alerts-severity-info";
-            case "CRITICAL" -> "alerts-severity-critical";
-            default -> "alerts-severity-warning";
-        };
     }
 
     private void safeShowToast(String message, boolean isError) {
@@ -1627,10 +1647,307 @@ public class DashboardController {
         log.info("toast({}): {}", isError ? "error" : "info", message);
     }
 
+    private void captureUndoSnapshot() {
+        if (isViewerMode() || undoRestoreInFlight || currentDashboardId() == null || !isEditModeActive()) {
+            return;
+        }
+        List<DashboardPanelDto> current = copyPanelSnapshot(
+                dashboardViewModel == null ? List.of() : dashboardViewModel.getCachedDashboardPanels());
+        List<DashboardPanelDto> latestUndoSnapshot = undoHistory.peekLast();
+        if (isSamePanelSnapshot(latestUndoSnapshot, current)) {
+            return;
+        }
+        undoHistory.addLast(current);
+        redoHistory.clear();
+        updateUndoButtonState();
+    }
+
+    private void clearUndoSnapshot() {
+        undoHistory.clear();
+        redoHistory.clear();
+        updateUndoButtonState();
+    }
+
+    private void updateUndoButtonState() {
+        boolean showUndoRedo = !isViewerMode() && isEditModeActive();
+        boolean disabled = isViewerMode()
+                || undoRestoreInFlight
+                || currentDashboardId() == null
+                || !isEditModeActive();
+        if (undoButton != null) {
+            undoButton.setManaged(showUndoRedo);
+            undoButton.setVisible(showUndoRedo);
+            undoButton.setDisable(disabled || undoHistory.isEmpty());
+        }
+        if (redoButton != null) {
+            redoButton.setManaged(showUndoRedo);
+            redoButton.setVisible(showUndoRedo);
+            redoButton.setDisable(disabled || redoHistory.isEmpty());
+        }
+    }
+
+    private void undoLastPanelMutation() {
+        if (!ensureWritePermission("패널 되돌리기")) {
+            return;
+        }
+        if (!isEditModeActive()) {
+            safeShowToast("편집 모드에서만 되돌리기를 사용할 수 있습니다.", true);
+            return;
+        }
+        Long dashboardId = currentDashboardId();
+        if (dashboardId == null || undoHistory.isEmpty()) {
+            safeShowToast("되돌릴 변경이 없습니다.", true);
+            return;
+        }
+
+        List<DashboardPanelDto> targetSnapshot = copyPanelSnapshot(undoHistory.peekLast());
+        List<DashboardPanelDto> currentSnapshot = copyPanelSnapshot(dashboardViewModel.getCachedDashboardPanels());
+        if (isSamePanelSnapshot(currentSnapshot, targetSnapshot)) {
+            undoHistory.pollLast();
+            updateUndoButtonState();
+            return;
+        }
+
+        restoreHistorySnapshot(dashboardId, currentSnapshot, targetSnapshot, true);
+    }
+
+    private void redoLastPanelMutation() {
+        if (!ensureWritePermission("패널 되돌리기 다시 실행")) {
+            return;
+        }
+        if (!isEditModeActive()) {
+            safeShowToast("편집 모드에서만 다시 실행을 사용할 수 있습니다.", true);
+            return;
+        }
+        Long dashboardId = currentDashboardId();
+        if (dashboardId == null || redoHistory.isEmpty()) {
+            safeShowToast("다시 실행할 변경이 없습니다.", true);
+            return;
+        }
+
+        List<DashboardPanelDto> targetSnapshot = copyPanelSnapshot(redoHistory.peekLast());
+        List<DashboardPanelDto> currentSnapshot = copyPanelSnapshot(dashboardViewModel.getCachedDashboardPanels());
+        if (isSamePanelSnapshot(currentSnapshot, targetSnapshot)) {
+            redoHistory.pollLast();
+            updateUndoButtonState();
+            return;
+        }
+
+        restoreHistorySnapshot(dashboardId, currentSnapshot, targetSnapshot, false);
+    }
+
+    private void restoreHistorySnapshot(Long dashboardId,
+                                        List<DashboardPanelDto> currentSnapshot,
+                                        List<DashboardPanelDto> targetSnapshot,
+                                        boolean fromUndo) {
+        undoRestoreInFlight = true;
+        updateUndoButtonState();
+
+        restorePanelSnapshotAsync(dashboardId, currentSnapshot, targetSnapshot)
+                .whenComplete((ignored, ex) -> Platform.runLater(() -> {
+                    undoRestoreInFlight = false;
+                    if (ex != null) {
+                        String message = ApiClient.userFacingErrorMessage(ex,
+                                fromUndo ? "되돌리기 처리에 실패했습니다." : "다시 실행 처리에 실패했습니다.");
+                        safeShowToast(message, true);
+                        updateUndoButtonState();
+                        return;
+                    }
+
+                    if (fromUndo) {
+                        undoHistory.pollLast();
+                        List<DashboardPanelDto> snapshotForRedo = copyPanelSnapshot(currentSnapshot);
+                        if (!isSamePanelSnapshot(redoHistory.peekLast(), snapshotForRedo)) {
+                            redoHistory.addLast(snapshotForRedo);
+                        }
+                        safeShowToast("이전 편집 상태로 되돌렸습니다.", false);
+                    } else {
+                        redoHistory.pollLast();
+                        List<DashboardPanelDto> snapshotForUndo = copyPanelSnapshot(currentSnapshot);
+                        if (!isSamePanelSnapshot(undoHistory.peekLast(), snapshotForUndo)) {
+                            undoHistory.addLast(snapshotForUndo);
+                        }
+                        safeShowToast("되돌리기를 다시 적용했습니다.", false);
+                    }
+
+                    loadDashboardPanels();
+                    updateUndoButtonState();
+                }));
+    }
+
+    private CompletableFuture<Void> restorePanelSnapshotAsync(Long dashboardId,
+                                                              List<DashboardPanelDto> currentSnapshot,
+                                                              List<DashboardPanelDto> targetSnapshot) {
+        Map<Long, DashboardPanelDto> currentById = new HashMap<>();
+        for (DashboardPanelDto panel : currentSnapshot) {
+            if (panel != null && panel.getId() != null) {
+                currentById.put(panel.getId(), panel);
+            }
+        }
+
+        Map<Long, DashboardPanelDto> targetById = new HashMap<>();
+        for (DashboardPanelDto panel : targetSnapshot) {
+            if (panel != null && panel.getId() != null) {
+                targetById.put(panel.getId(), panel);
+            }
+        }
+
+        List<CompletableFuture<?>> futures = new ArrayList<>();
+
+        for (Map.Entry<Long, DashboardPanelDto> entry : targetById.entrySet()) {
+            Long panelId = entry.getKey();
+            DashboardPanelDto target = entry.getValue();
+            DashboardPanelDto current = currentById.get(panelId);
+
+            if (current != null) {
+                if (!isSamePanelState(current, target)) {
+                    futures.add(apiClient.putJson(
+                            "/dashboards/" + dashboardId + "/panels/" + panelId,
+                            toPanelUpdatePayload(target)));
+                }
+            } else {
+                futures.add(apiClient.postJson(
+                        "/dashboards/" + dashboardId + "/panels",
+                        toPanelCreatePayload(target)));
+            }
+        }
+
+        for (Map.Entry<Long, DashboardPanelDto> entry : currentById.entrySet()) {
+            if (!targetById.containsKey(entry.getKey())) {
+                futures.add(apiClient
+                        .delete("/dashboards/" + dashboardId + "/panels/" + entry.getKey()));
+            }
+        }
+
+        if (futures.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    }
+
+    private Map<String, Object> toPanelUpdatePayload(DashboardPanelDto panel) {
+        Map<String, Object> payload = new HashMap<>();
+        if (panel.getPanelType() != null && !panel.getPanelType().isBlank()) {
+            payload.put("panelType", panel.getPanelType());
+        }
+        if (panel.getRefGroupId() != null) {
+            payload.put("refGroupId", panel.getRefGroupId());
+        }
+        if (panel.getConfigJson() != null) {
+            payload.put("configJson", panel.getConfigJson());
+        }
+        payload.put("x", panel.getX() == null ? 40.0 : panel.getX());
+        payload.put("y", panel.getY() == null ? 40.0 : panel.getY());
+        payload.put("width", panel.getWidth() == null ? 320.0 : panel.getWidth());
+        payload.put("height", panel.getHeight() == null ? 220.0 : panel.getHeight());
+        payload.put("visible", panel.isVisible());
+        payload.put("zIndex", panel.getZIndex() == null ? 0 : panel.getZIndex());
+        payload.put("panelName", panel.getPanelName());
+        return payload;
+    }
+
+    private Map<String, Object> toPanelCreatePayload(DashboardPanelDto panel) {
+        Map<String, Object> payload = toPanelUpdatePayload(panel);
+        if (!payload.containsKey("panelType")) {
+            payload.put("panelType", "CLASSROOM_HEARTBEAT");
+        }
+        return payload;
+    }
+
+    private boolean isSamePanelSnapshot(List<DashboardPanelDto> a, List<DashboardPanelDto> b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        if (a.size() != b.size()) {
+            return false;
+        }
+        List<DashboardPanelDto> left = copyPanelSnapshot(a);
+        List<DashboardPanelDto> right = copyPanelSnapshot(b);
+        left.sort(Comparator.comparing(DashboardPanelDto::getId, Comparator.nullsFirst(Long::compareTo)));
+        right.sort(Comparator.comparing(DashboardPanelDto::getId, Comparator.nullsFirst(Long::compareTo)));
+        for (int i = 0; i < left.size(); i++) {
+            if (!isSamePanelState(left.get(i), right.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isSamePanelState(DashboardPanelDto left, DashboardPanelDto right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return Objects.equals(left.getId(), right.getId())
+                && Objects.equals(left.getPanelType(), right.getPanelType())
+                && Objects.equals(left.getRefGroupId(), right.getRefGroupId())
+                && Objects.equals(left.getConfigJson(), right.getConfigJson())
+                && sameDouble(left.getX(), right.getX())
+                && sameDouble(left.getY(), right.getY())
+                && sameDouble(left.getWidth(), right.getWidth())
+                && sameDouble(left.getHeight(), right.getHeight())
+                && Objects.equals(left.getZIndex(), right.getZIndex())
+                && left.isVisible() == right.isVisible()
+                && Objects.equals(left.getPanelName(), right.getPanelName());
+    }
+
+    private boolean sameDouble(Double a, Double b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        return Math.abs(a - b) <= 0.5;
+    }
+
+    private List<DashboardPanelDto> copyPanelSnapshot(List<DashboardPanelDto> source) {
+        if (source == null || source.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<DashboardPanelDto> copy = new ArrayList<>(source.size());
+        for (DashboardPanelDto panel : source) {
+            if (panel == null) {
+                continue;
+            }
+            DashboardPanelDto next = new DashboardPanelDto();
+            next.setId(panel.getId());
+            next.setDashboardId(panel.getDashboardId());
+            next.setPanelType(panel.getPanelType());
+            next.setRefGroupId(panel.getRefGroupId());
+            next.setConfigJson(panel.getConfigJson());
+            next.setX(panel.getX());
+            next.setY(panel.getY());
+            next.setWidth(panel.getWidth());
+            next.setHeight(panel.getHeight());
+            next.setZIndex(panel.getZIndex());
+            next.setVisible(panel.isVisible());
+            next.setPanelName(panel.getPanelName());
+            next.setCreatedAt(panel.getCreatedAt());
+            next.setUpdatedAt(panel.getUpdatedAt());
+            copy.add(next);
+        }
+        return copy;
+    }
+
     private void connectWebSocket() {
         if (realtimeModule == null) {
-            realtimeModule = new DashboardRealtimeModule(ApiClient.getInstance().getWsUrl());
+            realtimeModule = new DashboardRealtimeModule(apiClient.getWsUrl());
         }
+        // Notify controller when WS actually connects so we can update UI state
+        realtimeModule.setOnConnected(() -> {
+            offlineNotified.set(false);
+            serverDisconnectHandled.set(false);
+            Platform.runLater(() -> {
+                if (connectivityLabel != null) {
+                    connectivityLabel.setText(DashboardStatusSummarySupport.CONNECTED_LABEL);
+                    connectivityLabel.setTextFill(Color.web(DashboardStatusSummarySupport.CONNECTED_COLOR_HEX));
+                }
+                if (dashboardUIService != null) {
+                    dashboardUIService.showToast("서버에 재연결되었습니다.", false);
+                }
+            });
+        });
+
         realtimeModule.start(
                 () -> Platform.runLater(this::refreshDashboardSnapshot),
                 this::handleRealtimeAlertPayload,
@@ -1639,7 +1956,7 @@ public class DashboardController {
     }
 
     private void handleServerConnectionLost(Throwable throwable) {
-        if (!serverDisconnectHandled.compareAndSet(false, true)) {
+        if (!offlineNotified.compareAndSet(false, true)) {
             return;
         }
         Platform.runLater(() -> {
@@ -1647,11 +1964,27 @@ public class DashboardController {
                 return;
             }
             if (connectivityLabel != null) {
-                connectivityLabel.setText("연결 끊김");
-                connectivityLabel.setTextFill(Color.web("#fca5a5"));
+                connectivityLabel.setText(DashboardStatusSummarySupport.DISCONNECTED_LABEL);
+                connectivityLabel.setTextFill(Color.web(DashboardStatusSummarySupport.ERROR_COLOR_HEX));
             }
-            forceMoveToLoginWithAlert("서버 연결이 끊어졌습니다. 로그인 페이지로 이동합니다.");
+            if (dashboardUIService != null) {
+                dashboardUIService.showToast("서버 연결이 끊어졌습니다. 자동 재시도 중...", true);
+            }
         });
+
+        // 연결 단절이 짧게 회복되는 경우를 고려해 유예 후 로그인 화면으로 이동한다.
+        scheduler.schedule(() -> Platform.runLater(() -> {
+            if (shutdownRequested) {
+                return;
+            }
+            if (!offlineNotified.get()) {
+                return;
+            }
+            if (!serverDisconnectHandled.compareAndSet(false, true)) {
+                return;
+            }
+            forceMoveToLoginWithAlert("서버 연결이 끊어졌습니다. 다시 로그인해 주세요.");
+        }), 3, TimeUnit.SECONDS);
     }
 
     private void handleSessionExpired(ApiClientException exception) {
@@ -1663,8 +1996,8 @@ public class DashboardController {
                 return;
             }
             if (connectivityLabel != null) {
-                connectivityLabel.setText("세션 만료");
-                connectivityLabel.setTextFill(Color.web("#fca5a5"));
+                connectivityLabel.setText(DashboardStatusSummarySupport.SESSION_EXPIRED_LABEL);
+                connectivityLabel.setTextFill(Color.web(DashboardStatusSummarySupport.ERROR_COLOR_HEX));
             }
             forceMoveToLoginWithAlert("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
         });
@@ -1679,7 +2012,13 @@ public class DashboardController {
     }
 
     private String currentApiBaseUrl() {
-        return ApiClient.getInstance().getBaseUrl();
+        return apiClient.getBaseUrl();
+    }
+
+    private Window resolveRootWindow() {
+        return rootVBox != null && rootVBox.getScene() != null
+                ? rootVBox.getScene().getWindow()
+                : null;
     }
 
     private void saveNodePosition(Node node) {
@@ -1709,6 +2048,7 @@ public class DashboardController {
                 panelId = null;
             }
             if (panelId != null) {
+                captureUndoSnapshot();
                 dashboardService.updatePanelPositionAsync(dashboardId, panelId, x, y, width, height);
                 updateCachedPanelPosition(panelId, x, y, width, height);
                 expandCanvasToContentBounds();
@@ -1832,6 +2172,7 @@ public class DashboardController {
         if (currentDashboardId() == null) {
             dashboardViewModel.setCachedDashboardPanels(List.of());
             Platform.runLater(this::refreshPanelListAndDashboard);
+            Platform.runLater(this::updateUndoButtonState);
             return;
         }
         dashboardService.fetchDashboardPanelsAsync(currentDashboardId(), panels -> Platform.runLater(() -> {
@@ -1845,6 +2186,7 @@ public class DashboardController {
             pendingInitialViewportAdjust = true;
             scheduleInitialViewportAdjust();
             triggerInitialFitIfNeeded();
+            updateUndoButtonState();
         }));
     }
 
@@ -1893,6 +2235,7 @@ public class DashboardController {
         if (operationsMetricsPanelModule != null) {
             operationsMetricsPanelModule.update(classrooms, panels);
         }
+        applyOfflineAlertBlinkState();
         Platform.runLater(this::expandCanvasToContentBounds);
         updateTopSummary();
     }
@@ -2308,6 +2651,7 @@ public class DashboardController {
         if (existing != null && currentDashboardId() != null) {
             double w = existing.getWidth() != null ? existing.getWidth() : 360.0;
             double h = existing.getHeight() != null ? existing.getHeight() : 280.0;
+            captureUndoSnapshot();
             dashboardService.updatePanelPositionAsync(currentDashboardId(), existing.getId(), x, y, w, h);
             updateCachedPanelPosition(existing.getId(), x, y, w, h);
             refreshPanelListAndDashboard();
@@ -2338,57 +2682,6 @@ public class DashboardController {
         }
         widgetModule.updateImageItemPosition(id, x, y, 360.0, 240.0, true);
         widgetModule.loadImageItems();
-    }
-
-    private void arrangePanels(String mode) {
-        if (!ensureWritePermission("패널 배열")) {
-            return;
-        }
-        if (!isEditModeActive()) {
-            dashboardUIService.showToast("편집 모드에서만 배열 기능을 사용할 수 있습니다.", true);
-            return;
-        }
-
-        List<Node> nodes = getAllCanvasPanels();
-        if (nodes.isEmpty()) {
-            return;
-        }
-
-        double startX = 40;
-        double startY = 40;
-        double gap = 24;
-
-        if ("GRID".equals(mode)) {
-            int cols = Math.max(1, (int) Math.ceil(Math.sqrt(nodes.size())));
-            for (int i = 0; i < nodes.size(); i++) {
-                Node node = nodes.get(i);
-                int row = i / cols;
-                int col = i % cols;
-                double x = startX + col * (Math.max(260, node.prefWidth(-1)) + gap);
-                double y = startY + row * (Math.max(180, node.prefHeight(-1)) + gap);
-                node.setLayoutX(applySnap(x));
-                node.setLayoutY(applySnap(y));
-                saveNodePosition(node);
-            }
-        } else if ("ROW".equals(mode)) {
-            double x = startX;
-            for (Node node : nodes) {
-                node.setLayoutX(applySnap(x));
-                node.setLayoutY(applySnap(startY));
-                x += Math.max(260, node.prefWidth(-1)) + gap;
-                saveNodePosition(node);
-            }
-        } else {
-            double y = startY;
-            for (Node node : nodes) {
-                node.setLayoutX(applySnap(startX));
-                node.setLayoutY(applySnap(y));
-                y += Math.max(180, node.prefHeight(-1)) + gap;
-                saveNodePosition(node);
-            }
-        }
-
-        dashboardUIService.showToast("배열 완료: " + mode, false);
     }
 
     private List<Node> getAllCanvasPanels() {
@@ -2533,13 +2826,9 @@ public class DashboardController {
         if (statusSummaryLabel == null || connectivityLabel == null) {
             return;
         }
-        List<ClassroomSummaryDto> classrooms = dashboardViewModel.getCachedClassrooms();
-        int classroomCount = classrooms.size();
-        long online = classrooms.stream().mapToLong(ClassroomSummaryDto::getOnlinePcs).sum();
-        long total = classrooms.stream().mapToLong(ClassroomSummaryDto::getTotalPcs).sum();
-        statusSummaryLabel.setText("강의실 " + classroomCount + ", 온라인 " + online + "/" + total);
-        connectivityLabel.setText("연결됨");
-        connectivityLabel.setTextFill(Color.web("#86efac"));
+        statusSummaryLabel.setText(DashboardStatusSummarySupport.formatTopSummary(dashboardViewModel.getCachedClassrooms()));
+        connectivityLabel.setText(DashboardStatusSummarySupport.CONNECTED_LABEL);
+        connectivityLabel.setTextFill(Color.web(DashboardStatusSummarySupport.CONNECTED_COLOR_HEX));
     }
 
     private DashboardViewModel viewModel() {
@@ -2554,7 +2843,13 @@ public class DashboardController {
     }
 
     private void setCurrentDashboardId(Long id) {
+        Long previous = viewModel().getSelectedDashboardId();
         viewModel().setSelectedDashboardId(id);
+        if (!Objects.equals(previous, id)) {
+            clearUndoSnapshot();
+        } else {
+            updateUndoButtonState();
+        }
     }
 
     private boolean isEditModeActive() {
@@ -2606,8 +2901,8 @@ public class DashboardController {
             return;
         }
         shutdownRequested = true;
-        ApiClient.getInstance().setConnectionFailureHandler(null);
-        ApiClient.getInstance().setAuthFailureHandler(null);
+        apiClient.setConnectionFailureHandler(null);
+        apiClient.setAuthFailureHandler(null);
         scheduler.shutdownNow();
         if (realtimeModule != null) {
             realtimeModule.stop();

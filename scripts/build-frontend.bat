@@ -11,7 +11,11 @@ echo === Build Frontend Only (ShadowJAR)
 echo ============================================================
 echo.
 
-echo Building Frontend ShadowJAR...
+echo [0/1] Cleaning up stale processes...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\cleanup-runtime.ps1" -NoBanner
+echo.
+
+echo [1/1] Building Frontend ShadowJAR...
 call gradlew.bat :frontend:shadowJar -x test
 if !errorlevel! neq 0 (
     echo [ERROR] Frontend build failed

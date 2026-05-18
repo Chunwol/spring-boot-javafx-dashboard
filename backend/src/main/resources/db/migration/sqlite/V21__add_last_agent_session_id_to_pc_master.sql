@@ -1,0 +1,1 @@
+ALTER TABLE pc_master ADD COLUMN last_agent_session_id TEXT;

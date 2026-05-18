@@ -19,7 +19,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -60,12 +59,11 @@ public class ClassroomService {
             allGroups.forEach(g -> logger.debug("  DB Group: id={}, name={}", g.getId(), g.getName()));
 
             LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
-            String cutoff = fiveMinutesAgo.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
             // Load group list + PC counts with single LEFT JOIN query
             List<ClassroomGroupRepository.GroupWithPcStatsProjection> groupStats =
-                    classroomGroupRepository.findAllWithPcStats(cutoff);
-            logger.info("Loaded {} classroom groups from query (cutoff: {})", groupStats.size(), cutoff);
+                    classroomGroupRepository.findAllWithPcStats(fiveMinutesAgo);
+            logger.info("Loaded {} classroom groups from query (cutoff: {})", groupStats.size(), fiveMinutesAgo);
             groupStats.forEach(g -> logger.debug("  - Group: id={}, name={}, total={}, online={}",
                     g.getGroupId(), g.getGroupName(), g.getTotalCount(), g.getOnlineCount()));
 

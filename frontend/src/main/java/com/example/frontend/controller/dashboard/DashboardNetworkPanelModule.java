@@ -42,6 +42,7 @@ public class DashboardNetworkPanelModule {
     private final BiConsumer<String, Boolean> showToast;
     private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final Function<String, double[]> responsiveSizeFn;
+    private final Runnable beforePanelMutation;
     private final Runnable onPanelsChanged;
 
     private final Map<Long, VBox> panelMap = new HashMap<>();
@@ -65,6 +66,7 @@ public class DashboardNetworkPanelModule {
             BiConsumer<String, Boolean> showToast,
             PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             Function<String, double[]> responsiveSizeFn,
+            Runnable beforePanelMutation,
             Runnable onPanelsChanged) {
         this.dashboardService = dashboardService;
         this.classroomContainer = classroomContainer;
@@ -75,6 +77,7 @@ public class DashboardNetworkPanelModule {
         this.showToast = showToast;
         this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.responsiveSizeFn = responsiveSizeFn;
+        this.beforePanelMutation = beforePanelMutation;
         this.onPanelsChanged = onPanelsChanged;
     }
 
@@ -176,6 +179,7 @@ public class DashboardNetworkPanelModule {
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
+                runBeforePanelMutation();
                 dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
             }
         });
@@ -268,6 +272,7 @@ public class DashboardNetworkPanelModule {
         if (dashboardId == null) {
             return;
         }
+        runBeforePanelMutation();
         dashboardService.updatePanelPositionAsync(
                 dashboardId, panelId,
                 panel.getLayoutX(), panel.getLayoutY(),
@@ -283,5 +288,12 @@ public class DashboardNetworkPanelModule {
             );
         }
         showToast.accept(toastMessage, false);
+    }
+
+    private void runBeforePanelMutation() {
+        if (beforePanelMutation == null) {
+            return;
+        }
+        beforePanelMutation.run();
     }
 }

@@ -10,6 +10,17 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+compose() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        docker-compose "$@"
+    else
+        echo "docker compose not found"
+        exit 1
+    fi
+}
+
 # 함수: 단계별 진행 표시
 step() {
     echo -e "${BLUE}===================================================${NC}"
@@ -29,17 +40,7 @@ failure() {
 
 # 0. Clean up existing Docker containers and processes
 step "STEP 0: Cleaning up existing deployment..."
-
-# Kill any local postgres/redis processes
-pkill -f "postgres" -9 2>/dev/null || true
-pkill -f "redis-server" -9 2>/dev/null || true
-
-# Stop docker-compose stack if running
-if [ -f "docker-compose.yml" ]; then
-    docker-compose down -v 2>/dev/null || true
-fi
-
-sleep 1
+bash ./scripts/cleanup-runtime.sh --quiet --docker
 success "Cleanup complete"
 
 # 1. Java 모듈 빌드
@@ -83,7 +84,7 @@ fi
 # 4. Docker Compose 시작
 step "STEP 4: Starting Docker stack..."
 
-if docker-compose up -d; then
+if compose up -d; then
     success "Docker stack started"
     
     # 5. 컨테이너 상태 확인
@@ -91,7 +92,7 @@ if docker-compose up -d; then
     sleep 3
     
     echo ""
-    docker-compose ps
+    compose ps
     
     echo ""
     success "Deployment completed!"

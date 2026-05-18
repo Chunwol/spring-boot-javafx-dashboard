@@ -18,7 +18,11 @@ if [ ! -f "gradlew" ]; then
     exit 1
 fi
 
-echo "Building Frontend ShadowJAR..."
+# Clean up stale processes (frontend doesn't use DB but good for consistency)
+echo "[0/1] Cleaning up stale processes..."
+bash ./scripts/cleanup-runtime.sh --quiet
+
+echo "[1/1] Building Frontend ShadowJAR..."
 ./gradlew :frontend:shadowJar -x test
 
 echo ""

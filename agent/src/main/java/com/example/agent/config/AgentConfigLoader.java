@@ -23,7 +23,6 @@ public class AgentConfigLoader {
 
     // CRITICAL FIX#4: Synchronize config file access to prevent race conditions
     private final Object configLock = new Object();
-    private final AgentConfigValidator validator = new AgentConfigValidator();
 
     public AgentConfigLoader() {
         // -Dpcagent.config.dir=<path> 시스템 속성으로 경로 재정의 가능
@@ -75,10 +74,6 @@ public class AgentConfigLoader {
             }
         }
         applyEnvOverrides(config);
-
-        // Validate configuration
-        validator.validateAndLog(config);
-
         return config;
     }
 
@@ -117,6 +112,11 @@ public class AgentConfigLoader {
         config.setTlsPinSha256(readEnv("AGENT_TLS_PIN_SHA256", config.getTlsPinSha256()));
         config.setHeartbeatIntervalSec(parseInt(readEnv("AGENT_HEARTBEAT_INTERVAL_SEC", null), config.getHeartbeatIntervalSec()));
         config.setJitterSec(parseInt(readEnv("AGENT_JITTER_SEC", null), config.getJitterSec()));
+        config.setUpdatePeerPort(parseInt(readEnv("AGENT_UPDATE_PEER_PORT", null), config.getUpdatePeerPort()));
+        // Overrides for cloned-image scenarios
+        config.setOverrideMacAddress(readEnv("AGENT_OVERRIDE_MAC", config.getOverrideMacAddress()));
+        config.setOverrideHostname(readEnv("AGENT_OVERRIDE_HOSTNAME", config.getOverrideHostname()));
+        config.setOverrideIpAddress(readEnv("AGENT_OVERRIDE_IP", config.getOverrideIpAddress()));
     }
 
     private String readEnv(String key, String defaultValue) {

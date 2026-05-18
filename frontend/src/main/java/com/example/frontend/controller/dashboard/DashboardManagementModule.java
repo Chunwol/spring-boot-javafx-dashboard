@@ -178,9 +178,11 @@ public class DashboardManagementModule {
         @SuppressWarnings("unchecked")
         TableColumn<Map<String, Object>, String> orphanCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(5);
         @SuppressWarnings("unchecked")
-        TableColumn<Map<String, Object>, String> lastSeenCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(6);
+        TableColumn<Map<String, Object>, String> versionCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(6);
         @SuppressWarnings("unchecked")
-        TableColumn<Map<String, Object>, Void> actionCol = (TableColumn<Map<String, Object>, Void>) agentTable.getColumns().get(7);
+        TableColumn<Map<String, Object>, String> lastSeenCol = (TableColumn<Map<String, Object>, String>) agentTable.getColumns().get(7);
+        @SuppressWarnings("unchecked")
+        TableColumn<Map<String, Object>, Void> actionCol = (TableColumn<Map<String, Object>, Void>) agentTable.getColumns().get(8);
 
         pcNameCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
         ipCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
@@ -224,6 +226,22 @@ public class DashboardManagementModule {
                 setText(s);
                 getStyleClass().removeAll("status-orphan", "status-normal");
                 getStyleClass().add("고아토큰".equals(s) ? "status-orphan" : "status-normal");
+            }
+        });
+
+        versionCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("agentVersion"))));
+        versionCol.setCellFactory(col -> new TableCell<>() {
+            @Override protected void updateItem(String version, boolean empty) {
+                super.updateItem(version, empty);
+                if (empty || version == null || version.isBlank() || "-".equals(version)) {
+                    setText(null);
+                    setGraphic(null);
+                    return;
+                }
+                Label lbl = new Label(version);
+                lbl.getStyleClass().add("code-tag");
+                setText(null);
+                setGraphic(lbl);
             }
         });
 

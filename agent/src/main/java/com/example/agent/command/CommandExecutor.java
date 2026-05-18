@@ -2,6 +2,7 @@ package com.example.agent.command;
 
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
+import com.example.agent.update.UpdateCacheServer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
@@ -17,18 +18,21 @@ import com.example.agent.util.UiThreadUtils;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -36,31 +40,53 @@ import javax.swing.filechooser.FileSystemView;
 
 /**
  * 서버에서 전달받은 명령을 실행한다.
- * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY, COLLECT_FILES, LIST_FILES
+ * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY, COLLECT_FILES, LIST_FILES, AGENT_UPDATE
  */
 public class CommandExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(CommandExecutor.class);
-    private static final int OUTPUT_LIMIT = 4 * 1024; // 4KB
+    private static final int OUTPUT_LIMIT = 4 * 1024;   // 4KB (shell 명령 결과용)
+    private static final int OUTPUT_LIMIT_JSON = 2 * 1024 * 1024; // 2MB (LIST_FILES JSON용)
     private static final String RUN_MODE_BACKGROUND = "BACKGROUND";
     private static final String WINDOW_MODE_VISIBLE = "VISIBLE";
+    private static final int LIST_FILES_DEFAULT_LIMIT = 120;
+    private static final int LIST_FILES_MAX_LIMIT = 400;
+    private static final int LIST_FILES_MAX_SCAN_ENTRIES = 5000;
+    private static final int LIST_FILES_WARNING_PREVIEW = 20;
+    private static final long LIST_FILES_SCAN_TIME_LIMIT_MS = 12_000L;
+    private static final int COLLECT_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+    private static final int COLLECT_UPLOAD_MAX_RETRY = 3;
+    private static final long COLLECT_UPLOAD_RETRY_BACKOFF_MS = 350L;
+    private static final long AGENT_UPDATE_EXIT_DELAY_MS = 4_000L;
+    private static final int AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE = 64 * 1024;
 
     private final AgentConfig config;
     private final AgentConfigLoader configLoader;
     private final OkHttpClient httpClient;
     private final ObjectMapper mapper;
     private final PendingCommandResultStore pendingResultStore;
+    private final UpdateCacheServer updateCacheServer;
 
     public CommandExecutor(AgentConfig config,
                            AgentConfigLoader configLoader,
                            OkHttpClient httpClient,
                            ObjectMapper mapper,
                            PendingCommandResultStore pendingResultStore) {
+        this(config, configLoader, httpClient, mapper, pendingResultStore, null);
+    }
+
+    public CommandExecutor(AgentConfig config,
+                           AgentConfigLoader configLoader,
+                           OkHttpClient httpClient,
+                           ObjectMapper mapper,
+                           PendingCommandResultStore pendingResultStore,
+                           UpdateCacheServer updateCacheServer) {
         this.config = config;
         this.configLoader = configLoader;
         this.httpClient = httpClient;
         this.mapper = mapper;
         this.pendingResultStore = pendingResultStore;
+        this.updateCacheServer = updateCacheServer;
     }
 
     /**
@@ -103,9 +129,12 @@ public class CommandExecutor {
                 case "WOL_RELAY"  -> executeWolRelay(payload);
                 case "COLLECT_FILES" -> executeCollectFiles(taskId, payload);
                 case "LIST_FILES" -> executeListFiles(payload);
+                case "AGENT_UPDATE" -> executeAgentUpdate(taskId, payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
-            persistAndSendResult(taskId, result);
+            // LIST_FILES JSON은 4KB 제한 대신 2MB 허용
+            int limit = "LIST_FILES".equals(type) ? OUTPUT_LIMIT_JSON : OUTPUT_LIMIT;
+            persistAndSendResult(taskId, result, limit);
         } catch (Exception e) {
             // MEDIUM FIX#9: Mask sensitive data in error messages
             String maskedMsg = SensitiveDataMasker.maskExceptionMessage(e.getMessage());
@@ -152,9 +181,13 @@ public class CommandExecutor {
     // ─── Result ─────────────────────────────────────────────────────────
 
     private void persistAndSendResult(long taskId, CommandResult result) {
+        persistAndSendResult(taskId, result, OUTPUT_LIMIT);
+    }
+
+    private void persistAndSendResult(long taskId, CommandResult result, int stdoutLimit) {
         CommandResult sanitized = new CommandResult(
                 result.exitCode(),
-                truncate(result.stdout()),
+                truncateTo(result.stdout(), stdoutLimit),
                 truncate(result.stderr())
         );
         pendingResultStore.upsert(taskId, sanitized);
@@ -242,11 +275,16 @@ public class CommandExecutor {
         String windowMode = p.has("windowMode") ? p.get("windowMode").asText("HIDDEN") : "HIDDEN";
         boolean visibleWindow = WINDOW_MODE_VISIBLE.equalsIgnoreCase(windowMode);
         boolean runAfterTransfer = p.has("runAfterTransfer") && p.get("runAfterTransfer").asBoolean(false);
+        boolean transferMode = p.has("transferMode") && p.get("transferMode").asBoolean(false);
+        String sourceType = p.has("sourceType") ? p.get("sourceType").asText("file") : "file";
+        boolean zipped = p.has("zipped") && p.get("zipped").asBoolean(false);
+        boolean archiveTransfer = transferMode && (zipped || isArchiveTransferSourceType(sourceType));
+        String displayNameFromPayload = p.has("displayName") ? p.get("displayName").asText("") : "";
+        String destinationMode = p.has("destinationMode") ? p.get("destinationMode").asText("DOWNLOADS") : "DOWNLOADS";
+        String destinationPath = p.has("destinationPath") ? p.get("destinationPath").asText("") : "";
 
         String source = scriptUrl.trim();
-        boolean hintedFolderSource = p.has("transferMode") && p.get("transferMode").asBoolean(false)
-                && p.has("sourceType") && "folder".equalsIgnoreCase(p.get("sourceType").asText(""));
-        String ext = (source.toLowerCase().endsWith(".zip") || hintedFolderSource) ? ".zip" : ".ps1";
+        String ext = (source.toLowerCase().endsWith(".zip") || archiveTransfer) ? ".zip" : ".ps1";
         Path tmpDir = background
                 ? Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-bg-scripts"))
                 : Files.createTempDirectory("pcagent-ps1-");
@@ -257,6 +295,7 @@ public class CommandExecutor {
         Path tmpFile = background
                 ? tmpDir.resolve("script-" + taskId + "-" + System.currentTimeMillis() + ext)
                 : tmpDir.resolve("script-" + taskId + ext);
+        Path stagedArchive = null;
 
         try {
             // 다운로드 (스트리밍 방식 — 30GB+ 대용량 파일 지원)
@@ -332,21 +371,24 @@ public class CommandExecutor {
                 }
             }
 
-            boolean transferMode = p.has("transferMode") && p.get("transferMode").asBoolean(false);
-            String sourceType = p.has("sourceType") ? p.get("sourceType").asText("file") : "file";
-            String displayName = p.has("displayName") ? p.get("displayName").asText(tmpFile.getFileName().toString()) : tmpFile.getFileName().toString();
-            String destinationMode = p.has("destinationMode") ? p.get("destinationMode").asText("DOWNLOADS") : "DOWNLOADS";
-            String destinationPath = p.has("destinationPath") ? p.get("destinationPath").asText("") : "";
+            String displayName = (displayNameFromPayload == null || displayNameFromPayload.isBlank())
+                    ? tmpFile.getFileName().toString()
+                    : displayNameFromPayload;
 
             if (transferMode) {
                 Path targetBaseDir = resolveTransferDestination(destinationMode, destinationPath);
                 Files.createDirectories(targetBaseDir);
 
-                if ("folder".equalsIgnoreCase(sourceType) || tmpFile.toString().toLowerCase().endsWith(".zip")) {
-                    String folderName = sanitizeName(displayName == null || displayName.isBlank() ? "transfer-folder" : displayName);
+                if (archiveTransfer || tmpFile.toString().toLowerCase().endsWith(".zip")) {
+                    Path archiveTempDir = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "pcagent-transfer-archive"));
+                    restrictTempDirPermissions(archiveTempDir);
+                    stagedArchive = Files.createTempFile(archiveTempDir, "task-" + taskId + "-", ".zip");
+                    Files.copy(tmpFile, stagedArchive, StandardCopyOption.REPLACE_EXISTING);
+
+                    String folderName = normalizeArchiveFolderName(displayName);
                     Path targetFolder = targetBaseDir.resolve(folderName);
                     Files.createDirectories(targetFolder);
-                    ZipUtil.unzip(tmpFile, targetFolder);
+                    ZipUtil.unzip(stagedArchive, targetFolder);
 
                     if (runAfterTransfer) {
                         Path toRun = findFirstRunnableFile(targetFolder);
@@ -354,7 +396,7 @@ public class CommandExecutor {
                             return executeShellOrPs1(toRun);
                         }
                     }
-                    return new CommandResult(0, "폴더 전송 완료: " + targetFolder, "");
+                    return new CommandResult(0, "압축 전송 완료: " + targetFolder, "");
                 }
 
                 String targetName = sanitizeName(displayName == null || displayName.isBlank() ? tmpFile.getFileName().toString() : displayName);
@@ -437,8 +479,16 @@ public class CommandExecutor {
                 proc.destroyForcibly();
             }
         } finally {
+            // 압축 아티팩트는 항상 삭제
+            if (stagedArchive != null) {
+                try { Files.deleteIfExists(stagedArchive); } catch (IOException ignored) {}
+            }
+
             // 임시 파일 정리 (예외 발생 시에도 보장)
-            if (!background) {
+            // 압축 파일은 백그라운드 여부와 무관하게 항상 제거한다.
+            boolean keepForBackgroundScript = background && !transferMode
+                    && !tmpFile.toString().toLowerCase(Locale.ROOT).endsWith(".zip");
+            if (!keepForBackgroundScript) {
                 try { Files.deleteIfExists(tmpFile); } catch (IOException ignored) {}
                 try { Files.deleteIfExists(tmpDir); } catch (IOException ignored) {}
             }
@@ -718,6 +768,182 @@ public class CommandExecutor {
     }
 
     private JsonNode uploadCollectedArtifact(Path zipPath, String originalFilename, long taskId) throws IOException {
+        long fileSize = Files.size(zipPath);
+        if (fileSize <= 0) {
+            throw new IOException("수집 파일이 비어 있습니다.");
+        }
+
+        try {
+            return uploadCollectedArtifactInChunks(zipPath, originalFilename, taskId, fileSize);
+        } catch (ChunkUploadException ex) {
+            if (ex.isFallbackAllowed()) {
+                log.warn("청크 업로드 엔드포인트를 사용할 수 없어 단일 업로드로 폴백합니다. taskId={} status={}",
+                        taskId, ex.statusCode());
+                return uploadCollectedArtifactSingle(zipPath, originalFilename, taskId);
+            }
+            throw ex;
+        }
+    }
+
+    private JsonNode uploadCollectedArtifactInChunks(Path zipPath,
+                                                     String originalFilename,
+                                                     long taskId,
+                                                     long fileSize) throws IOException {
+        String uploadId = buildChunkUploadId(taskId);
+        long estimatedChunks = (fileSize + COLLECT_UPLOAD_CHUNK_SIZE - 1L) / COLLECT_UPLOAD_CHUNK_SIZE;
+        if (estimatedChunks <= 0 || estimatedChunks > Integer.MAX_VALUE) {
+            throw new IOException("청크 수 계산 실패: " + estimatedChunks);
+        }
+        int totalChunks = (int) estimatedChunks;
+
+        byte[] buffer = new byte[COLLECT_UPLOAD_CHUNK_SIZE];
+        int chunkIndex = 0;
+        try (InputStream in = Files.newInputStream(zipPath)) {
+            while (chunkIndex < totalChunks) {
+                int read = readChunk(in, buffer);
+                if (read <= 0) {
+                    break;
+                }
+                byte[] chunkBytes = read == buffer.length ? Arrays.copyOf(buffer, buffer.length) : Arrays.copyOf(buffer, read);
+                final String chunkHash;
+                try {
+                    chunkHash = sha256(chunkBytes).toLowerCase(Locale.ROOT);
+                } catch (Exception e) {
+                    throw new IOException("청크 해시 계산 실패: " + e.getMessage(), e);
+                }
+                uploadChunkWithRetry(uploadId, chunkIndex, totalChunks, chunkHash, chunkBytes);
+                chunkIndex++;
+            }
+        }
+
+        if (chunkIndex != totalChunks) {
+            throw new IOException("청크 업로드 중 파일 길이가 예상과 다릅니다. uploaded=" + chunkIndex + ", expected=" + totalChunks);
+        }
+
+        return assembleUploadedChunks(uploadId, originalFilename, totalChunks, taskId);
+    }
+
+    private int readChunk(InputStream in, byte[] buffer) throws IOException {
+        int offset = 0;
+        while (offset < buffer.length) {
+            int read = in.read(buffer, offset, buffer.length - offset);
+            if (read < 0) {
+                break;
+            }
+            offset += read;
+            if (offset >= buffer.length) {
+                break;
+            }
+            if (in.available() <= 0) {
+                break;
+            }
+        }
+        return offset;
+    }
+
+    private void uploadChunkWithRetry(String uploadId,
+                                      int chunkIndex,
+                                      int totalChunks,
+                                      String chunkHash,
+                                      byte[] chunkBytes) throws IOException {
+        for (int attempt = 1; attempt <= COLLECT_UPLOAD_MAX_RETRY; attempt++) {
+            try {
+                uploadCollectedChunk(uploadId, chunkIndex, totalChunks, chunkHash, chunkBytes);
+                return;
+            } catch (ChunkUploadException e) {
+                if (!e.retryable() || attempt >= COLLECT_UPLOAD_MAX_RETRY) {
+                    throw e;
+                }
+                long backoff = COLLECT_UPLOAD_RETRY_BACKOFF_MS * attempt;
+                log.warn("청크 업로드 재시도 taskId? uploadId={} chunk={}/{} attempt={} reason={}",
+                        uploadId, chunkIndex + 1, totalChunks, attempt, e.getMessage());
+                sleepQuietly(backoff);
+            } catch (IOException e) {
+                if (attempt >= COLLECT_UPLOAD_MAX_RETRY) {
+                    throw e;
+                }
+                long backoff = COLLECT_UPLOAD_RETRY_BACKOFF_MS * attempt;
+                sleepQuietly(backoff);
+            }
+        }
+    }
+
+    private JsonNode uploadCollectedChunk(String uploadId,
+                                          int chunkIndex,
+                                          int totalChunks,
+                                          String chunkHash,
+                                          byte[] chunkBytes) throws IOException {
+        String url = config.getServerUrl() + "/api/v1/agent/file-chunks"
+                + "?uploadId=" + urlEncode(uploadId)
+                + "&chunkIndex=" + chunkIndex
+                + "&totalChunks=" + totalChunks
+                + "&chunkHash=" + urlEncode(chunkHash);
+
+        RequestBody fileBody = RequestBody.create(chunkBytes, MediaType.parse("application/octet-stream"));
+        MultipartBody body = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", "chunk-" + chunkIndex + ".part", fileBody)
+                .build();
+
+        Request req = new Request.Builder()
+                .url(url)
+                .header("X-Agent-Token", config.getAgentToken())
+                .post(body)
+                .build();
+
+        try (Response resp = httpClient.newCall(req).execute()) {
+            String bodyText = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) {
+                throw toChunkUploadException("청크 업로드 실패", resp.code(), bodyText);
+            }
+            if (bodyText == null || bodyText.isBlank()) {
+                return mapper.createObjectNode();
+            }
+            return mapper.readTree(bodyText);
+        } catch (ChunkUploadException e) {
+            throw e;
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("청크 업로드 응답 파싱 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private JsonNode assembleUploadedChunks(String uploadId,
+                                            String originalFilename,
+                                            int totalChunks,
+                                            long taskId) throws IOException {
+        String url = config.getServerUrl() + "/api/v1/agent/file-chunks/assemble"
+                + "?uploadId=" + urlEncode(uploadId)
+                + "&originalFilename=" + urlEncode(originalFilename)
+                + "&totalChunks=" + totalChunks
+                + "&taskId=" + taskId;
+
+        Request req = new Request.Builder()
+                .url(url)
+                .header("X-Agent-Token", config.getAgentToken())
+                .post(RequestBody.create("{}", MediaType.parse("application/json")))
+                .build();
+
+        try (Response resp = httpClient.newCall(req).execute()) {
+            String bodyText = resp.body() != null ? resp.body().string() : "";
+            if (!resp.isSuccessful()) {
+                throw toChunkUploadException("청크 조립 실패", resp.code(), bodyText);
+            }
+            if (bodyText == null || bodyText.isBlank()) {
+                throw new IOException("청크 조립 응답이 비어 있습니다.");
+            }
+            return mapper.readTree(bodyText);
+        } catch (ChunkUploadException e) {
+            throw e;
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("청크 조립 응답 파싱 실패: " + e.getMessage(), e);
+        }
+    }
+
+    private JsonNode uploadCollectedArtifactSingle(Path zipPath, String originalFilename, long taskId) throws IOException {
         String url = config.getServerUrl() + "/api/v1/agent/uploads";
         RequestBody fileBody = RequestBody.create(zipPath.toFile(), MediaType.parse("application/zip"));
         MultipartBody body = new MultipartBody.Builder()
@@ -742,10 +968,368 @@ public class CommandExecutor {
         }
     }
 
+    private ChunkUploadException toChunkUploadException(String phase, int statusCode, String bodyText) {
+        boolean retryable = statusCode >= 500 || statusCode == 429;
+        String message = phase + ": HTTP " + statusCode;
+        if (bodyText != null && !bodyText.isBlank()) {
+            try {
+                JsonNode error = mapper.readTree(bodyText);
+                if (error.has("retryable")) {
+                    retryable = error.get("retryable").asBoolean(retryable);
+                }
+                String errorCode = error.path("code").asText("");
+                String errorMessage = error.path("message").asText("");
+                if (!errorMessage.isBlank()) {
+                    message += " " + errorMessage;
+                } else if (!errorCode.isBlank()) {
+                    message += " " + errorCode;
+                }
+            } catch (Exception ignored) {
+                message += " " + truncate(bodyText);
+            }
+        }
+        return new ChunkUploadException(message, statusCode, retryable);
+    }
+
+    private String buildChunkUploadId(long taskId) {
+        String random = UUID.randomUUID().toString().replace("-", "");
+        String suffix = random.length() > 12 ? random.substring(0, 12) : random;
+        return "collect_" + taskId + "_" + System.currentTimeMillis() + "_" + suffix;
+    }
+
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    private void sleepQuietly(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private CommandResult executeAgentUpdate(long taskId, String payloadJson) {
+        try {
+            JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+            String sourceMode = payload.has("sourceMode") ? payload.get("sourceMode").asText("SERVER_ONLY") : "SERVER_ONLY";
+            String targetVersion = payload.has("targetVersion") ? payload.get("targetVersion").asText("") : "";
+            String expectedSha256 = payload.has("sha256") ? payload.get("sha256").asText("") : "";
+            String peerToken = payload.has("peerToken") ? payload.get("peerToken").asText("") : "";
+            String downloadUrl = payload.has("downloadUrl") ? payload.get("downloadUrl").asText("") : "";
+            if (downloadUrl == null || downloadUrl.isBlank()) {
+                return new CommandResult(1, "", "AGENT_UPDATE payload missing downloadUrl");
+            }
+
+            Set<String> candidateSet = new LinkedHashSet<>();
+            if ("HYBRID_PEER".equalsIgnoreCase(sourceMode) && payload.has("peerCandidates") && payload.get("peerCandidates").isArray()) {
+                for (JsonNode candidate : payload.get("peerCandidates")) {
+                    if (candidate == null || candidate.isNull() || !candidate.has("url")) {
+                        continue;
+                    }
+                    String url = candidate.get("url").asText("");
+                    if (url != null && !url.isBlank()) {
+                        candidateSet.add(url.trim());
+                    }
+                }
+            }
+            candidateSet.add(resolveRemoteScriptUrl(downloadUrl.trim()));
+            List<String> candidates = new ArrayList<>(candidateSet);
+
+            Path selfPath = resolveAgentBinaryPath();
+            if (selfPath == null || !Files.exists(selfPath)) {
+                return new CommandResult(1, "", "현재 실행 중인 에이전트 바이너리 경로를 확인할 수 없습니다.");
+            }
+            Path parentDir = selfPath.getParent() != null
+                    ? selfPath.getParent()
+                    : Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+            Path updateDir = Files.createDirectories(parentDir.resolve("agent-update"));
+
+            String fileName = selfPath.getFileName() == null ? "pcagent.jar" : selfPath.getFileName().toString();
+            String ext = fileName.toLowerCase(Locale.ROOT).endsWith(".exe") ? ".exe" : ".jar";
+            long now = System.currentTimeMillis();
+            Path stagedFile = updateDir.resolve("agent-next-" + taskId + "-" + now + ext);
+            Path backupFile = updateDir.resolve("agent-backup-" + taskId + "-" + now + ext);
+
+            downloadAgentUpdateArtifact(candidates, stagedFile, peerToken);
+            String actualSha256 = sha256(stagedFile);
+
+            if (expectedSha256 != null && !expectedSha256.isBlank()) {
+                if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
+                    Files.deleteIfExists(stagedFile);
+                    return new CommandResult(1, "", "업데이트 파일 무결성 검증 실패");
+                }
+            }
+
+            Files.copy(selfPath, backupFile, StandardCopyOption.REPLACE_EXISTING);
+
+            if (updateCacheServer != null) {
+                try {
+                    String cacheToken = peerToken == null ? "" : peerToken;
+                    updateCacheServer.registerArtifact(actualSha256, stagedFile, cacheToken);
+                } catch (Exception cacheEx) {
+                    log.warn("업데이트 캐시 등록 실패 taskId={}: {}", taskId, cacheEx.getMessage());
+                }
+            }
+
+            if (!scheduleAgentBinarySwap(selfPath, stagedFile, backupFile)) {
+                return new CommandResult(1, "", "업데이트 교체 프로세스 시작 실패");
+            }
+
+            scheduleSelfExit(AGENT_UPDATE_EXIT_DELAY_MS);
+
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("status", "staged");
+            result.put("taskId", taskId);
+            result.put("targetVersion", targetVersion);
+            result.put("sourceMode", sourceMode);
+            result.put("downloadCandidates", candidates.size());
+            result.put("sha256", actualSha256);
+            result.put("peerCacheEnabled", updateCacheServer != null);
+            result.put("rebootRequired", true);
+            result.put("message", "업데이트 교체를 예약했습니다. 작업 저장 후 재부팅하여 버전 반영을 확인하세요.");
+            return new CommandResult(0, mapper.writeValueAsString(result), "");
+        } catch (Exception e) {
+            return new CommandResult(1, "", "AGENT_UPDATE 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    private void downloadAgentUpdateArtifact(List<String> candidates, Path destination, String peerToken) throws IOException {
+        IOException lastError = null;
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            String url = candidate.trim();
+            try {
+                Request.Builder requestBuilder = new Request.Builder().url(url).get();
+                if (isServerHostedUrl(url) && config.getAgentToken() != null && !config.getAgentToken().isBlank()) {
+                    requestBuilder.header("X-Agent-Token", config.getAgentToken());
+                }
+                if (peerToken != null && !peerToken.isBlank()) {
+                    requestBuilder.header("X-Agent-Update-Token", peerToken);
+                }
+                Request request = requestBuilder.build();
+                try (Response response = httpClient.newCall(request).execute()) {
+                    if (!response.isSuccessful() || response.body() == null) {
+                        throw new IOException("HTTP " + response.code());
+                    }
+                    byte[] buffer = new byte[AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE];
+                    try (InputStream in = response.body().byteStream();
+                         OutputStream out = Files.newOutputStream(destination,
+                                 StandardOpenOption.CREATE,
+                                 StandardOpenOption.TRUNCATE_EXISTING,
+                                 StandardOpenOption.WRITE)) {
+                        int read;
+                        while ((read = in.read(buffer)) > 0) {
+                            out.write(buffer, 0, read);
+                        }
+                    }
+                    return;
+                }
+            } catch (IOException ex) {
+                lastError = ex;
+            }
+        }
+        throw lastError == null
+                ? new IOException("다운로드 가능한 업데이트 소스가 없습니다.")
+                : new IOException("업데이트 파일 다운로드 실패: " + lastError.getMessage(), lastError);
+    }
+
+    private boolean isServerHostedUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        try {
+            URI u = URI.create(url);
+            URI server = URI.create(config.getServerUrl());
+            String hostA = u.getHost();
+            String hostB = server.getHost();
+            int portA = u.getPort() > 0 ? u.getPort() : ("https".equalsIgnoreCase(u.getScheme()) ? 443 : 80);
+            int portB = server.getPort() > 0 ? server.getPort() : ("https".equalsIgnoreCase(server.getScheme()) ? 443 : 80);
+            return hostA != null && hostB != null
+                    && hostA.equalsIgnoreCase(hostB)
+                    && portA == portB;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private Path resolveAgentBinaryPath() {
+        try {
+            Path codeSource = Path.of(CommandExecutor.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            if (!Files.isDirectory(codeSource)) {
+                String lower = codeSource.toString().toLowerCase(Locale.ROOT);
+                if (lower.endsWith(".jar") || lower.endsWith(".exe")) {
+                    return codeSource.toAbsolutePath().normalize();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        String command = ProcessHandle.current().info().command().orElse(null);
+        if (command != null && !command.isBlank()) {
+            try {
+                return Path.of(command).toAbsolutePath().normalize();
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    private boolean scheduleAgentBinarySwap(Path targetBinary, Path stagedBinary, Path backupBinary) {
+                try {
+                        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+                        ProcessBuilder pb;
+                        if (osName.contains("win")) {
+                                Path script = Files.createTempFile("pcagent-update-swap-", ".ps1");
+                                String body = """
+                                                param(
+                                                    [string]$Target,
+                                                    [string]$Next,
+                                                    [string]$Backup,
+                                                    [int]$VerifySeconds = 30
+                                                )
+
+                                                Start-Sleep -Seconds 8
+
+                                                try {
+                                                    Copy-Item -LiteralPath $Next -Destination $Target -Force
+                                                } catch {
+                                                    Write-Output \"COPY_FAILED: $_\"
+                                                    exit 2
+                                                }
+
+                                                $java = $null
+                                                if ($Target.ToLower().EndsWith('.jar')) {
+                                                    try { $java = (Get-Command java -ErrorAction SilentlyContinue).Source } catch {}
+                                                    if (-not $java) { Write-Output 'JAVA_NOT_FOUND'; exit 3 }
+                                                }
+
+                                                try {
+                                                    if ($Target.ToLower().EndsWith('.jar')) {
+                                                        $proc = Start-Process -FilePath $java -ArgumentList '-jar', $Target -WorkingDirectory (Split-Path $Target) -PassThru
+                                                    } else {
+                                                        $proc = Start-Process -FilePath $Target -WorkingDirectory (Split-Path $Target) -PassThru
+                                                    }
+                                                } catch {
+                                                    Write-Output \"START_FAILED: $_\"
+                                                }
+
+                                                Start-Sleep -Seconds $VerifySeconds
+
+                                                if ($proc -eq $null -or $proc.HasExited) {
+                                                    Write-Output 'NEW_PROCESS_FAILED'
+                                                    try { Copy-Item -LiteralPath $Backup -Destination $Target -Force } catch { Write-Output 'RESTORE_FAILED: ' + $_ }
+                                                    try {
+                                                        if ($Target.ToLower().EndsWith('.jar')) {
+                                                            Start-Process -FilePath $java -ArgumentList '-jar', $Target -WorkingDirectory (Split-Path $Target) -PassThru
+                                                        } else {
+                                                            Start-Process -FilePath $Target -WorkingDirectory (Split-Path $Target) -PassThru
+                                                        }
+                                                    } catch {}
+                                                    exit 1
+                                                }
+
+                                                Remove-Item -LiteralPath $Next -Force -ErrorAction SilentlyContinue
+                                                Write-Output 'UPDATE_SUCCESS'
+                                                exit 0
+                                                """;
+
+                                Files.writeString(script, body, StandardCharsets.UTF_8);
+                                script.toFile().deleteOnExit();
+
+                                pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                                script.toAbsolutePath().toString(),
+                                                targetBinary.toAbsolutePath().toString(),
+                                                stagedBinary.toAbsolutePath().toString(),
+                                                backupBinary.toAbsolutePath().toString(),
+                                                "30");
+                        } else {
+                                Path script = Files.createTempFile("pcagent-update-swap-", ".sh");
+                                String body = "#!/bin/sh\n"
+                                                + "sleep 8\n"
+                                                + "cp -f \"$2\" \"$1\" || { echo \"copy_failed\"; exit 2; }\n"
+                                                + "if echo \"$1\" | grep -qi '\\ .jar$' ; then\n"
+                                                + "  JAVA=$(command -v java || true)\n"
+                                                + "  if [ -z \"$JAVA\" ]; then echo 'JAVA_NOT_FOUND'; exit 3; fi\n"
+                                                + "  \"$JAVA\" -jar \"$1\" &\n"
+                                                + "  PID=$!\n"
+                                                + "else\n"
+                                                + "  \"$1\" &\n"
+                                                + "  PID=$!\n"
+                                                + "fi\n"
+                                                + "sleep 30\n"
+                                                + "if ! kill -0 $PID 2>/dev/null; then\n"
+                                                + "  echo 'new_process_failed'\n"
+                                                + "  cp -f \"$3\" \"$1\" || echo 'restore_failed'\n"
+                                                + "  if echo \"$1\" | grep -qi '\\ .jar$' ; then\n"
+                                                + "    \"$JAVA\" -jar \"$1\" &\n"
+                                                + "  else\n"
+                                                + "    \"$1\" &\n"
+                                                + "  fi\n"
+                                                + "  exit 1\n"
+                                                + "fi\n"
+                                                + "rm -f \"$2\"\n"
+                                                + "echo 'update_success'\n"
+                                                + "exit 0\n";
+
+                                Files.writeString(script, body, StandardCharsets.UTF_8);
+                                try {
+                                        script.toFile().setExecutable(true);
+                                } catch (Exception ignored) {}
+                                pb = new ProcessBuilder("sh", script.toAbsolutePath().toString(),
+                                                targetBinary.toAbsolutePath().toString(),
+                                                stagedBinary.toAbsolutePath().toString(),
+                                                backupBinary.toAbsolutePath().toString(),
+                                                "30");
+                        }
+                        pb.start();
+                        return true;
+                } catch (Exception ex) {
+                        log.warn("업데이트 교체 프로세스 시작 실패: {}", ex.getMessage());
+                        return false;
+                }
+    }
+
+    private String escapeForPowerShell(String value) {
+        return value == null ? "" : value.replace("'", "''");
+    }
+
+    private String escapeForShell(String value) {
+        return value == null ? "" : value.replace("'", "'\"'\"'");
+    }
+
+    private void scheduleSelfExit(long delayMs) {
+        Thread exitThread = new Thread(() -> {
+            sleepQuietly(delayMs);
+            System.exit(0);
+        }, "agent-update-exit");
+        exitThread.setDaemon(true);
+        exitThread.start();
+    }
+
+    private String sha256(Path file) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) > 0) {
+                md.update(buffer, 0, read);
+            }
+        }
+        return HexFormat.of().formatHex(md.digest());
+    }
+
     private CommandResult executeListFiles(String payloadJson) {
         try {
             JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
             String requestedPath = payload.has("path") ? payload.get("path").asText("").trim() : "";
+            int offset = parsePagingInt(payload, "offset", 0, 0, Integer.MAX_VALUE);
+            int limit = parsePagingInt(payload, "limit", LIST_FILES_DEFAULT_LIMIT, 1, LIST_FILES_MAX_LIMIT);
+            boolean includeHidden = payload.has("includeHidden") && payload.get("includeHidden").asBoolean(false);
 
             Path current = resolveBrowsePath(requestedPath);
             if (current == null) {
@@ -770,28 +1354,76 @@ public class CommandExecutor {
                     String nb = String.valueOf(b.getOrDefault("displayName", b.getOrDefault("name", "")));
                     return na.compareToIgnoreCase(nb);
                 });
+                int from = Math.min(Math.max(0, offset), drives.size());
+                int to = Math.min(drives.size(), from + limit);
+                List<Map<String, Object>> page = new ArrayList<>(drives.subList(from, to));
+                boolean hasMore = to < drives.size();
                 Map<String, Object> rootResp = new java.util.LinkedHashMap<>();
                 rootResp.put("ok", true);
                 rootResp.put("currentPath", "");
                 rootResp.put("parentPath", "");
                 rootResp.put("driveCount", drives.size());
-                rootResp.put("entries", drives);
+                rootResp.put("offset", from);
+                rootResp.put("limit", limit);
+                rootResp.put("returnedEntries", page.size());
+                rootResp.put("totalEntries", drives.size());
+                rootResp.put("hasMore", hasMore);
+                rootResp.put("nextOffset", hasMore ? to : drives.size());
+                rootResp.put("entries", page);
                 return new CommandResult(0, mapper.writeValueAsString(rootResp), "");
             }
 
             List<Map<String, Object>> entries = new ArrayList<>();
+            List<String> warnings = new ArrayList<>();
+            int skippedEntries = 0;
+            int scannedEntries = 0;
+            boolean scanLimitReached = false;
+            boolean timeLimitReached = false;
+            long scanStartMs = System.currentTimeMillis();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(current)) {
                 for (Path child : stream) {
+                    scannedEntries++;
+                    if (scannedEntries > LIST_FILES_MAX_SCAN_ENTRIES) {
+                        scanLimitReached = true;
+                        break;
+                    }
+                    if ((System.currentTimeMillis() - scanStartMs) > LIST_FILES_SCAN_TIME_LIMIT_MS) {
+                        timeLimitReached = true;
+                        break;
+                    }
                     try {
+                        if (!includeHidden) {
+                            try {
+                                if (Files.isHidden(child)) {
+                                    continue;
+                                }
+                            } catch (IOException e) {
+                                appendWarning(warnings, "숨김 여부 확인 실패: " + child.getFileName());
+                                skippedEntries++;
+                                continue;
+                            }
+                        }
                         boolean isDir = Files.isDirectory(child);
                         String type = isDir ? "dir" : "file";
-                        long size = isDir ? 0L : Files.size(child);
+                        long size = 0L;
+                        if (!isDir) {
+                            try {
+                                size = Files.size(child);
+                            } catch (Exception e) {
+                                appendWarning(warnings, "파일 크기 조회 실패: " + child.getFileName());
+                                skippedEntries++;
+                                continue;
+                            }
+                        }
                         Map<String, Object> e = new java.util.LinkedHashMap<>();
                         e.put("name", child.getFileName() == null ? child.toString() : child.getFileName().toString());
                         e.put("type", type);
                         e.put("size", size);
                         entries.add(e);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        appendWarning(warnings, "항목 읽기 실패: " + child.getFileName());
+                        skippedEntries++;
+                    }
                 }
             }
 
@@ -807,20 +1439,35 @@ public class CommandExecutor {
                 return na.compareToIgnoreCase(nb);
             });
 
-            boolean truncated = false;
-            int maxEntries = 40;
-            if (entries.size() > maxEntries) {
-                entries = new ArrayList<>(entries.subList(0, maxEntries));
-                truncated = true;
-            }
+            int from = Math.min(Math.max(0, offset), entries.size());
+            int to = Math.min(entries.size(), from + limit);
+            List<Map<String, Object>> page = new ArrayList<>(entries.subList(from, to));
+            boolean hasMore = to < entries.size();
+            boolean partial = scanLimitReached || timeLimitReached || skippedEntries > 0;
+            List<String> warningsPreview = warnings.size() > LIST_FILES_WARNING_PREVIEW
+                    ? new ArrayList<>(warnings.subList(0, LIST_FILES_WARNING_PREVIEW))
+                    : warnings;
 
             Map<String, Object> resp = new java.util.LinkedHashMap<>();
             resp.put("ok", true);
             resp.put("currentPath", current.toString());
             Path parent = current.getParent();
             resp.put("parentPath", parent == null ? "" : parent.toString());
-            resp.put("truncated", truncated);
-            resp.put("entries", entries);
+            resp.put("offset", from);
+            resp.put("limit", limit);
+            resp.put("returnedEntries", page.size());
+            resp.put("totalEntries", entries.size());
+            resp.put("scannedEntries", scannedEntries);
+            resp.put("skippedEntries", skippedEntries);
+            resp.put("hasMore", hasMore);
+            resp.put("nextOffset", hasMore ? to : entries.size());
+            resp.put("truncated", hasMore);
+            resp.put("partial", partial);
+            resp.put("scanLimitReached", scanLimitReached);
+            resp.put("timeLimitReached", timeLimitReached);
+            resp.put("warningsCount", warnings.size());
+            resp.put("warningsPreview", warningsPreview);
+            resp.put("entries", page);
             return new CommandResult(0, mapper.writeValueAsString(resp), "");
         } catch (Exception e) {
             return new CommandResult(1, "", "파일 목록 조회 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
@@ -832,7 +1479,12 @@ public class CommandExecutor {
             return null;
         }
         try {
-            Path p = Path.of(requestedPath).normalize();
+            // "C:" is a relative path in Java — normalize to "C:\" for drive roots.
+            String req = requestedPath.trim();
+            if (req.matches("[A-Za-z]:")) {
+                req = req + "\\";
+            }
+            Path p = Path.of(req).normalize();
             if (!Files.exists(p) || !Files.isDirectory(p)) {
                 return null;
             }
@@ -840,6 +1492,34 @@ public class CommandExecutor {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private int parsePagingInt(JsonNode payload, String field, int defaultValue, int min, int max) {
+        if (payload == null || !payload.has(field) || payload.get(field).isNull()) {
+            return defaultValue;
+        }
+        try {
+            int value = payload.get(field).asInt(defaultValue);
+            if (value < min) {
+                return min;
+            }
+            if (value > max) {
+                return max;
+            }
+            return value;
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private void appendWarning(List<String> warnings, String message) {
+        if (warnings == null || message == null || message.isBlank()) {
+            return;
+        }
+        if (warnings.size() >= 200) {
+            return;
+        }
+        warnings.add(message);
     }
 
     private Map<String, Object> buildDriveEntry(File root, FileSystemView fsView) {
@@ -966,6 +1646,29 @@ public class CommandExecutor {
         return name.replaceAll("[\\\\/:*?\"<>|]", "_");
     }
 
+    private static boolean isArchiveTransferSourceType(String sourceType) {
+        if (sourceType == null || sourceType.isBlank()) {
+            return false;
+        }
+        String normalized = sourceType.trim().toLowerCase(Locale.ROOT);
+        return "folder".equals(normalized)
+                || "multi-transfer".equals(normalized)
+                || "archive".equals(normalized)
+                || "zip".equals(normalized);
+    }
+
+    private static String normalizeArchiveFolderName(String displayName) {
+        String fallback = "transfer-folder";
+        String value = sanitizeName(displayName == null || displayName.isBlank() ? fallback : displayName);
+        if (value.toLowerCase(Locale.ROOT).endsWith(".zip") && value.length() > 4) {
+            value = value.substring(0, value.length() - 4);
+        }
+        if (value.isBlank()) {
+            return fallback;
+        }
+        return value;
+    }
+
     private static Path findFirstRunnableFile(Path root) {
         try {
             return Files.walk(root)
@@ -987,8 +1690,12 @@ public class CommandExecutor {
     }
 
     private static String truncate(String s) {
+        return truncateTo(s, OUTPUT_LIMIT);
+    }
+
+    private static String truncateTo(String s, int limit) {
         if (s == null) return "";
-        return s.length() <= OUTPUT_LIMIT ? s : s.substring(0, OUTPUT_LIMIT);
+        return s.length() <= limit ? s : s.substring(0, limit);
     }
 
     private void handleAuthFailure(String channel, long taskId, int statusCode) {
@@ -1094,6 +1801,29 @@ public class CommandExecutor {
             }
         } catch (IOException e) {
             log.warn("임시 디렉토리 권한 설정 실패: {} - {}", dir, e.getMessage());
+        }
+    }
+
+    private static class ChunkUploadException extends IOException {
+        private final int statusCode;
+        private final boolean retryable;
+
+        private ChunkUploadException(String message, int statusCode, boolean retryable) {
+            super(message);
+            this.statusCode = statusCode;
+            this.retryable = retryable;
+        }
+
+        private int statusCode() {
+            return statusCode;
+        }
+
+        private boolean retryable() {
+            return retryable;
+        }
+
+        private boolean isFallbackAllowed() {
+            return statusCode == 401 || statusCode == 403 || statusCode == 404 || statusCode == 405 || statusCode == 501;
         }
     }
 

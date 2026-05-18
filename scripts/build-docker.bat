@@ -9,6 +9,11 @@ echo Building Docker Images
 echo ================================
 echo.
 
+REM 0. Runtime and Docker cleanup
+echo [0/2] Cleaning up existing runtime and Docker stack...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0cleanup-runtime.ps1" -NoBanner -IncludeDocker
+echo.
+
 REM 1. Backend Docker 이미지
 echo [1/2] Building Backend Docker image...
 docker build -t dashboard-backend:latest -f Dockerfile .

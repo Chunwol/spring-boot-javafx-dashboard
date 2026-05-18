@@ -21,18 +21,24 @@ public class PerformanceStatusService {
     private final CommandQueueRepository commandQueueRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
     private final CacheManager cacheManager;
+    private final OperationalMetricsService operationalMetricsService;
 
     @Value("${app.command.timeout-seconds:180}")
     private long commandTimeoutSeconds;
 
+    @Value("${app.cache.provider:redis}")
+    private String cacheProvider;
+
     public PerformanceStatusService(PcMasterRepository pcMasterRepository,
                                     CommandQueueRepository commandQueueRepository,
                                     AgentAuthTokenRepository agentAuthTokenRepository,
-                                    CacheManager cacheManager) {
+                                    CacheManager cacheManager,
+                                    OperationalMetricsService operationalMetricsService) {
         this.pcMasterRepository = pcMasterRepository;
         this.commandQueueRepository = commandQueueRepository;
         this.agentAuthTokenRepository = agentAuthTokenRepository;
         this.cacheManager = cacheManager;
+        this.operationalMetricsService = operationalMetricsService;
     }
 
     public Map<String, Object> snapshot() {
@@ -73,16 +79,27 @@ public class PerformanceStatusService {
         token.put("revoked", agentAuthTokenRepository.countByRevoked(true));
 
         Map<String, Object> cache = cacheStats();
+        Map<String, Object> operational = operationalMetricsService.snapshot();
+        Map<String, Object> opLatency = toMap(operational.get("latency"));
+        Map<String, Object> opTransfer = toMap(operational.get("transfer"));
+        Map<String, Object> opRequest = toMap(operational.get("request"));
 
         Map<String, Object> pressure = new LinkedHashMap<>();
         pressure.put("queuePressure", queued > 200 ? "HIGH" : queued > 80 ? "MEDIUM" : "LOW");
         pressure.put("stalePressure", (staleDelivered + staleAcked) > 30 ? "HIGH" : (staleDelivered + staleAcked) > 10 ? "MEDIUM" : "LOW");
+        pressure.put("commandFailurePressure", toDouble(opLatency.get("failureRate")) > 0.25 ? "HIGH"
+                : toDouble(opLatency.get("failureRate")) > 0.10 ? "MEDIUM" : "LOW");
+        pressure.put("transferFailurePressure", toDouble(opTransfer.get("failureRate")) > 0.25 ? "HIGH"
+                : toDouble(opTransfer.get("failureRate")) > 0.10 ? "MEDIUM" : "LOW");
+        pressure.put("requestErrorPressure", toDouble(opRequest.get("errorRate")) > 0.15 ? "HIGH"
+                : toDouble(opRequest.get("errorRate")) > 0.05 ? "MEDIUM" : "LOW");
 
         resp.put("timestamp", LocalDateTime.now());
         resp.put("pc", pc);
         resp.put("command", command);
         resp.put("token", token);
         resp.put("cache", cache);
+        resp.put("operational", operational);
         resp.put("pressure", pressure);
         return resp;
     }
@@ -90,10 +107,21 @@ public class PerformanceStatusService {
     private Map<String, Object> cacheStats() {
         Map<String, Object> cache = new LinkedHashMap<>();
         Cache springCache = cacheManager.getCache("ipRangeCache");
+        cache.put("name", "ipRangeCache");
+        cache.put("provider", cacheProvider);
+        cache.put("cacheManager", cacheManager.getClass().getSimpleName());
+
+        if (springCache == null) {
+            cache.put("enabled", false);
+            cache.put("message", "Cache not initialized");
+            return cache;
+        }
+
         if (springCache instanceof CaffeineCache caffeineCache) {
             com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache = caffeineCache.getNativeCache();
             var stats = nativeCache.stats();
-            cache.put("name", "ipRangeCache");
+            cache.put("enabled", true);
+            cache.put("provider", "caffeine");
             cache.put("estimatedSize", nativeCache.estimatedSize());
             cache.put("hitRate", stats.hitRate());
             cache.put("hitCount", stats.hitCount());
@@ -101,9 +129,31 @@ public class PerformanceStatusService {
             cache.put("evictionCount", stats.evictionCount());
             return cache;
         }
-        cache.put("name", "ipRangeCache");
-        cache.put("enabled", false);
-        cache.put("message", "Caffeine cache not initialized");
+
+        cache.put("enabled", true);
+        cache.put("message", "Provider-specific cache stats are unavailable");
         return cache;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
+    private double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value == null) {
+            return 0.0d;
+        }
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException ex) {
+            return 0.0d;
+        }
     }
 }

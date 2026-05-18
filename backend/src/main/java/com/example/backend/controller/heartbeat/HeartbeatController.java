@@ -1,6 +1,7 @@
 package com.example.backend.controller.heartbeat;
 
 import com.example.backend.dto.heartbeat.HeartbeatDto;
+import com.example.backend.dto.heartbeat.HeartbeatOfflineDto;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.service.heartbeat.HeartbeatService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -58,5 +59,36 @@ public class HeartbeatController {
             resp.put("command", pendingCmd);
         }
         return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/offline")
+    @Operation(
+        summary = "에이전트 종료/재부팅 오프라인 선신고",
+        description = "에이전트 종료 훅에서 호출되어 즉시 OFFLINE 상태를 반영합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "오프라인 선신고 수신 성공")
+    @ApiResponse(responseCode = "401", description = "에이전트 토큰 인증 실패")
+    public ResponseEntity<Map<String, Object>> receiveOfflineNotice(
+            @RequestBody HeartbeatOfflineDto offlineNotice,
+            HttpServletRequest httpRequest) {
+
+        if (offlineNotice == null || offlineNotice.getMacAddress() == null || offlineNotice.getMacAddress().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "macAddress is required"));
+        }
+
+        String agentMac = (String) httpRequest.getAttribute("agentMac");
+        if (agentMac != null && !agentMac.equals(offlineNotice.getMacAddress())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Token MAC mismatch"));
+        }
+
+        heartbeatService.processGracefulOffline(offlineNotice);
+        auditService.log(
+                offlineNotice.getMacAddress(),
+                "HEARTBEAT_OFFLINE_NOTICE",
+                "PC",
+                offlineNotice.getMacAddress(),
+                offlineNotice.getReason(),
+                offlineNotice.getIpAddress());
+        return ResponseEntity.ok(Map.of("accepted", true));
     }
 }

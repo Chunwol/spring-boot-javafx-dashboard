@@ -67,8 +67,9 @@ public class AgentController {
         config.put("serverUrl", serverUrl);
         config.put("installKey", installKey);
         config.put("agentToken", "");
-        config.put("heartbeatIntervalSec", 120);
-        config.put("jitterSec", 30);
+        // Keep command pickup latency low for interactive operations (e.g., remote file explorer)
+        config.put("heartbeatIntervalSec", 12);
+        config.put("jitterSec", 3);
     config.put("githubOwner", "");
     config.put("githubRepo", "");
 

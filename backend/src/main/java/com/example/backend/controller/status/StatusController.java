@@ -140,8 +140,8 @@ public class StatusController {
         d.setStatus(p.getStatus());
         d.setOnline("ONLINE".equals(p.getStatus()));
         d.setRole(p.getRole());
+        d.setAgentVersion(p.getAgentVersion());
         d.setLastSeen(p.getLastSeen());
         return d;
     }
 }
-

@@ -59,6 +59,7 @@ public class DashboardDisconnectStatusPanelModule {
     private final BiConsumer<String, Boolean> showToast;
     private final PanelLayoutCacheUpdater panelLayoutCacheUpdater;
     private final Function<String, double[]> responsiveSizeFn;
+    private final Runnable beforePanelMutation;
     private final Runnable onPanelsChanged;
     private final javafx.scene.layout.Pane classroomContainer;
 
@@ -92,6 +93,7 @@ public class DashboardDisconnectStatusPanelModule {
             BiConsumer<String, Boolean> showToast,
             PanelLayoutCacheUpdater panelLayoutCacheUpdater,
             Function<String, double[]> responsiveSizeFn,
+            Runnable beforePanelMutation,
             Runnable onPanelsChanged) {
         this.dashboardService = dashboardService;
         this.classroomContainer = classroomContainer;
@@ -102,6 +104,7 @@ public class DashboardDisconnectStatusPanelModule {
         this.showToast = showToast;
         this.panelLayoutCacheUpdater = panelLayoutCacheUpdater;
         this.responsiveSizeFn = responsiveSizeFn;
+        this.beforePanelMutation = beforePanelMutation;
         this.onPanelsChanged = onPanelsChanged;
     }
 
@@ -176,6 +179,7 @@ public class DashboardDisconnectStatusPanelModule {
         deleteBtn.setOnAction(e -> {
             Long dashboardId = dashboardIdSupplier.get();
             if (dashboardId != null) {
+                runBeforePanelMutation();
                 dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
             }
         });
@@ -348,6 +352,7 @@ public class DashboardDisconnectStatusPanelModule {
         if (dashboardId == null) {
             return;
         }
+        runBeforePanelMutation();
         dashboardService.updatePanelPositionAsync(
                 dashboardId,
                 panelId,
@@ -366,6 +371,13 @@ public class DashboardDisconnectStatusPanelModule {
             );
         }
         showToast.accept("접속현황 패널 저장됨", false);
+    }
+
+    private void runBeforePanelMutation() {
+        if (beforePanelMutation == null) {
+            return;
+        }
+        beforePanelMutation.run();
     }
 
     private record ConnectionLogRow(String time, String classroom, String pcName, String event) {}

@@ -37,6 +37,10 @@ public class FileDistributionController {
         int waveSize = toInt(body.get("waveSize"), 20);
         boolean canaryOnly = Boolean.parseBoolean(String.valueOf(body.getOrDefault("canaryOnly", false)));
         Long groupId = parseOptionalLong(body.get("groupId"), "groupId");
+        Long artifactId = parseOptionalLong(body.get("artifactId"), "artifactId");
+        String targetVersion = body.get("targetVersion") == null ? null : String.valueOf(body.get("targetVersion"));
+        String sourceMode = String.valueOf(body.getOrDefault("sourceMode", "SERVER_ONLY"));
+        Double rampUpFactor = parseOptionalDouble(body.get("rampUpFactor"), "rampUpFactor");
 
         if (uploadId.isBlank()) {
             throw new IllegalArgumentException("uploadId is required");
@@ -45,15 +49,32 @@ public class FileDistributionController {
             throw new IllegalArgumentException("totalChunks must be > 0");
         }
 
-        String canonical = "createJob|" + uploadId + "|" + originalFilename + "|" + totalChunks + "|" + waveSize + "|" + canaryOnly + "|" + groupId;
+        String canonical = "createJob|" + uploadId + "|" + originalFilename + "|" + totalChunks + "|"
+                + waveSize + "|" + canaryOnly + "|" + groupId + "|" + artifactId + "|" + targetVersion + "|"
+                + sourceMode + "|" + rampUpFactor;
         requestSecurity.validateOrThrow(request, canonical);
 
-        FileDistributionJob job = orchestrator.createJob(uploadId, originalFilename, totalChunks, waveSize, canaryOnly, groupId);
-        return Map.of(
-                "jobId", job.getId(),
-                "status", job.getStatus(),
-                "uploadId", job.getUploadId()
+        FileDistributionJob job = orchestrator.createJob(
+                uploadId,
+                originalFilename,
+                totalChunks,
+                waveSize,
+                canaryOnly,
+                groupId,
+                artifactId,
+                targetVersion,
+                sourceMode,
+                rampUpFactor
         );
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("jobId", job.getId());
+        response.put("status", job.getStatus());
+        response.put("uploadId", job.getUploadId());
+        response.put("artifactId", job.getArtifactId());
+        response.put("targetVersion", job.getTargetVersion());
+        response.put("sourceMode", job.getSourceMode());
+        response.put("rampUpFactor", job.getRampUpFactor());
+        return response;
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -196,6 +217,17 @@ public class FileDistributionController {
         }
         try {
             return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + " must be a number");
+        }
+    }
+
+    private Double parseOptionalDouble(Object value, String fieldName) {
+        if (value == null || String.valueOf(value).isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
         } catch (Exception ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldName + " must be a number");
         }

@@ -51,7 +51,7 @@
                     <children>
                         <RadioButton fx:id="downloadRadio" text="다운로드 폴더" wrapText="true" />
                         <RadioButton fx:id="desktopRadio" text="바탕화면" wrapText="true" />
-                        <RadioButton fx:id="customRadio" text="경로 직접&#10;입력" wrapText="true" />
+                        <RadioButton fx:id="customRadio" text="직접 경로 입력" wrapText="true" />
                         <TextField fx:id="customPathField" promptText="경로 입력..." prefWidth="420.0" />
                     </children>
                 </VBox>
