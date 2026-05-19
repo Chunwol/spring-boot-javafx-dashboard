@@ -3,8 +3,10 @@ package com.example.backend.service.command;
 import com.example.backend.dto.command.CommandRequestDto;
 import com.example.backend.model.command.CommandQueue;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
+import com.example.backend.service.status.OperationalMetricsService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -23,6 +25,8 @@ class CommandServiceTest {
 
     @Mock CommandQueueRepository commandQueueRepository;
     @Mock PcMasterRepository pcMasterRepository;
+    @Mock ClassroomIpRangeRepository classroomIpRangeRepository;
+    @Mock OperationalMetricsService operationalMetricsService;
     @InjectMocks CommandService commandService;
 
     @Test
@@ -94,7 +98,10 @@ class CommandServiceTest {
     void sendGroupWol_withCandidates_enqueuesWolCommand() {
         PcMaster pc = new PcMaster();
         pc.setMacAddress("AA:BB:CC:DD:EE:FF");
+        pc.setIpAddress("10.0.0.1");
         when(pcMasterRepository.findByGroupIdAndStatus(1L, "ONLINE")).thenReturn(List.of(pc));
+        when(pcMasterRepository.findByGroupIdAndStatus(1L, "OFFLINE")).thenReturn(List.of());
+        when(classroomIpRangeRepository.findByGroupId(1L)).thenReturn(List.of());
 
         boolean result = commandService.sendGroupWol(1L);
 

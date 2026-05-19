@@ -13,6 +13,7 @@ import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.service.filedist.FileDistributionOrchestrator;
 import com.example.backend.service.realtime.WebSocketService;
 import com.example.backend.service.status.OperationalMetricsService;
+import com.example.backend.service.traffic.TrafficLogFlushService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,6 +46,7 @@ class HeartbeatServiceTest {
     @Mock FileDistributionOrchestrator fileDistributionOrchestrator;
     @Mock WebSocketService webSocketService;
     @Mock OperationalMetricsService operationalMetricsService;
+    @Mock TrafficLogFlushService trafficLogFlushService;
 
     @InjectMocks HeartbeatService heartbeatService;
 
@@ -153,13 +156,15 @@ class HeartbeatServiceTest {
 
         when(commandQueueRepository.findNextDispatchCandidates(eq("AA:BB:CC:DD:EE:11"), any()))
                 .thenReturn(List.of(listFiles));
+        when(commandQueueRepository.markDeliveredIfQueued(eq(99L), any(LocalDateTime.class)))
+                .thenReturn(1);
 
         var response = heartbeatService.processHeartbeat(heartbeat);
 
         assertThat(response).isNotNull();
         assertThat(response.get("taskId")).isEqualTo(99L);
         assertThat(response.get("type")).isEqualTo("LIST_FILES");
-        verify(commandQueueRepository).save(listFiles);
+        verify(commandQueueRepository).markDeliveredIfQueued(eq(99L), any(LocalDateTime.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -185,7 +190,7 @@ class HeartbeatServiceTest {
         heartbeatService.processHeartbeat(heartbeat);
 
         ArgumentCaptor<List> logsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(trafficLogsRepository, times(1)).saveAll(logsCaptor.capture());
+        verify(trafficLogFlushService, times(1)).enqueueAll(logsCaptor.capture());
         List<TrafficLog> saved = (List<TrafficLog>) logsCaptor.getValue();
         assertThat(saved).hasSize(2);
         assertThat(saved.get(0).getInboundKbps()).isEqualTo(12L);
