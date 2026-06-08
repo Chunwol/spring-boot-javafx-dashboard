@@ -17,17 +17,19 @@
     <children>
         <Label text="리소스" styleClass="resource-title-label" />
         <Label text="대시보드에서 사용 가능한 패널" styleClass="resource-sub-label" />
-        <ListView fx:id="groupListView" prefHeight="320.0" minHeight="200.0"
-                  maxHeight="1.7976931348623157E308" fixedCellSize="56.0"
+        <ListView fx:id="groupListView" prefHeight="240.0" minHeight="80.0" maxHeight="340.0"
+                  fixedCellSize="52.0"
                   styleClass="resource-list-view"
                   VBox.vgrow="ALWAYS">
             <placeholder><Label text="사용 가능한 리소스가 없습니다." /></placeholder>
         </ListView>
-        <ScrollPane fx:id="controlsScroll" fitToWidth="true" pannable="true"
-                    prefViewportHeight="220.0" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED"
-                    styleClass="scroll-transparent">
+        <ScrollPane fx:id="controlsScroll" fitToWidth="true" pannable="false"
+                    minViewportHeight="160.0" prefViewportHeight="220.0"
+                    hbarPolicy="NEVER" vbarPolicy="AS_NEEDED"
+                    styleClass="scroll-transparent"
+                    VBox.vgrow="ALWAYS">
             <content>
-                <VBox fx:id="leftEditControls" spacing="8.0" fillWidth="true" />
+                <VBox fx:id="leftEditControls" spacing="6.0" fillWidth="true" />
             </content>
         </ScrollPane>
     </children>

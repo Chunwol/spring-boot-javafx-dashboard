@@ -1,5 +1,6 @@
 package com.example.backend.controller.dashboard;
 
+import com.example.backend.dto.dashboard.DashboardPanelBatchPositionRequest;
 import com.example.backend.dto.dashboard.DashboardPanelUpsertRequest;
 import com.example.backend.model.dashboard.DashboardLayout;
 import com.example.backend.model.dashboard.DashboardLayoutBackup;
@@ -71,6 +72,18 @@ public class DashboardLayoutController {
     public ResponseEntity<Void> deletePanel(@PathVariable Long id, @PathVariable Long panelId) {
         dashboardLayoutService.deletePanel(id, panelId);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 여러 패널의 위치/크기/Z-순서 일괄 업데이트.
+     * 다중 선택 정렬, 균등 분배, Z-순서 변경 등 N개의 PUT을 1번으로 줄이기 위한 엔드포인트.
+     * PUT /api/v1/dashboards/{id}/panels/batch-position
+     */
+    @PutMapping("/{id}/panels/batch-position")
+    public ResponseEntity<List<DashboardPanel>> batchUpdatePanelPositions(
+            @PathVariable Long id,
+            @Valid @RequestBody DashboardPanelBatchPositionRequest request) {
+        return ResponseEntity.ok(dashboardLayoutService.batchUpdatePositions(id, request));
     }
 
     // ======== BACKUP/RESTORE ENDPOINTS ========

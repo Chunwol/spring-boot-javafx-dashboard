@@ -2,7 +2,6 @@ package com.example.frontend.controller.dashboard;
 
 import com.example.frontend.model.dashboard.DashboardAlertItem;
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
@@ -26,7 +25,7 @@ class DashboardAlertPopupBuilderTest {
 
     @BeforeAll
     static void initToolkit() {
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test

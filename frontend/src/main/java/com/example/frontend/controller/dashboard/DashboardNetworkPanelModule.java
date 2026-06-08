@@ -50,6 +50,23 @@ public class DashboardNetworkPanelModule {
     private final Map<Long, Long> panelGroupMap = new HashMap<>();
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
     private final Map<Long, Label> resizeHandleMap = new HashMap<>();
+    private java.util.function.BiConsumer<javafx.scene.Node, Boolean> onSelectCallback;
+    private Supplier<java.util.Set<javafx.scene.Node>> selectedNodesSupplier;
+
+    public void setOnSelectCallback(java.util.function.BiConsumer<javafx.scene.Node, Boolean> callback) {
+        this.onSelectCallback = callback;
+    }
+
+    public void setSelectedNodesSupplier(Supplier<java.util.Set<javafx.scene.Node>> supplier) {
+        this.selectedNodesSupplier = supplier;
+    }
+
+    public void deletePanel(Long panelId) {
+        Long dashboardId = dashboardIdSupplier.get();
+        if (dashboardId == null || panelId == null) return;
+        runBeforePanelMutation();
+        dashboardService.deletePanelAsync(dashboardId, panelId, onPanelsChanged);
+    }
 
     @FunctionalInterface
     public interface PanelLayoutCacheUpdater {
@@ -173,20 +190,16 @@ public class DashboardNetworkPanelModule {
 
         title.setText(linked != null ? linked.getGroupName() + " 네트워크" : "네트워크 패널");
 
-        deleteBtn.setVisible(canInteract.getAsBoolean());
-        deleteBtn.setManaged(canInteract.getAsBoolean());
+        // Delete button permanently hidden; action wired for right-panel use
+        deleteBtn.setVisible(false);
+        deleteBtn.setManaged(false);
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
-        deleteBtn.setOnAction(e -> {
-            Long dashboardId = dashboardIdSupplier.get();
-            if (dashboardId != null) {
-                runBeforePanelMutation();
-                dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
-            }
-        });
+        deleteBtn.setOnAction(e -> deletePanel(panelDto.getId()));
 
         contentSlot.getChildren().setAll(controller.getPanel());
 
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
+        wrapper.getProperties().put("panelType", "network");
         wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 80);
         wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 80);
 
@@ -225,17 +238,20 @@ public class DashboardNetworkPanelModule {
                 panel,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
+                selectedNodesSupplier,
                 () -> persistPosition(panel, panelId, "패널 위치 저장됨")
         );
 
         StackPane handleHolder = (StackPane) panel.getProperties().get("resizeHandleHolder");
         Label handle = new Label("◢");
         handle.getStyleClass().add("drag-handle");
-        handle.setVisible(canInteract.getAsBoolean());
-        handle.setManaged(canInteract.getAsBoolean());
+        // 핸들 라벨은 선택 시에만 표시 (홀더는 항상 자리 차지)
+        handle.setVisible(false);
+        handle.setManaged(false);
         resizeHandleMap.put(panelId, handle);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
         handleHolder.getChildren().setAll(handle);
+        panel.getProperties().put("resizeHandleNode", handle);
 
         interactionService.attachResizeHandlers(
                 panel, handle, 320, 220,
@@ -243,17 +259,24 @@ public class DashboardNetworkPanelModule {
                 snapFn,
                 () -> persistPosition(panel, panelId, "패널 크기 저장됨")
         );
+
+        panel.setOnMouseClicked(e -> {
+            if (!canInteract.getAsBoolean()) return;
+            boolean dragged = Boolean.TRUE.equals(panel.getProperties().get("__dragging__"));
+            if (!dragged && onSelectCallback != null) {
+                onSelectCallback.accept(panel, e.isControlDown());
+                e.consume();
+            }
+        });
     }
 
     public void applyEditMode(boolean editMode) {
-        deleteBtnMap.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        resizeHandleMap.values().forEach(handle -> {
-            handle.setVisible(editMode);
-            handle.setManaged(editMode);
-        });
+        if (!editMode) {
+            resizeHandleMap.values().forEach(handle -> {
+                handle.setVisible(false);
+                handle.setManaged(false);
+            });
+        }
     }
 
     public void refreshPcTrafficRows() {

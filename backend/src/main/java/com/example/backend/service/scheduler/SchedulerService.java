@@ -122,6 +122,7 @@ public class SchedulerService {
     private final AtomicBoolean staleCommandRetryRunning = new AtomicBoolean(false);
     private final AtomicBoolean systemPressureMonitorRunning = new AtomicBoolean(false);
     private final AtomicBoolean scmateMonitorRunning = new AtomicBoolean(false);
+    private final AtomicBoolean onlineRatioAlertActive = new AtomicBoolean(false);
 
     public SchedulerService(TrafficLogsRepository trafficRepo,
                             PcMasterRepository pcRepo,
@@ -161,7 +162,7 @@ public class SchedulerService {
                                 "[트래픽 경고] MAC=%s 인바운드 %.1f Mbps (임계치: %d Mbps) at %s",
                                 mac, inKbps / 1000.0, alertThresholdMbps, tlog.getTimestamp());
                         log.warn(msg);
-                        eventPublisher.publishEvent(new AlertEvent(this, mac, msg));
+                        eventPublisher.publishEvent(new AlertEvent(this, mac, msg, "WARNING", "TRAFFIC_HIGH"));
                         lastAlertTime.put(mac, LocalDateTime.now());
                     }
                 }
@@ -210,7 +211,7 @@ public class SchedulerService {
                     String msg = String.format(
                             "[PC 오프라인] %s (%s) - 마지막 접속: %s",
                             pc.getPcName(), pc.getMacAddress(), pc.getLastSeen());
-                    eventPublisher.publishEvent(new AlertEvent(this, pc.getMacAddress(), msg));
+                    eventPublisher.publishEvent(new AlertEvent(this, pc.getMacAddress(), msg, "WARNING", "PC_OFFLINE"));
                     lastAlertTime.put(pc.getMacAddress(), LocalDateTime.now());
                 }
             }
@@ -425,7 +426,7 @@ public class SchedulerService {
                                         "[SCMATE 초기화 감지] %s (%s) - 에이전트 업데이트/파일 설치 완료 직후 연결 끊김. "
                                                 + "PC의 SCMATE 스냅샷을 재설정하고 PC를 재부팅하세요. (명령 ID: %d)",
                                         pc.getPcName(), mac, cmd.getTaskId());
-                                eventPublisher.publishEvent(new AlertEvent(this, mac, scmateMsg));
+                                eventPublisher.publishEvent(new AlertEvent(this, mac, scmateMsg, "WARNING", "SCMATE"));
                                 lastAlertTime.put(mac, LocalDateTime.now());
                             }
                         }
@@ -438,6 +439,17 @@ public class SchedulerService {
     }
 
     private void handleRetryOrFail(CommandQueue cmd) {
+        // ACKED 상태(에이전트가 이미 실행 시작)에서 timeout된 전원 제어 명령은
+        // 에이전트가 실행 직후 종료되어 결과를 보고할 수 없으므로 power-state 검증으로 전환
+        if ("ACKED".equals(cmd.getStatus()) && isPowerCommand(cmd.getCommandType())) {
+            LocalDateTime now = LocalDateTime.now();
+            log.info("[CMD POWER-VERIFY] taskId={} mac={} type={} → power-state 검증으로 전환",
+                    cmd.getTaskId(), cmd.getMacAddress(), cmd.getCommandType());
+            armPostExecutionVerification(cmd, now);
+            commandQueueRepository.save(cmd);
+            return;
+        }
+
         int retryCount = cmd.getRetryCount() == null ? 0 : cmd.getRetryCount();
         if (retryCount >= maxCommandRetries) {
             cmd.setStatus("FAILED");
@@ -460,6 +472,15 @@ public class SchedulerService {
         commandQueueRepository.save(cmd);
         log.info("[CMD RETRY] taskId={} mac={} retryCount={}",
                 cmd.getTaskId(), cmd.getMacAddress(), cmd.getRetryCount());
+    }
+
+    /** 에이전트가 실행 즉시 종료되어 결과 보고가 불가능한 전원 명령 여부. */
+    private boolean isPowerCommand(String type) {
+        if (type == null) return false;
+        return switch (type.toUpperCase()) {
+            case "SHUTDOWN", "REBOOT", "RESTART", "PCON", "LOGOFF", "SLEEP", "HIBERNATE" -> true;
+            default -> false;
+        };
     }
 
     private boolean isPowerStateCommand(CommandQueue cmd) {
@@ -657,11 +678,16 @@ public class SchedulerService {
         long total = pcRepo.count();
         long online = pcRepo.countByStatus("ONLINE");
         if (total <= 0) {
+            onlineRatioAlertActive.set(false);
             return;
         }
 
         double onlineRatio = (double) online / (double) total;
         if (onlineRatio >= minOnlineRatioThreshold) {
+            onlineRatioAlertActive.set(false);
+            return;
+        }
+        if (!onlineRatioAlertActive.compareAndSet(false, true)) {
             return;
         }
 

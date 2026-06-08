@@ -149,18 +149,24 @@ public class DashboardResourcePanelModule {
                 Label subLabel = new Label(model.subLabel());
                 subLabel.getStyleClass().add("resource-item-sub");
                 VBox textBox = new VBox(2, nameLabel, nameField, subLabel);
-
-                Region spacer = new Region();
-                HBox.setHgrow(spacer, Priority.ALWAYS);
+                HBox.setHgrow(textBox, Priority.ALWAYS);
 
                 Button deleteBtn = buildDeleteButton(item, model);
                 boolean canDrag = canDragFromResource(model);
-                Label dragHint = new Label(canDrag ? "드래그 추가" : "");
-                dragHint.getStyleClass().add("resource-item-drag-hint");
 
-                HBox row = deleteBtn == null
-                        ? new HBox(10, textBox, spacer, dragHint)
-                        : new HBox(10, textBox, spacer, dragHint, deleteBtn);
+                // 설정 표시(추가됨/드래그) + 삭제 버튼을 좌측에 배치
+                Label statusDot = new Label(model.added() ? "●" : "○");
+                statusDot.getStyleClass().add(model.added()
+                        ? "resource-item-status-dot-added"
+                        : "resource-item-status-dot-pending");
+                statusDot.setMinWidth(14);
+
+                HBox row;
+                if (deleteBtn == null) {
+                    row = new HBox(8, statusDot, textBox);
+                } else {
+                    row = new HBox(8, deleteBtn, textBox);
+                }
                 row.setAlignment(Pos.CENTER_LEFT);
                 configureResourceDrag(row, model.dragKey());
                 setGraphic(row);

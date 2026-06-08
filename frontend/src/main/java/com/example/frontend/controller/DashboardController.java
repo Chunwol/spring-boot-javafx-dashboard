@@ -24,8 +24,10 @@ import com.example.frontend.controller.dashboard.DashboardResourcePanelModule;
 import com.example.frontend.controller.dashboard.DashboardUIService;
 import com.example.frontend.controller.dashboard.DashboardViewModel;
 import com.example.frontend.controller.dashboard.DashboardWidgetModule;
+import com.example.frontend.controller.dashboard.DashboardGridSettings;
 import com.example.frontend.controller.dashboard.DashboardNetworkPanelModule;
 import com.example.frontend.controller.dashboard.DashboardPcManagementModule;
+import com.example.frontend.controller.dashboard.DashboardRightPanelModule;
 import com.example.frontend.model.dashboard.DashboardAlertItem;
 import com.example.frontend.controller.panel.CommandStatusPanelController;
 import com.example.frontend.controller.panel.NetworkPanelController;
@@ -40,7 +42,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXMLLoader;
+import javafx.animation.Interpolator;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
 import javafx.animation.PauseTransition;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
@@ -76,6 +82,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.PopupWindow;
@@ -257,6 +264,12 @@ public class DashboardController {
     @FXML
     private VBox rightToolPane;
 
+    @FXML
+    private VBox editRightPanelSlot;
+
+    private DashboardRightPanelModule rightPanelModule;
+    private Timeline rightPanelTimeline;
+    private static final double RIGHT_PANEL_WIDTH = 256.0;
     private DashboardCanvasModule canvasModule;
     private DashboardClassroomModule classroomModule;
     private DashboardManagementModule managementModule;
@@ -336,6 +349,9 @@ public class DashboardController {
     private final AtomicBoolean serverDisconnectHandled = new AtomicBoolean(false);
     private final AtomicBoolean offlineNotified = new AtomicBoolean(false);
     private volatile boolean undoRestoreInFlight = false;
+    /** WS-triggered refresh minimum interval: prevents API storm from high-frequency heartbeat events */
+    private static final long WS_REFRESH_MIN_INTERVAL_MS = 5_000L;
+    private long lastWsRefreshMs = 0L;
     private final Deque<List<DashboardPanelDto>> undoHistory = new ArrayDeque<>();
     private final Deque<List<DashboardPanelDto>> redoHistory = new ArrayDeque<>();
 
@@ -556,7 +572,7 @@ public class DashboardController {
             }
         }), 0, 1, TimeUnit.SECONDS);
 
-        scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::refreshDashboardSnapshot), 0, 30, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(() -> Platform.runLater(() -> refreshDashboardSnapshot(true)), 0, 30, TimeUnit.SECONDS);
         scheduler.scheduleAtFixedRate(() -> Platform.runLater(this::pulseOfflineAlertBlink),
                 0,
                 OFFLINE_ALERT_BLINK_INTERVAL_MS,
@@ -941,6 +957,121 @@ public class DashboardController {
             undoLastPanelMutation();
             event.consume();
         }
+        // 편집 모드 단축키 (방향키/Delete/Ctrl+A/Ctrl+D)
+        else if (isEditModeActive() && handleEditModeShortcut(event)) {
+            event.consume();
+        }
+    }
+
+    /** nudge 저장 디바운스 — 방향키 연타 시 API 폭주 방지 */
+    private final PauseTransition nudgeSaveDebounce = createNudgeSaveDebounce();
+    private final java.util.Set<javafx.scene.Node> pendingNudgeNodes = new java.util.LinkedHashSet<>();
+
+    private PauseTransition createNudgeSaveDebounce() {
+        PauseTransition p = new PauseTransition(Duration.millis(350));
+        p.setOnFinished(e -> {
+            java.util.List<javafx.scene.Node> alive = new java.util.ArrayList<>();
+            for (javafx.scene.Node n : pendingNudgeNodes) {
+                if (n.getParent() != null) alive.add(n);
+            }
+            pendingNudgeNodes.clear();
+            if (!alive.isEmpty()) batchSaveSelectedPositions(alive);
+        });
+        return p;
+    }
+
+    private void scheduleNudgeSave(java.util.Collection<javafx.scene.Node> nodes) {
+        pendingNudgeNodes.addAll(nodes);
+        nudgeSaveDebounce.playFromStart();
+    }
+
+    /** 편집 모드에서 동작하는 단축키. 처리 시 true. */
+    private boolean handleEditModeShortcut(javafx.scene.input.KeyEvent event) {
+        if (canvasModule == null) return false;
+        // 우측 패널 TextField/Spinner에 포커스가 있으면 방향키는 텍스트 캐럿 이동에 사용되어야 함
+        javafx.scene.Node focused = rootVBox != null && rootVBox.getScene() != null
+                ? rootVBox.getScene().getFocusOwner() : null;
+        if (focused instanceof javafx.scene.control.TextInputControl
+                || focused instanceof javafx.scene.control.Spinner) {
+            javafx.scene.input.KeyCode code = event.getCode();
+            if (code == KeyCode.LEFT || code == KeyCode.RIGHT
+                    || code == KeyCode.UP || code == KeyCode.DOWN
+                    || code == KeyCode.DELETE || code == KeyCode.BACK_SPACE) {
+                return false; // 이벤트 소비 안 함 → 기본 텍스트 편집 동작
+            }
+        }
+        java.util.Set<javafx.scene.Node> selected = canvasModule.getSelectedNodes();
+
+        // Ctrl+A: 전체 선택
+        if (event.isControlDown() && event.getCode() == KeyCode.A) {
+            canvasModule.selectAll();
+            return true;
+        }
+        // Ctrl+D: 복제 (현재는 미구현 → 토스트로 알림)
+        if (event.isControlDown() && event.getCode() == KeyCode.D) {
+            if (!selected.isEmpty()) {
+                safeShowToast("복제는 추후 지원 예정입니다.", false);
+            }
+            return true;
+        }
+        if (selected.isEmpty()) return false;
+
+        // Delete/Backspace: 선택 패널 삭제
+        if (event.getCode() == KeyCode.DELETE || event.getCode() == KeyCode.BACK_SPACE) {
+            deleteSelectedPanels(selected);
+            return true;
+        }
+
+        // 방향키: 1px 이동 (Shift 누르면 10px)
+        double step = event.isShiftDown() ? 10.0 : 1.0;
+        double dx = 0, dy = 0;
+        switch (event.getCode()) {
+            case LEFT -> dx = -step;
+            case RIGHT -> dx = step;
+            case UP -> dy = -step;
+            case DOWN -> dy = step;
+            default -> { return false; }
+        }
+        for (javafx.scene.Node n : selected) {
+            n.setLayoutX(Math.max(0, n.getLayoutX() + dx));
+            n.setLayoutY(Math.max(0, n.getLayoutY() + dy));
+        }
+        // 디바운스 저장 (방향키 연타 시 API 폭주 방지)
+        scheduleNudgeSave(selected);
+        // 단일 선택 시 우측 패널 X/Y/W/H 실시간 갱신
+        if (selected.size() == 1) handleSelectionChanged(selected.iterator().next());
+        return true;
+    }
+
+    private void deleteSelectedPanels(java.util.Set<javafx.scene.Node> selected) {
+        for (javafx.scene.Node n : new java.util.ArrayList<>(selected)) {
+            Runnable del = deleteActionFor(n);
+            if (del != null) del.run();
+        }
+        canvasModule.clearSelectionExternal();
+    }
+
+    /** 패널 타입 → 해당 모듈의 삭제 액션 매핑. 알 수 없는 타입이면 null. */
+    private Runnable deleteActionFor(javafx.scene.Node n) {
+        String type = (String) n.getProperties().get("panelType");
+        if (type == null) return null;
+        Long panelId = (Long) n.getProperties().get("dashboardPanelId");
+        Long itemId  = (Long) n.getProperties().get("dashboardItemId");
+        return switch (type) {
+            case "classroom"  -> (panelId != null && classroomModule != null)
+                    ? () -> classroomModule.deleteClassroomPanel(panelId) : null;
+            case "text"       -> (itemId != null && widgetModule != null)
+                    ? () -> widgetModule.handleDeleteTextItem(itemId) : null;
+            case "image"      -> (itemId != null && widgetModule != null)
+                    ? () -> widgetModule.handleDeleteImageItem(itemId) : null;
+            case "network"    -> (panelId != null && networkPanelModule != null)
+                    ? () -> networkPanelModule.deletePanel(panelId) : null;
+            case "disconnect" -> (panelId != null && disconnectStatusPanelModule != null)
+                    ? () -> disconnectStatusPanelModule.deletePanel(panelId) : null;
+            case "operations" -> (panelId != null && operationsMetricsPanelModule != null)
+                    ? () -> operationsMetricsPanelModule.deletePanel(panelId) : null;
+            default -> null;
+        };
     }
 
     private void initializeTabs() {
@@ -1054,6 +1185,7 @@ public class DashboardController {
         attachLeftPane();
         initializeDashboardServices();
         initializeOverlayPanelModules();
+        wireSelectionInteractions();
 
         applyEditModeUiState();
         return dashboardMainSplitPane;
@@ -1124,6 +1256,8 @@ public class DashboardController {
     }
 
     private void initializeDashboardServices() {
+        initializeRightPanelModule();
+
         dashboardUIService = new DashboardUIService(
                 toastContainer,
                 classroomContainer,
@@ -1348,7 +1482,7 @@ public class DashboardController {
         refreshBtn.setAccessibleText("새로고침");
         refreshBtn.setTooltip(new Tooltip("대시보드 데이터를 새로고침합니다."));
         refreshBtn.setOnAction(e -> {
-            refreshDashboardSnapshot();
+            refreshDashboardSnapshot(true);
         });
     }
 
@@ -1438,31 +1572,384 @@ public class DashboardController {
         fitAllBtn.setOnAction(e -> fitAllPanelsToViewport());
     }
 
-    private void applyEditModeUiState() {
-        if (dashboardUIService != null) {
-            dashboardUIService.applyEditModeUiState(isEditModeActive());
-        } else if (canvasModule != null) {
-            canvasModule.applyEditMode(isEditModeActive());
+    private void initializeRightPanelModule() {
+        if (isViewerMode()) return;
+
+        rightPanelModule = new DashboardRightPanelModule(
+                this::handleAutoArrange,
+                this::handleResolveOverlap
+        );
+
+        if (editRightPanelSlot != null) {
+            editRightPanelSlot.getChildren().setAll(rightPanelModule.getPanel());
+        }
+    }
+
+    private void wireSelectionInteractions() {
+        if (canvasModule == null) return;
+
+        // 8방향 리사이즈 핸들(Figma 스타일) 초기화 — 스냅 함수 주입
+        canvasModule.initSelectionHandles(this::applySnap);
+
+        // Figma 스타일 스마트 가이드 (드래그 시 정렬 라인) - 모든 모듈에 공유 주입
+        com.example.frontend.controller.dashboard.DashboardSmartGuides smartGuides =
+                new com.example.frontend.controller.dashboard.DashboardSmartGuides(classroomContainer);
+        dashboardInteractionService.setSmartGuides(smartGuides);
+        if (classroomModule != null) classroomModule.setSmartGuides(smartGuides);
+        if (widgetModule != null) widgetModule.setSmartGuides(smartGuides);
+
+        // 선택 변경 시 우측 패널 업데이트
+        canvasModule.setOnSelectionChanged(selected -> {
+            if (rightPanelModule == null) return;
+            if (selected.isEmpty()) {
+                rightPanelModule.showNoSelection();
+                return;
+            }
+            if (selected.size() > 1) {
+                rightPanelModule.showMultiSelection(selected.size());
+                return;
+            }
+            javafx.scene.Node node = selected.iterator().next();
+            handleSelectionChanged(node);
+        });
+
+        // 강의실/위젯 모듈에 선택 콜백 및 선택 노드 공급자 등록
+        if (classroomModule != null) {
+            classroomModule.setOnSelectCallback((node, addMode) ->
+                    canvasModule.selectNodeExternal(node, addMode));
+            classroomModule.setSelectedNodesSupplier(canvasModule::getSelectedNodes);
         }
         if (widgetModule != null) {
-            widgetModule.applyEditMode(isEditModeActive());
-        }
-        if (classroomModule != null) {
-            classroomModule.applyEditMode(isEditModeActive());
+            widgetModule.setOnSelectCallback((node, addMode) ->
+                    canvasModule.selectNodeExternal(node, addMode));
+            widgetModule.setSelectedNodesSupplier(canvasModule::getSelectedNodes);
         }
         if (networkPanelModule != null) {
-            networkPanelModule.applyEditMode(isEditModeActive());
+            networkPanelModule.setOnSelectCallback((node, addMode) ->
+                    canvasModule.selectNodeExternal(node, addMode));
+            networkPanelModule.setSelectedNodesSupplier(canvasModule::getSelectedNodes);
         }
         if (disconnectStatusPanelModule != null) {
-            disconnectStatusPanelModule.applyEditMode(isEditModeActive());
+            disconnectStatusPanelModule.setOnSelectCallback((node, addMode) ->
+                    canvasModule.selectNodeExternal(node, addMode));
+            disconnectStatusPanelModule.setSelectedNodesSupplier(canvasModule::getSelectedNodes);
         }
         if (operationsMetricsPanelModule != null) {
-            operationsMetricsPanelModule.applyEditMode(isEditModeActive());
+            operationsMetricsPanelModule.setOnSelectCallback((node, addMode) ->
+                    canvasModule.selectNodeExternal(node, addMode));
+            operationsMetricsPanelModule.setSelectedNodesSupplier(canvasModule::getSelectedNodes);
+        }
+
+        // 우측 패널 컨텍스트 (4개 콜백 → 1개 인터페이스)
+        if (rightPanelModule != null) {
+            rightPanelModule.setContext(new com.example.frontend.controller.dashboard.DashboardRightPanelModule.RightPanelContext() {
+                @Override public void onPositionSizeChanged(double[] vals) { applyRightPanelPositionSize(vals); }
+                @Override public void onZOrderChanged(boolean toFront)    { reorderSelectedZ(toFront); }
+                @Override public void onAlignmentRequest(String action)   { performAlignAction(action); }
+            });
+        }
+    }
+
+    private void applyRightPanelPositionSize(double[] vals) {
+        java.util.Set<javafx.scene.Node> sel = canvasModule.getSelectedNodes();
+        if (sel.size() != 1) return;
+        javafx.scene.Node n = sel.iterator().next();
+        n.setLayoutX(Math.max(0, vals[0]));
+        n.setLayoutY(Math.max(0, vals[1]));
+        if (n instanceof javafx.scene.layout.Region r) {
+            r.setPrefWidth(Math.max(80, vals[2]));
+            r.setPrefHeight(Math.max(60, vals[3]));
+        }
+        saveNodePosition(n);
+    }
+
+    /** 선택된 강의실 패널들의 zIndex를 일괄 변경 후 1번의 배치 API로 영속화. */
+    private void reorderSelectedZ(boolean toFront) {
+        java.util.Set<javafx.scene.Node> sel = canvasModule.getSelectedNodes();
+        if (sel.isEmpty()) return;
+        // 현재 z 범위 파악 (강의실 패널만 zIndex DB 영속 — 나머지 위젯/오버레이는 컨테이너 순서만)
+        int max = 0;
+        for (com.example.frontend.model.panel.PanelInfo info : panelManager.getPanels()) {
+            VBox p = info.getPanel();
+            if (p == null) continue;
+            Object z = p.getProperties().get("zIndex");
+            if (z instanceof Number num) max = Math.max(max, num.intValue());
+        }
+        int base = toFront ? max + 1 : -sel.size();
+
+        java.util.List<Map<String, Object>> items = new java.util.ArrayList<>();
+        int idx = 0;
+        for (javafx.scene.Node n : sel) {
+            if (toFront) n.toFront(); else n.toBack();
+            String type = (String) n.getProperties().get("panelType");
+            // 강의실/네트워크/접속/운영은 dashboardPanelId 보유 → DB 영속 가능
+            Long panelId = (Long) n.getProperties().get("dashboardPanelId");
+            if (panelId == null) continue;
+            int newZ = Math.max(0, base + idx++);
+            n.getProperties().put("zIndex", newZ);
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("panelId", panelId);
+            item.put("zIndex", newZ);
+            items.add(item);
+        }
+        long dashboardId = currentDashboardId() == null ? -1L : currentDashboardId();
+        if (dashboardId > 0 && !items.isEmpty()) {
+            dashboardService.updatePanelsBatchAsync(dashboardId, items, null);
+        }
+    }
+
+    private void performAlignAction(String action) {
+        java.util.Set<javafx.scene.Node> sel = canvasModule.getSelectedNodes();
+        if (sel.size() < 2) return;
+        java.util.List<javafx.scene.Node> list = new java.util.ArrayList<>(sel);
+        java.util.function.ToDoubleFunction<javafx.scene.Node> w = n ->
+                n instanceof javafx.scene.layout.Region r ? r.getPrefWidth() : n.getBoundsInLocal().getWidth();
+        java.util.function.ToDoubleFunction<javafx.scene.Node> h = n ->
+                n instanceof javafx.scene.layout.Region r ? r.getPrefHeight() : n.getBoundsInLocal().getHeight();
+        switch (action) {
+            case "LEFT" -> {
+                double min = list.stream().mapToDouble(javafx.scene.Node::getLayoutX).min().orElse(0);
+                list.forEach(n -> n.setLayoutX(min));
+            }
+            case "RIGHT" -> {
+                double max = list.stream().mapToDouble(n -> n.getLayoutX() + w.applyAsDouble(n)).max().orElse(0);
+                list.forEach(n -> n.setLayoutX(max - w.applyAsDouble(n)));
+            }
+            case "CENTER_H" -> {
+                double avg = list.stream().mapToDouble(n -> n.getLayoutX() + w.applyAsDouble(n) / 2).average().orElse(0);
+                list.forEach(n -> n.setLayoutX(avg - w.applyAsDouble(n) / 2));
+            }
+            case "TOP" -> {
+                double min = list.stream().mapToDouble(javafx.scene.Node::getLayoutY).min().orElse(0);
+                list.forEach(n -> n.setLayoutY(min));
+            }
+            case "BOTTOM" -> {
+                double max = list.stream().mapToDouble(n -> n.getLayoutY() + h.applyAsDouble(n)).max().orElse(0);
+                list.forEach(n -> n.setLayoutY(max - h.applyAsDouble(n)));
+            }
+            case "CENTER_V" -> {
+                double avg = list.stream().mapToDouble(n -> n.getLayoutY() + h.applyAsDouble(n) / 2).average().orElse(0);
+                list.forEach(n -> n.setLayoutY(avg - h.applyAsDouble(n) / 2));
+            }
+            case "DIST_H" -> {
+                if (list.size() < 3) return;
+                list.sort(java.util.Comparator.comparingDouble(javafx.scene.Node::getLayoutX)
+                        .thenComparing(n -> String.valueOf(n.getProperties().get("dashboardPanelId"))));
+                double minX = list.get(0).getLayoutX();
+                double maxX = list.get(list.size()-1).getLayoutX();
+                if (maxX - minX < 1.0) {
+                    safeShowToast("가로로 펼쳐진 패널이어야 균등 분배할 수 있습니다", true);
+                    return;
+                }
+                double gap = (maxX - minX) / (list.size() - 1);
+                for (int i = 0; i < list.size(); i++) list.get(i).setLayoutX(minX + gap * i);
+            }
+            case "DIST_V" -> {
+                if (list.size() < 3) return;
+                list.sort(java.util.Comparator.comparingDouble(javafx.scene.Node::getLayoutY)
+                        .thenComparing(n -> String.valueOf(n.getProperties().get("dashboardPanelId"))));
+                double minY = list.get(0).getLayoutY();
+                double maxY = list.get(list.size()-1).getLayoutY();
+                if (maxY - minY < 1.0) {
+                    safeShowToast("세로로 펼쳐진 패널이어야 균등 분배할 수 있습니다", true);
+                    return;
+                }
+                double gap = (maxY - minY) / (list.size() - 1);
+                for (int i = 0; i < list.size(); i++) list.get(i).setLayoutY(minY + gap * i);
+            }
+            default -> {}
+        }
+        // 모든 변경을 1번의 배치 API로 저장 (서버 부담 N→1)
+        batchSaveSelectedPositions(list);
+    }
+
+    /**
+     * 강의실/네트워크/접속/운영 패널만 배치 API로 저장.
+     * 텍스트/이미지(dashboardItemId 사용)는 개별 API로 fallback.
+     */
+    private void batchSaveSelectedPositions(java.util.List<javafx.scene.Node> nodes) {
+        long dashboardId = currentDashboardId() == null ? -1L : currentDashboardId();
+        java.util.List<Map<String, Object>> batchItems = new java.util.ArrayList<>();
+        java.util.List<javafx.scene.Node> fallback = new java.util.ArrayList<>();
+        for (javafx.scene.Node n : nodes) {
+            Long panelId = (Long) n.getProperties().get("dashboardPanelId");
+            if (panelId == null) {
+                fallback.add(n); // 텍스트/이미지는 dashboardItemId만 보유
+                continue;
+            }
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("panelId", panelId);
+            item.put("x", n.getLayoutX());
+            item.put("y", n.getLayoutY());
+            if (n instanceof javafx.scene.layout.Region r) {
+                item.put("width", r.getPrefWidth());
+                item.put("height", r.getPrefHeight());
+            }
+            batchItems.add(item);
+        }
+        if (dashboardId > 0 && !batchItems.isEmpty()) {
+            dashboardService.updatePanelsBatchAsync(dashboardId, batchItems, null);
+        }
+        // 텍스트/이미지는 개별 저장 (기존 경로 유지)
+        fallback.forEach(this::saveNodePosition);
+    }
+
+    private void handleSelectionChanged(javafx.scene.Node node) {
+        if (rightPanelModule == null || node == null) return;
+        if (node.getParent() == null) {
+            // 패널이 이미 삭제된 경우
+            rightPanelModule.showNoSelection();
+            return;
+        }
+        String type = (String) node.getProperties().get("panelType");
+        double x = node.getLayoutX();
+        double y = node.getLayoutY();
+        double w = node instanceof javafx.scene.layout.Region r ? r.getPrefWidth() : 0;
+        double h = node instanceof javafx.scene.layout.Region r ? r.getPrefHeight() : 0;
+        Runnable onDelete = deleteActionFor(node);
+
+        switch (type == null ? "" : type) {
+            case "classroom" -> {
+                Long panelId = (Long) node.getProperties().get("dashboardPanelId");
+                rightPanelModule.showSingleClassroom(x, y, w, h, onDelete,
+                        () -> { if (classroomModule != null && panelId != null) classroomModule.showGridSettingsForPanel(panelId); });
+            }
+            case "text" -> {
+                Long itemId = (Long) node.getProperties().get("dashboardItemId");
+                if (widgetModule == null || itemId == null) return;
+                java.util.Map<String, Object> style = widgetModule.getTextStyle(itemId);
+                boolean bold   = Boolean.TRUE.equals(style.get("bold"));
+                boolean italic = Boolean.TRUE.equals(style.get("italic"));
+                int fontSize   = ((Number) style.getOrDefault("fontSize", 14)).intValue();
+                String color   = style.getOrDefault("fontColor", "#111111").toString();
+                rightPanelModule.showSingleText(x, y, w, h, onDelete,
+                        bold, italic, fontSize, color,
+                        () -> widgetModule.updateTextStyle(
+                                itemId,
+                                rightPanelModule.isBoldSelected(),
+                                rightPanelModule.isItalicSelected(),
+                                rightPanelModule.getTextFontSize(),
+                                rightPanelModule.getTextColorHex()));
+            }
+            case "image"      -> rightPanelModule.showSingleImage(x, y, w, h, onDelete);
+            case "network"    -> rightPanelModule.showSimplePanel("네트워크 패널", x, y, w, h, onDelete);
+            case "disconnect" -> rightPanelModule.showSimplePanel("접속현황 패널", x, y, w, h, onDelete);
+            case "operations" -> rightPanelModule.showSimplePanel("운영 메트릭 패널", x, y, w, h, onDelete);
+            default           -> rightPanelModule.showNoSelection();
+        }
+    }
+
+    private void handleAutoArrange(DashboardGridSettings settings) {
+        if (!ensureWritePermission("자동 정렬")) return;
+        if (canvasModule == null) return;
+        canvasModule.autoArrangeNodes(settings, this::saveNodePosition);
+        safeShowToast("자동 정렬 완료", false);
+    }
+
+    private void handleResolveOverlap(DashboardGridSettings settings) {
+        if (!ensureWritePermission("겹침 해소")) return;
+        if (canvasModule == null) return;
+        canvasModule.resolveOverlaps(settings, this::saveNodePosition);
+        safeShowToast("겹침 해소 완료", false);
+    }
+
+    private void applyEditModeUiState() {
+        boolean editMode = isEditModeActive();
+
+        if (dashboardUIService != null) {
+            dashboardUIService.applyEditModeUiState(editMode);
+        } else if (canvasModule != null) {
+            canvasModule.applyEditMode(editMode);
+        }
+        if (widgetModule != null) {
+            widgetModule.applyEditMode(editMode);
+        }
+        if (classroomModule != null) {
+            classroomModule.applyEditMode(editMode);
+        }
+        if (networkPanelModule != null) {
+            networkPanelModule.applyEditMode(editMode);
+        }
+        if (disconnectStatusPanelModule != null) {
+            disconnectStatusPanelModule.applyEditMode(editMode);
+        }
+        if (operationsMetricsPanelModule != null) {
+            operationsMetricsPanelModule.applyEditMode(editMode);
         }
         if (resourcePanelModule != null) {
             resourcePanelModule.refreshListView();
         }
+
+        // 우측 편집 패널 슬라이드 인/아웃
+        if (editRightPanelSlot != null && !isViewerMode()) {
+            if (editMode) {
+                slideRightPanelIn();
+            } else {
+                slideRightPanelOut();
+            }
+        }
+
         updateUndoButtonState();
+    }
+
+    private void slideRightPanelIn() {
+        if (editRightPanelSlot == null) return;
+        if (rightPanelTimeline != null) rightPanelTimeline.stop();
+
+        editRightPanelSlot.setVisible(true);
+        editRightPanelSlot.setManaged(true);
+        editRightPanelSlot.setMinWidth(0); // allow animation to start from 0
+        editRightPanelSlot.setMaxWidth(RIGHT_PANEL_WIDTH);
+
+        // 클립: 너비 애니메이션 중 내용이 밖으로 넘치지 않게
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(editRightPanelSlot.widthProperty());
+        clip.heightProperty().bind(editRightPanelSlot.heightProperty());
+        editRightPanelSlot.setClip(clip);
+
+        rightPanelTimeline = new Timeline(
+                new KeyFrame(Duration.ZERO,
+                        new KeyValue(editRightPanelSlot.prefWidthProperty(), 0)),
+                new KeyFrame(Duration.millis(220),
+                        new KeyValue(editRightPanelSlot.prefWidthProperty(),
+                                RIGHT_PANEL_WIDTH, Interpolator.EASE_OUT))
+        );
+        rightPanelTimeline.setOnFinished(e -> {
+            // Lock in minWidth so wide canvas content cannot squish the panel
+            editRightPanelSlot.setMinWidth(RIGHT_PANEL_WIDTH);
+            editRightPanelSlot.setClip(null);
+        });
+        rightPanelTimeline.play();
+    }
+
+    private void slideRightPanelOut() {
+        if (editRightPanelSlot == null) return;
+        if (rightPanelTimeline != null) rightPanelTimeline.stop();
+
+        editRightPanelSlot.setMinWidth(0); // allow animation to shrink to 0
+
+        double currentW = editRightPanelSlot.getPrefWidth() > 0
+                ? editRightPanelSlot.getPrefWidth()
+                : RIGHT_PANEL_WIDTH;
+
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(editRightPanelSlot.widthProperty());
+        clip.heightProperty().bind(editRightPanelSlot.heightProperty());
+        editRightPanelSlot.setClip(clip);
+
+        rightPanelTimeline = new Timeline(
+                new KeyFrame(Duration.ZERO,
+                        new KeyValue(editRightPanelSlot.prefWidthProperty(), currentW)),
+                new KeyFrame(Duration.millis(180),
+                        new KeyValue(editRightPanelSlot.prefWidthProperty(), 0,
+                                Interpolator.EASE_IN))
+        );
+        rightPanelTimeline.setOnFinished(e -> {
+            editRightPanelSlot.setVisible(false);
+            editRightPanelSlot.setManaged(false);
+            editRightPanelSlot.setClip(null);
+        });
+        rightPanelTimeline.play();
     }
 
     private void toggleAlertPopup() {
@@ -1490,7 +1977,7 @@ public class DashboardController {
         }
         alertContextMenu.getItems().setAll(
                 DashboardAlertPopupBuilder.buildRootMenuItem(
-                        alertCoordinator.getAlertItems(),
+                        DashboardAlertApiClient.filterVisibleAlerts(alertCoordinator.getAlertItems()),
                         isViewerMode(),
                         () -> {
                             loadAlertSnapshot();
@@ -1517,16 +2004,11 @@ public class DashboardController {
     }
 
     private void refreshUnreadAlertCount() {
-        dashboardAlertApiClient
-                .fetchUnreadCount()
-                .thenAccept(count -> Platform.runLater(() -> {
-                    alertCoordinator.setUnreadAlertCount(count);
-                    refreshAlertBadge();
-                }))
-                .exceptionally(ex -> {
-                    log.debug("미확인 경보 카운트 조회 실패: {}", ex.getMessage());
-                    return null;
-                });
+        long unread = DashboardAlertApiClient.filterVisibleAlerts(alertCoordinator.getAlertItems()).stream()
+                .filter(item -> item != null && !item.isAcknowledged())
+                .count();
+        alertCoordinator.setUnreadAlertCount(unread);
+        refreshAlertBadge();
     }
 
     private void acknowledgeAlert(DashboardAlertItem item) {
@@ -1582,6 +2064,9 @@ public class DashboardController {
         if (alertItem == null || alertItem.getMessage() == null || alertItem.getMessage().isBlank()) {
             return;
         }
+        if (!DashboardAlertApiClient.shouldDisplay(alertItem)) {
+            return;
+        }
 
         Platform.runLater(() -> {
             alertCoordinator.applyRealtimeAlert(alertItem, ALERT_FETCH_LIMIT);
@@ -1600,13 +2085,14 @@ public class DashboardController {
         if (classroomModule == null) {
             return;
         }
+        List<DashboardAlertItem> visibleAlerts = DashboardAlertApiClient.filterVisibleAlerts(alertCoordinator.getAlertItems());
         classroomModule.applyAlertBlink(
                 DashboardAlertSupport.collectBlinkingOfflineAlertMacs(
-                        alertCoordinator.getAlertItems(),
+                        visibleAlerts,
                         OFFLINE_ALERT_BLINK_WINDOW_SECONDS,
                         LocalDateTime.now()
                 ),
-                DashboardAlertSupport.collectBlinkingUpdateAlertMacs(alertCoordinator.getAlertItems()),
+                DashboardAlertSupport.collectBlinkingUpdateAlertMacs(visibleAlerts),
                 offlineAlertBlinkHighlightPhase
         );
     }
@@ -1948,7 +2434,13 @@ public class DashboardController {
         });
 
         realtimeModule.start(
-                () -> Platform.runLater(this::refreshDashboardSnapshot),
+                () -> Platform.runLater(() -> {
+                    long now = System.currentTimeMillis();
+                    if (now - lastWsRefreshMs >= WS_REFRESH_MIN_INTERVAL_MS) {
+                        lastWsRefreshMs = now;
+                        refreshDashboardSnapshot(false);
+                    }
+                }),
                 this::handleRealtimeAlertPayload,
                 () -> handleServerConnectionLost(new RuntimeException("WebSocket disconnected"))
         );
@@ -2080,13 +2572,17 @@ public class DashboardController {
     }
 
     private void refreshDashboardSnapshot() {
+        refreshDashboardSnapshot(true);
+    }
+
+    private void refreshDashboardSnapshot(boolean withAuxiliaryRefresh) {
         if (!snapshotRefreshInFlight.compareAndSet(false, true)) {
             return;
         }
-        dashboardViewModel.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot)));
+        dashboardViewModel.fetchRefreshSnapshotAsync(snapshot -> Platform.runLater(() -> applyRefreshSnapshot(snapshot, withAuxiliaryRefresh)));
     }
 
-    private void applyRefreshSnapshot(DashboardRefreshDto snapshot) {
+    private void applyRefreshSnapshot(DashboardRefreshDto snapshot, boolean withAuxiliaryRefresh) {
         try {
             if (snapshot == null) {
                 return;
@@ -2119,7 +2615,11 @@ public class DashboardController {
             }
 
             refreshPanelListAndDashboard();
-            refreshAuxiliaryTabs();
+            // WS-triggered refreshes skip auxiliary tabs to avoid exhausting the rate limit.
+            // The 30-second scheduler refresh (withAuxiliaryRefresh=true) handles them.
+            if (withAuxiliaryRefresh) {
+                refreshAuxiliaryTabs();
+            }
         } finally {
             snapshotRefreshInFlight.set(false);
         }

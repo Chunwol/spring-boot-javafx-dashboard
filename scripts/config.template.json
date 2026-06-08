@@ -1,6 +1,6 @@
 {
-  "serverUrl" : "https://REPLACE_WITH_BACKEND_URL",
-  "installKey" : "INST-CHANGE-ME-BEFORE-DEPLOY",
+  "serverUrl" : "https://pelmon.kro.kr",
+  "installKey" : "INST-E14A3737AF11A9052BAC",
   "agentToken" : "",
   "tlsPinSha256" : "",
   "githubOwner" : "",
@@ -8,5 +8,9 @@
   "internetCheckHost" : "1.1.1.1",
   "internetCheckPort" : 53,
   "heartbeatIntervalSec" : 12,
-  "jitterSec" : 3
+  "jitterSec" : 3,
+  "updatePeerPort" : 18777,
+  "overrideMacAddress" : "",
+  "overrideHostname" : "",
+  "overrideIpAddress" : ""
 }

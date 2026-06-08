@@ -1,7 +1,7 @@
 package com.example.backend.controller.script;
 
 import com.example.backend.model.script.ScriptArtifact;
-import com.example.backend.repository.script.ScriptArtifactRepository;
+import com.example.backend.service.script.ScriptArtifactService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -81,7 +82,7 @@ public class ScriptController {
     /** 에이전트 수집 파일 총량 기본 제한: 30GB */
     private static final long DEFAULT_COLLECT_MAX_BYTES = 30L * 1024 * 1024 * 1024;
 
-    private final ScriptArtifactRepository scriptArtifactRepository;
+    private final ScriptArtifactService scriptArtifactService;
     private final ObjectMapper objectMapper;
     private final Object[] uploadLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
             .mapToObj(i -> new Object())
@@ -109,8 +110,8 @@ public class ScriptController {
     @Value("${app.nginx.internal-location:/internal-uploads/}")
     private String nginxInternalLocation;
 
-    public ScriptController(ScriptArtifactRepository scriptArtifactRepository, ObjectMapper objectMapper) {
-        this.scriptArtifactRepository = scriptArtifactRepository;
+    public ScriptController(ScriptArtifactService scriptArtifactService, ObjectMapper objectMapper) {
+        this.scriptArtifactService = scriptArtifactService;
         this.objectMapper = objectMapper;
     }
 
@@ -162,7 +163,7 @@ public class ScriptController {
         String sha256 = HexFormat.of().formatHex(md.digest());
 
         // de-dup by sha256 (optional)
-        ScriptArtifact existing = scriptArtifactRepository.findFirstBySha256(sha256);
+        ScriptArtifact existing = scriptArtifactService.findBySha256(sha256);
         if (existing != null) {
             // keep existing artifact, remove newly written file
             Files.deleteIfExists(target);
@@ -182,7 +183,7 @@ public class ScriptController {
         a.setCreatedAt(LocalDateTime.now());
         ScriptArtifact saved;
         try {
-            saved = scriptArtifactRepository.save(a);
+            saved = scriptArtifactService.save(a);
         } catch (Exception ex) {
             Files.deleteIfExists(target);
             throw ex;
@@ -238,7 +239,7 @@ public class ScriptController {
         }
         String sha256 = HexFormat.of().formatHex(md.digest());
 
-        ScriptArtifact existing = scriptArtifactRepository.findFirstBySha256(sha256);
+        ScriptArtifact existing = scriptArtifactService.findBySha256(sha256);
         if (existing != null) {
             Files.deleteIfExists(target);
             return ResponseEntity.ok(Map.of(
@@ -258,7 +259,7 @@ public class ScriptController {
         a.setCreatedAt(LocalDateTime.now());
         ScriptArtifact saved;
         try {
-            saved = scriptArtifactRepository.save(a);
+            saved = scriptArtifactService.save(a);
         } catch (Exception ex) {
             Files.deleteIfExists(target);
             throw ex;
@@ -472,7 +473,7 @@ public class ScriptController {
                 }
                 finalSha256 = HexFormat.of().formatHex(md.digest());
 
-                ScriptArtifact existing = scriptArtifactRepository.findFirstBySha256(finalSha256);
+                ScriptArtifact existing = scriptArtifactService.findBySha256(finalSha256);
                 if (existing != null) {
                     Files.deleteIfExists(assembledTemp);
                     writeManifest(uploadId, metadata, effectiveTotalChunks, finalSha256, assembledSizeBytes, existing.getId(), existing.getStoredFilename(), true);
@@ -505,7 +506,7 @@ public class ScriptController {
                 a.setCreatedAt(LocalDateTime.now());
                 ScriptArtifact saved;
                 try {
-                    saved = scriptArtifactRepository.save(a);
+                    saved = scriptArtifactService.save(a);
                 } catch (Exception ex) {
                     Files.deleteIfExists(target);
                     throw ex;
@@ -549,8 +550,9 @@ public class ScriptController {
     }
 
     @GetMapping("/scripts/{id}/download")
-    public ResponseEntity<?> download(@PathVariable Long id) {
-        Optional<ScriptArtifact> opt = scriptArtifactRepository.findById(id);
+    public ResponseEntity<?> download(@PathVariable Long id,
+                                      @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) {
+        Optional<ScriptArtifact> opt = scriptArtifactService.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
 
@@ -561,28 +563,7 @@ public class ScriptController {
         if (!Files.exists(file)) return ResponseEntity.notFound().build();
 
         String filename = a.getOriginalFilename() == null ? ("script-" + id + ".ps1") : a.getOriginalFilename();
-        String safeFilename = filename.replaceAll("[^\\w.\\-]", "_");
-        String sha256 = a.getSha256() != null ? a.getSha256() : "";
-
-        if (nginxAccelRedirectEnabled) {
-            // X-Accel-Redirect: Spring Boot는 헤더만 반환, Nginx가 직접 파일 서빙
-            // Nginx JVM 힙 완전 우회 → 850대 동시 다운로드에서 메모리 압박 없음
-            // 필수 Nginx 설정: location /internal-uploads/ { internal; alias /app/uploads/; }
-            return ResponseEntity.ok()
-                    .header("X-Accel-Redirect", nginxInternalLocation + a.getStoredFilename())
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
-                    .header("X-Script-SHA256", sha256)
-                    .build();
-        }
-
-        // 폴백: Spring Boot 직접 스트리밍 (Nginx internal location 미설정 시)
-        Resource res = new FileSystemResource(file);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
-                .header("X-Script-SHA256", sha256)
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(res);
+        return buildDownloadResponse(file, filename, a.getStoredFilename(), a.getSha256(), rangeHeader);
     }
 
     /**
@@ -592,8 +573,9 @@ public class ScriptController {
     @GetMapping("/agent/uploads/{id}/download")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "수집 파일 다운로드", description = "에이전트가 업로드한 수집 파일을 관리자가 다운로드합니다.")
-    public ResponseEntity<?> downloadCollected(@PathVariable Long id) {
-        Optional<ScriptArtifact> opt = scriptArtifactRepository.findById(id);
+    public ResponseEntity<?> downloadCollected(@PathVariable Long id,
+                                               @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) {
+        Optional<ScriptArtifact> opt = scriptArtifactService.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
 
@@ -603,28 +585,174 @@ public class ScriptController {
         if (!Files.exists(file)) return ResponseEntity.notFound().build();
 
         String filename = a.getOriginalFilename() == null ? ("collected-" + id + ".zip") : a.getOriginalFilename();
+        return buildDownloadResponse(file, filename, a.getStoredFilename(), a.getSha256(), rangeHeader);
+    }
+
+    private ResponseEntity<?> buildDownloadResponse(Path file,
+                                                    String filename,
+                                                    String storedFilename,
+                                                    String sha256Value,
+                                                    String rangeHeader) {
         String safeFilename = filename.replaceAll("[^\\w.\\-]", "_");
-        String sha256 = a.getSha256() != null ? a.getSha256() : "";
+        String sha256 = sha256Value != null ? sha256Value : "";
 
         if (nginxAccelRedirectEnabled) {
             return ResponseEntity.ok()
-                    .header("X-Accel-Redirect", nginxInternalLocation + a.getStoredFilename())
+                    .header("X-Accel-Redirect", nginxInternalLocation + storedFilename)
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_OCTET_STREAM_VALUE)
+                    .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                     .header("X-Script-SHA256", sha256)
                     .build();
         }
 
-        Resource res = new FileSystemResource(file);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
-                .header("X-Script-SHA256", sha256)
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(res);
+        try {
+            long fileSize = Files.size(file);
+            RangeSpec range = parseRangeHeader(rangeHeader, fileSize);
+            if (range != null) {
+                InputStream in = Files.newInputStream(file);
+                in.skipNBytes(range.start);
+                Resource rangeResource = new InputStreamResource(new BoundedInputStream(in, range.length())) {
+                    @Override
+                    public long contentLength() {
+                        return range.length();
+                    }
+                };
+                return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
+                        .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                        .header(HttpHeaders.CONTENT_RANGE,
+                                "bytes " + range.start + "-" + range.end + "/" + fileSize)
+                        .header("X-Script-SHA256", sha256)
+                        .contentLength(range.length())
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .body(rangeResource);
+            }
+
+            Resource res = new FileSystemResource(file);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
+                    .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                    .header("X-Script-SHA256", sha256)
+                    .contentLength(fileSize)
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(res);
+        } catch (InvalidRangeException ex) {
+            long size = ex.fileSize;
+            return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    .header(HttpHeaders.CONTENT_RANGE, "bytes */" + Math.max(0L, size))
+                    .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                    .build();
+        } catch (IOException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     private boolean isValidUploadId(String uploadId) {
         return uploadId != null && SAFE_UPLOAD_ID.matcher(uploadId).matches();
+    }
+
+    private RangeSpec parseRangeHeader(String rangeHeader, long fileSize) {
+        if (!StringUtils.hasText(rangeHeader)) {
+            return null;
+        }
+        if (fileSize <= 0) {
+            throw new InvalidRangeException(fileSize);
+        }
+        String value = rangeHeader.trim();
+        if (!value.startsWith("bytes=") || value.contains(",")) {
+            throw new InvalidRangeException(fileSize);
+        }
+        String spec = value.substring("bytes=".length()).trim();
+        int dash = spec.indexOf('-');
+        if (dash < 0) {
+            throw new InvalidRangeException(fileSize);
+        }
+
+        try {
+            long start;
+            long end;
+            String startText = spec.substring(0, dash).trim();
+            String endText = spec.substring(dash + 1).trim();
+            if (startText.isEmpty()) {
+                long suffixLength = Long.parseLong(endText);
+                if (suffixLength <= 0) {
+                    throw new InvalidRangeException(fileSize);
+                }
+                start = Math.max(0L, fileSize - suffixLength);
+                end = fileSize - 1;
+            } else {
+                start = Long.parseLong(startText);
+                end = endText.isEmpty() ? fileSize - 1 : Long.parseLong(endText);
+            }
+            if (start < 0 || start >= fileSize || end < start) {
+                throw new InvalidRangeException(fileSize);
+            }
+            return new RangeSpec(start, Math.min(end, fileSize - 1));
+        } catch (NumberFormatException ex) {
+            throw new InvalidRangeException(fileSize);
+        }
+    }
+
+    private static final class RangeSpec {
+        private final long start;
+        private final long end;
+
+        private RangeSpec(long start, long end) {
+            this.start = start;
+            this.end = end;
+        }
+
+        private long length() {
+            return end - start + 1;
+        }
+    }
+
+    private static final class InvalidRangeException extends RuntimeException {
+        private final long fileSize;
+
+        private InvalidRangeException(long fileSize) {
+            this.fileSize = fileSize;
+        }
+    }
+
+    private static final class BoundedInputStream extends InputStream {
+        private final InputStream delegate;
+        private long remaining;
+
+        private BoundedInputStream(InputStream delegate, long limit) {
+            this.delegate = delegate;
+            this.remaining = Math.max(0L, limit);
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (remaining <= 0) {
+                return -1;
+            }
+            int value = delegate.read();
+            if (value >= 0) {
+                remaining--;
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (remaining <= 0) {
+                return -1;
+            }
+            int read = delegate.read(b, off, (int) Math.min(len, remaining));
+            if (read > 0) {
+                remaining -= read;
+            }
+            return read;
+        }
+
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
     }
 
     private String normalizeChunkHash(String chunkHash) {
@@ -862,7 +990,7 @@ public class ScriptController {
      * 에이전트 수집 파일 총량이 한도를 초과하면 507 응답, 아니면 null 반환.
      */
     private ResponseEntity<?> checkCollectCapacity(long additionalBytes) {
-        long used = scriptArtifactRepository.sumTotalSizeBytes();
+        long used = scriptArtifactService.getTotalSizeBytes();
         if (used + additionalBytes > collectMaxTotalBytes) {
             long usedMb = used / (1024 * 1024);
             long maxMb = collectMaxTotalBytes / (1024 * 1024);
@@ -903,4 +1031,3 @@ public class ScriptController {
         public Map<Integer, Long> chunkSizes = new HashMap<>();
     }
 }
-

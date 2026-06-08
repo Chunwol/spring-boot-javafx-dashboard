@@ -3,24 +3,28 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.VBox?>
 
-<VBox spacing="10.0" styleClass="pcmgmt-command-divider"
+<VBox spacing="8.0" styleClass="pcmgmt-command-divider"
       xmlns:fx="http://javafx.com/fxml">
     <children>
-        <Label text="명령 전송" styleClass="pcmgmt-command-title" />
-        <FlowPane fx:id="commandControlsFlow" hgap="10.0" vgap="8.0" prefWrapLength="760.0" alignment="CENTER_LEFT">
+        <FlowPane fx:id="commandControlsFlow" hgap="10.0" vgap="8.0" prefWrapLength="780.0" alignment="CENTER_LEFT">
             <children>
-                <Label text="대상:" styleClass="pcmgmt-command-label" />
-                <ComboBox fx:id="targetCombo" prefWidth="150.0" promptText="대상 선택" />
-                <ComboBox fx:id="targetClassroomCombo" prefWidth="150.0" visible="false" managed="false" promptText="강의실 선택" />
+                <!-- 대상 콤보 제거 — 체크박스로 PC 직접 선택, 없으면 전체 -->
+                <Label fx:id="selectionHintLabel" styleClass="pcmgmt-selection-hint" />
                 <Label text="명령:" styleClass="pcmgmt-command-label" />
-                <ComboBox fx:id="commandCombo" prefWidth="170.0" promptText="명령 선택" />
-                <Button fx:id="sendBtn" text="▶ 전송" styleClass="pcmgmt-send-btn" />
-                <Button fx:id="rolloutBtn" text="에이전트 업데이트" styleClass="pcmgmt-refresh-btn" />
+                <ComboBox fx:id="commandCombo" prefWidth="180.0" promptText="명령 선택" />
+                <Button fx:id="sendBtn" text="▶ 전송" styleClass="btn-primary">
+                    <tooltip><Tooltip text="체크된 PC에 명령 전송 (없으면 전체)" /></tooltip>
+                </Button>
+                <Separator orientation="VERTICAL" prefHeight="26.0" />
+                <Button fx:id="rolloutBtn" text="⬆ 에이전트 업데이트" styleClass="btn-warning">
+                    <tooltip><Tooltip text="MSI 업로드 후 체크된 PC(없으면 전체)에 배포" /></tooltip>
+                </Button>
             </children>
         </FlowPane>
-        <Label fx:id="selectionHintLabel" styleClass="pcmgmt-selection-hint" />
     </children>
 </VBox>

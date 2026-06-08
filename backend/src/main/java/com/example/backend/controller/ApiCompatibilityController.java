@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,14 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1")
+@RequiredArgsConstructor
 @Tag(name = "Compatibility", description = "레거시 URL 호환 API (신규 개발에는 /api/v1/dashboard 사용 권장)")
 public class ApiCompatibilityController {
 
     private final ClassroomService classroomService;
-
-    public ApiCompatibilityController(ClassroomService classroomService) {
-        this.classroomService = classroomService;
-    }
 
     /**
      * 구버전 프론트엔드 호환용 강의실 목록 조회.

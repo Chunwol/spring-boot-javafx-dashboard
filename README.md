@@ -308,7 +308,7 @@ Windows PowerShell:
 |------|----------|------|
 | **Backend** | `backend.jar` | `dist/backend/` |
 | **Agent** | `agent.jar` | `dist/agent/` |
-| **Frontend** | `frontend-all.jar`, `ClassroomDashboard.exe` | `dist/frontend/` |
+| **Frontend** | `frontend-win.jar`, `frontend-mac.jar`, `frontend-mac-aarch64.jar`, `frontend-linux.jar`, `ClassroomDashboard.exe` | `dist/frontend/` |
 
 ### 빠른 배포 (Windows)
 
@@ -448,9 +448,11 @@ docker compose ps
 curl https://pelmon.kro.kr/health
 
 # Frontend 실행 (GUI)
-java -jar dist/frontend/frontend-all.jar
+java -jar dist/frontend/frontend-win.jar
+java -jar dist/frontend/frontend-mac.jar
+java -jar dist/frontend/frontend-mac-aarch64.jar
+java -jar dist/frontend/frontend-linux.jar
 
 # Agent 실행 (모니터링)
 java -jar dist/agent/agent.jar
 ```
-

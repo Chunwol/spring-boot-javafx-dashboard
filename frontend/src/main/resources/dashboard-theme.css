@@ -52,7 +52,7 @@
     -fx-status-failed: #dc2626;
 
     /* — Base — */
-    -fx-font-family: "Segoe UI", "Malgun Gothic";
+    -fx-font-family: "Pretendard", "Malgun Gothic", "Segoe UI";
     -fx-background-color: linear-gradient(to bottom, #f0f4ff, #ffffff 40%);
     -fx-font-size: 15px;
     -fx-text-fill: -fx-text-body;
@@ -104,6 +104,19 @@
     -fx-border-color: -fx-primary;
     -fx-border-width: 2;
 }
+/* 읽기 전용 TextArea: 편집 불가임을 배경/테두리로 시각화 */
+.textarea-readonly {
+    -fx-control-inner-background: -fx-bg-subtle;
+    -fx-border-color: -fx-border-light;
+    -fx-text-fill: -fx-text-body;
+}
+.textarea-readonly .content {
+    -fx-background-color: -fx-bg-subtle;
+}
+.textarea-readonly:focused {
+    -fx-border-color: -fx-border-default;
+    -fx-border-width: 1;
+}
 .combo-box:focused {
     -fx-border-color: -fx-primary;
     -fx-border-width: 2;
@@ -152,89 +165,39 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   Buttons — Semantic (btn-primary / success / danger / warning / neutral / secondary)
+   Buttons — Unified Outlined Style (모든 버튼 동일 스타일)
    ═══════════════════════════════════════════════════════════════════ */
 
-.btn-primary {
-    -fx-background-color: -fx-primary;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
+.btn-primary, .btn-success, .btn-danger, .btn-warning, .btn-neutral, .btn-secondary {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d1d5db;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
     -fx-background-radius: 8;
+    -fx-text-fill: #374151;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
     -fx-padding: 6 14 6 14;
     -fx-cursor: hand;
 }
-.btn-primary:hover { -fx-background-color: -fx-primary-hover; }
-.btn-primary:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-primary:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
-
-.btn-success {
-    -fx-background-color: -fx-success;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 6 14 6 14;
-    -fx-cursor: hand;
+.btn-primary:hover, .btn-success:hover, .btn-danger:hover, .btn-warning:hover,
+.btn-neutral:hover, .btn-secondary:hover {
+    -fx-background-color: #f9fafb;
+    -fx-border-color: #9ca3af;
 }
-.btn-success:hover { -fx-background-color: -fx-success-hover; }
-.btn-success:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-success:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
-
-.btn-danger {
-    -fx-background-color: -fx-danger;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 6 14 6 14;
-    -fx-cursor: hand;
+.btn-primary:focused, .btn-success:focused, .btn-danger:focused, .btn-warning:focused,
+.btn-neutral:focused, .btn-secondary:focused {
+    -fx-border-color: #6b7280;
+    -fx-border-width: 2;
 }
-.btn-danger:hover { -fx-background-color: -fx-danger-hover; }
-.btn-danger:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-danger:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
-
-.btn-warning {
-    -fx-background-color: -fx-warning;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 6 14 6 14;
-    -fx-cursor: hand;
+.btn-primary:disabled, .btn-success:disabled, .btn-danger:disabled, .btn-warning:disabled,
+.btn-neutral:disabled, .btn-secondary:disabled {
+    -fx-opacity: 0.5;
+    -fx-cursor: default;
 }
-.btn-warning:hover { -fx-background-color: -fx-warning-hover; }
-.btn-warning:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-warning:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
-
-.btn-neutral {
-    -fx-background-color: -fx-neutral;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 6 14 6 14;
-    -fx-cursor: hand;
-}
-.btn-neutral:hover { -fx-background-color: -fx-neutral-hover; }
-.btn-neutral:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-neutral:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
-
-.btn-secondary {
-    -fx-background-color: -fx-text-body;
-    -fx-text-fill: white;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 6 14 6 14;
-    -fx-cursor: hand;
-}
-.btn-secondary:hover { -fx-background-color: -fx-text-heading; }
-.btn-secondary:focused { -fx-border-color: -fx-primary-dark; -fx-border-width: 2; -fx-border-radius: 8; }
-.btn-secondary:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
 
 .btn-sm {
-    -fx-font-size: 12px;
+    -fx-font-size: 11px;
     -fx-padding: 4 10 4 10;
 }
 
@@ -298,18 +261,22 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 .btn-tiny-delete {
-    -fx-background-color: #c81d25;
-    -fx-text-fill: #fff;
-    -fx-font-size: 12px;
+    -fx-background-color: transparent;
+    -fx-text-fill: #c81d25;
+    -fx-font-size: 11px;
     -fx-font-weight: 700;
-    -fx-background-radius: 8;
-    -fx-padding: 5 12 5 12;
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.13), 4, 0, 0, 1);
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-border-color: #fca5a5;
+    -fx-border-width: 1;
+    -fx-padding: 3 7 3 7;
+    -fx-effect: null;
     -fx-cursor: hand;
+    -fx-min-width: 28;
 }
 .btn-tiny-delete:hover {
-    -fx-background-color: #a61b1b;
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 6, 0, 0, 2);
+    -fx-background-color: #fee2e2;
+    -fx-border-color: #c81d25;
 }
 .btn-tiny-delete:focused {
     -fx-border-color: -fx-primary-hover;
@@ -372,16 +339,15 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 .login-bg-pane {
-    -fx-background-color: linear-gradient(to bottom right, #dde8fb, #e8f4ff 50%, #f8fbff);
+    -fx-background-color: #ffffff;
 }
 
 .login-card {
-    -fx-background-color: white;
-    -fx-background-radius: 16;
-    -fx-border-color: #dbe5f1;
-    -fx-border-radius: 16;
-    -fx-border-width: 1;
-    -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.14), 28, 0, 0, 6);
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-effect: null;
 }
 
 /* keep .login-container as fallback so old usage doesn't break */
@@ -401,7 +367,10 @@
 }
 
 .login-divider {
-    -fx-border-color: -fx-border-light;
+    -fx-background-color: #e2e8f0;
+    -fx-min-height: 1;
+    -fx-max-height: 1;
+    -fx-pref-height: 1;
 }
 
 .login-field-label {
@@ -416,7 +385,8 @@
     -fx-font-size: 12px;
     -fx-background-color: #fff0f0;
     -fx-background-radius: 6;
-    -fx-padding: 6 10;
+    -fx-padding: 8 12;
+    -fx-text-overrun: clip;
 }
 
 .login-btn {
@@ -581,7 +551,7 @@
 
 .dashboard-menu-button {
     -fx-font-size: 13px;
-    -fx-font-family: "Malgun Gothic", "Segoe UI";
+    -fx-font-family: "Pretendard", "Malgun Gothic", "Segoe UI";
     -fx-padding: 8 16 8 16;
     -fx-min-width: 118px;
     -fx-pref-width: 118px;
@@ -670,9 +640,459 @@
     -fx-border-color: -fx-primary;
     -fx-border-style: dashed;
 }
+.panel-selected {
+    -fx-border-color: #3182ce;
+    -fx-border-width: 2;
+    -fx-border-radius: 4;
+    -fx-effect: dropshadow(gaussian, rgba(49,130,206,0.35), 8, 0, 0, 0);
+}
+/* Figma 스타일 8방향 리사이즈 핸들 (오버레이) */
+.selection-handle {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 2;
+    -fx-border-color: #3182ce;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.18), 3, 0, 0, 1);
+}
+.selection-handle:hover {
+    -fx-background-color: #3182ce;
+    -fx-border-color: #ffffff;
+}
+/* 우측 패널 - 위치/크기 직접 입력 필드 */
+.edit-panel-input {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #cbd5e1;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 4 8;
+    -fx-font-size: 12px;
+}
+.edit-panel-input:focused {
+    -fx-border-color: #3182ce;
+    -fx-background-color: #ffffff;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   신규 메인 레이아웃 (2026-06 리디자인)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.main-root { -fx-background-color: #ffffff; }
+
+/* ── Top Header ── */
+.main-header {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent transparent #f1f5f9 transparent;
+    -fx-border-width: 0 0 1 0;
+}
+.app-title { -fx-font-size: 18px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.status-legend { -fx-padding: 4 12; }
+.legend-label { -fx-font-size: 12px; -fx-text-fill: #475569; }
+.legend-dot-online  { -fx-fill: #22c55e; }
+.legend-dot-running { -fx-fill: #facc15; }
+.legend-dot-offline { -fx-fill: #ef4444; }
+
+.header-icon-btn {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+    -fx-cursor: hand;
+    -fx-text-fill: #475569;
+}
+.header-icon-btn:hover { -fx-background-color: #f1f5f9; -fx-background-radius: 6; }
+.header-badge {
+    -fx-background-color: #ef4444;
+    -fx-text-fill: white;
+    -fx-font-size: 9px;
+    -fx-padding: 1 5;
+    -fx-background-radius: 8;
+    -fx-translate-x: -2;
+    -fx-translate-y: 2;
+}
+.header-search-box {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 18;
+    -fx-background-radius: 18;
+    -fx-min-width: 200;
+}
+.header-search-icon { -fx-icon-color: #94a3b8; }
+.header-search-field { -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0; -fx-font-size: 12px; }
+.header-avatar-btn { -fx-background-color: transparent; -fx-padding: 4; -fx-cursor: hand; }
+
+/* ── Sidebar ── */
+.main-sidebar {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent #f1f5f9 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+    -fx-min-width: 200;
+    -fx-pref-width: 220;
+}
+.sidebar-user-card {
+    -fx-background-color: #f8fafc;
+    -fx-background-radius: 10;
+}
+.sidebar-user-icon { -fx-icon-color: #cbd5e1; }
+.sidebar-user-name { -fx-font-size: 13px; -fx-font-weight: 600; -fx-text-fill: #0f172a; }
+.sidebar-search-box {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+.sidebar-search-field { -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0; -fx-font-size: 12px; }
+.sidebar-section-header { -fx-font-size: 11px; -fx-text-fill: #94a3b8; -fx-font-weight: 600; }
+.sidebar-menu-row {
+    -fx-cursor: hand;
+    -fx-background-radius: 8;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+    -fx-border-color: transparent;
+}
+.sidebar-menu-caret { -fx-icon-color: #94a3b8; }
+.sidebar-submenu-row {
+    -fx-cursor: hand;
+    -fx-background-radius: 6;
+}
+.sidebar-submenu-row:hover { -fx-background-color: #f1f5f9; }
+.sidebar-submenu-row-active .sidebar-submenu-label {
+    -fx-text-fill: #0f172a;
+    -fx-font-weight: 700;
+}
+.sidebar-submenu-label { -fx-font-size: 12px; -fx-text-fill: #64748b; }
+.sidebar-menu-row:hover { -fx-background-color: #f1f5f9; }
+.sidebar-menu-row:pressed { -fx-background-color: #e2e8f0; }
+.sidebar-menu-row:focused { -fx-border-color: transparent; -fx-background-insets: 0; }
+/* 활성 탭: 배경 없이 볼드만 */
+.sidebar-menu-row-active { -fx-background-color: transparent; }
+.sidebar-menu-row-active .sidebar-menu-label { -fx-text-fill: #0f172a; -fx-font-weight: 700; }
+.sidebar-menu-row-active .sidebar-menu-icon { -fx-icon-color: #0f172a; }
+.sidebar-menu-label { -fx-font-size: 13px; -fx-text-fill: #334155; }
+.sidebar-menu-icon { -fx-icon-color: #64748b; }
+
+/* ── Tab bar ── */
+.main-content { -fx-background-color: #f8fafc; }
+.main-tabbar { -fx-background-color: #ffffff; }
+.main-tabpane .tab-header-background { -fx-background-color: #ffffff; }
+.main-tabpane .tab {
+    -fx-background-color: #ffffff;
+    -fx-padding: 4 12;
+}
+.main-tabpane .tab:selected {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 6 6 0 0;
+}
+.main-tabpane .tab-label { -fx-text-fill: #475569; -fx-font-size: 12px; }
+.main-tabpane .tab:selected .tab-label { -fx-text-fill: #0f172a; -fx-font-weight: 700; }
+.tabbar-nav-btn {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+    -fx-cursor: hand;
+}
+.tabbar-nav-btn:hover { -fx-background-color: #f1f5f9; -fx-background-radius: 6; }
+
+/* ── Footer ── */
+.main-footer { -fx-background-color: transparent; }
+.footer-text { -fx-font-size: 11px; -fx-text-fill: #94a3b8; }
+
+/* ── Classroom Status Tab ── */
+.tab-content { -fx-background-color: #f8fafc; -fx-padding: 16; -fx-spacing: 16; }
+.tab-main {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 12;
+    -fx-border-color: #eef2f6;
+    -fx-border-radius: 12;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.04), 10, 0, 0, 2);
+}
+.tab-title { -fx-font-size: 18px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.tab-favorite-btn { -fx-background-color: transparent; -fx-padding: 4; -fx-cursor: hand; }
+.tab-search-box {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 18;
+    -fx-background-radius: 18;
+    -fx-min-width: 220;
+}
+.tab-search-field { -fx-background-color: transparent; -fx-border-color: transparent; -fx-font-size: 12px; }
+.tab-icon-btn {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+    -fx-cursor: hand;
+}
+.tab-icon-btn:hover { -fx-background-color: #f1f5f9; -fx-background-radius: 6; }
+
+.filter-label { -fx-font-size: 12px; -fx-text-fill: #64748b; -fx-font-weight: 600; }
+/* 필터 콤보 — 흰 배경 + 회색 테두리 outline (헤더 버튼과 형식 통일) */
+.filter-combo {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-font-size: 13px;
+    -fx-cursor: hand;
+}
+.filter-combo:hover { -fx-border-color: #cbd5e1; }
+.filter-combo .arrow, .filter-combo .arrow-button .arrow { -fx-background-color: #64748b; }
+.filter-combo .list-cell { -fx-text-fill: #334155; -fx-padding: 3 8; }
+
+.btn-primary-outline, .btn-danger-outline {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d1d5db;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: #374151;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-padding: 6 14;
+    -fx-cursor: hand;
+}
+.btn-primary-outline:hover, .btn-danger-outline:hover { -fx-background-color: #f9fafb; -fx-border-color: #9ca3af; }
+.btn-primary-outline:disabled, .btn-danger-outline:disabled { -fx-opacity: 0.5; -fx-cursor: default; }
+
+/* ── Classroom table ── */
+.classroom-table {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+.classroom-table .column-header {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: transparent transparent #e2e8f0 transparent;
+    -fx-padding: 8;
+}
+.classroom-table .column-header .label {
+    -fx-text-fill: #64748b;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+}
+.classroom-table .table-row-cell {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent transparent #f1f5f9 transparent;
+    -fx-padding: 6 0;
+}
+.classroom-table .table-row-cell:hover { -fx-background-color: #f8fafc; }
+.classroom-table .table-row-cell:selected { -fx-background-color: #f1f5f9; }
+.classroom-table .table-cell { -fx-text-fill: #334155; -fx-font-size: 13px; -fx-alignment: CENTER; }
+
+/* ── 컬럼 메뉴 버튼(…) ── */
+.table-view .show-hide-columns-button {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-width: 0 0 1 1;
+    -fx-padding: 6 10 6 10;
+    -fx-cursor: hand;
+    -fx-min-width: 28;
+    -fx-pref-width: 28;
+}
+.table-view .show-hide-columns-button:hover {
+    -fx-background-color: #f1f5f9;
+}
+.table-view .show-hide-columns-button > .label {
+    -fx-text-fill: #64748b;
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+}
+/* 헤더 배경에 오른쪽 공간 확보 — 버튼이 내용 위에 겹치지 않게 */
+.table-view .column-header-background {
+    -fx-padding: 0 28 0 0;
+}
+
+/* ── 전체 표 공통 스타일 (classroom-table 기준) ──────────────────────────────
+   .network-table, .detail-pc-table, pcmgmt pcTable, command commandTable,
+   mgmt agentTable 등 모든 TableView에 이 공통 클래스를 적용한다. */
+.app-table {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+.app-table .column-header {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: transparent transparent #e2e8f0 transparent;
+    -fx-padding: 8;
+}
+.app-table .column-header .label {
+    -fx-text-fill: #64748b;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-alignment: CENTER;
+}
+.app-table .table-row-cell {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent transparent #f1f5f9 transparent;
+    -fx-padding: 4 0;
+}
+.app-table .table-row-cell:hover   { -fx-background-color: #f8fafc; }
+.app-table .table-row-cell:selected { -fx-background-color: #f1f5f9; }
+.app-table .table-cell { -fx-text-fill: #334155; -fx-font-size: 13px; -fx-alignment: CENTER; }
+
+/* PC 상태 막대 (목업: 가는 막대) */
+.pc-bar-track {
+    -fx-background-color: #eef2f6;
+    -fx-background-radius: 3;
+}
+.pc-bar-fill {
+    -fx-background-radius: 3;
+}
+.pc-bar-fill-online  { -fx-background-color: #22c55e; }
+.pc-bar-fill-offline { -fx-background-color: #e2e8f0; }
+
+/* 상태 배지 */
+.status-badge {
+    -fx-padding: 3 12;
+    -fx-background-radius: 12;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+}
+.status-badge-ok      { -fx-background-color: #dcfce7; -fx-text-fill: #15803d; }
+.status-badge-warn    { -fx-background-color: #fef9c3; -fx-text-fill: #a16207; }
+.status-badge-offline { -fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; }
+
+/* ── Classroom detail panel (목업: 메인과 분리된 둥근 흰 카드) ── */
+.classroom-detail-panel {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 12;
+    -fx-border-color: #eef2f6;
+    -fx-border-radius: 12;
+    -fx-max-width: 380;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.04), 10, 0, 0, 2);
+}
+.detail-title { -fx-font-size: 16px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.detail-close-btn {
+    -fx-background-color: transparent;
+    -fx-padding: 4;
+    -fx-cursor: hand;
+}
+.detail-close-btn:hover { -fx-background-color: #f1f5f9; -fx-background-radius: 6; }
+/* 카운터: 옅은 회색 박스 안에 세로 구분선으로 3등분 */
+.detail-counter-row {
+    -fx-background-color: #f8fafc;
+    -fx-background-radius: 10;
+    -fx-border-color: #eef2f6;
+    -fx-border-radius: 10;
+}
+.detail-counter-card { -fx-min-width: 80; }
+.detail-counter-divider {
+    -fx-background-color: #e2e8f0;
+    -fx-pref-width: 1;
+    -fx-min-width: 1;
+    -fx-max-width: 1;
+}
+.counter-label { -fx-font-size: 11px; -fx-text-fill: #94a3b8; -fx-font-weight: 600; }
+.counter-value-online  { -fx-font-size: 22px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.counter-value-warn    { -fx-font-size: 22px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.counter-value-offline { -fx-font-size: 22px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+
+.detail-section-title { -fx-font-size: 12px; -fx-font-weight: 600; -fx-text-fill: #475569; }
+.detail-view-toggle {
+    -fx-background-color: transparent;
+    -fx-padding: 4;
+    -fx-cursor: hand;
+    -fx-background-radius: 4;
+}
+.detail-view-toggle:hover { -fx-background-color: #f1f5f9; }
+.detail-view-toggle-active { -fx-background-color: #e0e7ff; }
+.detail-view-toggle-active .ikonli-font-icon { -fx-icon-color: #2563eb; }
+
+/* PC 카드 그리드 (상세 패널 + 메인 그리드 보기 공용) */
+.pc-grid-scroll { -fx-background-color: #ffffff; -fx-background: #ffffff; }
+.pc-grid-scroll > .viewport { -fx-background-color: #ffffff; }
+
+/* 강의실 카드 (그리드 모드 메인 뷰) */
+.classroom-card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 10;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 10;
+    -fx-padding: 12;
+    -fx-cursor: hand;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.06), 4, 0, 0, 2);
+}
+.classroom-card:hover { -fx-border-color: #2563eb; }
+.ccard-role-label {
+    -fx-font-size: 10px;
+    -fx-font-weight: 600;
+    -fx-text-fill: #94a3b8;
+    -fx-padding: 2 0 0 0;
+}
+.ccard-counter-online { -fx-font-size: 12px; -fx-font-weight: 700; -fx-text-fill: #16a34a; }
+.ccard-counter-warn   { -fx-font-size: 12px; -fx-font-weight: 700; -fx-text-fill: #d97706; }
+.ccard-counter-zero   { -fx-font-size: 12px; -fx-font-weight: 700; -fx-text-fill: #94a3b8; }
+.ccard-counter-total  { -fx-font-size: 12px; -fx-text-fill: #64748b; }
+
+/* 메인 그리드 스크롤/컨테이너 배경 흰색 */
+.main-grid-scroll { -fx-background-color: #ffffff; -fx-background: #ffffff; }
+.main-grid-scroll > .viewport { -fx-background-color: #ffffff; }
+.main-grid-content { -fx-background-color: #ffffff; }
+.pc-grid-section-label {
+    -fx-background-color: transparent;
+    -fx-text-fill: #64748b;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-padding: 2 0 2 2;
+    -fx-alignment: CENTER_LEFT;
+}
+.pc-card {
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-cursor: hand;
+}
+.pc-card-teacher {
+    -fx-border-color: #2563eb;
+    -fx-border-width: 2;
+}
+.pc-card-number { -fx-font-size: 16px; -fx-font-weight: 600; }
+.pc-card-online { -fx-background-color: #22c55e; }
+.pc-card-online .pc-card-number { -fx-text-fill: #ffffff; }
+.pc-card-warn { -fx-background-color: #ef4444; }
+.pc-card-warn .pc-card-number { -fx-text-fill: #ffffff; }
+.pc-card-offline { -fx-background-color: #f1f5f9; }
+.pc-card-offline .pc-card-number { -fx-text-fill: #94a3b8; }
+
+/* 메인 그리드 보기 — 강의실 섹션 */
+.classroom-section {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 10;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 10;
+    -fx-padding: 16;
+    -fx-cursor: hand;
+}
+.classroom-section:hover { -fx-border-color: #94a3b8; }
+.classroom-section-header { -fx-alignment: CENTER_LEFT; }
+.classroom-section-title { -fx-font-size: 14px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.classroom-section-summary { -fx-font-size: 12px; -fx-text-fill: #64748b; }
+.main-view-toggle-group {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+/* detail-pc-table은 app-table 스타일 상속 + 작은 글씨 */
+.detail-pc-table { -fx-background-color: transparent; -fx-border-color: transparent; }
+.detail-pc-table .column-header { -fx-background-color: #f8fafc; -fx-border-color: transparent transparent #e2e8f0 transparent; -fx-padding: 6; }
+.detail-pc-table .column-header .label { -fx-text-fill: #64748b; -fx-font-size: 11px; -fx-font-weight: 600; }
+.detail-pc-table .table-row-cell { -fx-background-color: transparent; -fx-border-color: transparent transparent #f1f5f9 transparent; }
+.detail-pc-table .table-row-cell:hover { -fx-background-color: #f8fafc; }
+.detail-pc-table .table-row-cell:selected { -fx-background-color: #f1f5f9; }
+.detail-pc-table .table-cell { -fx-font-size: 12px; -fx-text-fill: #334155; }
+
+.detail-updated-label { -fx-font-size: 11px; -fx-text-fill: #94a3b8; }
+
+/* ── Placeholder tab ── */
+.placeholder-tab { -fx-background-color: #f8fafc; }
+.placeholder-title { -fx-font-size: 18px; -fx-font-weight: 700; -fx-text-fill: #475569; }
+.placeholder-text  { -fx-font-size: 13px; -fx-text-fill: #94a3b8; }
+
+/* ── Toast (floating bottom-right) ── */
+.toast-container { -fx-pickOnBounds: false; }
+.toast-message {
+    -fx-padding: 10 16;
+    -fx-background-radius: 8;
+    -fx-font-size: 13px;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.15), 12, 0, 0, 4);
+}
+.toast-info  { -fx-background-color: #0f172a; -fx-text-fill: #ffffff; }
+.toast-error { -fx-background-color: #dc2626; -fx-text-fill: #ffffff; }
 .dashboard-canvas-scroll {
     -fx-background: #f8fbff;
-    -fx-background-color: #f8fbff;
+    -fx-background-color: #ffffff;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -680,36 +1100,49 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 .resource-left-pane {
-    -fx-background-color: -fx-bg-light;
-    -fx-border-color: -fx-border-light;
+    -fx-background-color: #f0f4ff;
+    -fx-border-color: #dbe5f1;
     -fx-border-width: 0 1 0 0;
 }
 .resource-title-label {
-    -fx-font-size: 18px;
+    -fx-font-size: 15px;
     -fx-font-weight: 800;
     -fx-text-fill: -fx-text-heading;
 }
 .resource-sub-label {
     -fx-text-fill: -fx-text-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 11px;
 }
 .resource-list-view {
+    -fx-background-color: #ffffff;
     -fx-background-radius: 8;
     -fx-border-color: #dbe5f1;
     -fx-border-radius: 8;
 }
+.resource-list-view .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 4 6 4 6;
+}
+.resource-list-view .list-cell:selected {
+    -fx-background-color: #f1f5f9;
+}
 .resource-item-name {
     -fx-font-size: 12px;
     -fx-font-weight: bold;
+    -fx-text-fill: -fx-text-heading;
 }
 .resource-item-sub {
     -fx-text-fill: -fx-text-muted;
-    -fx-font-size: 12px;
+    -fx-font-size: 11px;
 }
-.resource-item-drag-hint {
-    -fx-text-fill: -fx-primary-hover;
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
+/* 추가됨 상태 표시 점 */
+.resource-item-status-dot-added {
+    -fx-text-fill: #16a34a;
+    -fx-font-size: 10px;
+}
+.resource-item-status-dot-pending {
+    -fx-text-fill: #94a3b8;
+    -fx-font-size: 10px;
 }
 .resource-add-btn {
     -fx-background-color: -fx-primary;
@@ -883,7 +1316,7 @@
 
 .pcmgmt-selection-hint {
     -fx-font-size: 12px;
-    -fx-text-fill: #6366f1;
+    -fx-text-fill: #64748b;
     -fx-font-style: italic;
 }
 
@@ -1131,15 +1564,83 @@
     -fx-alignment: CENTER;
 }
 .network-progress-normal {
-    -fx-accent: #0f766e;
+    -fx-accent: #2563eb;
 }
 .network-progress-warning {
-    -fx-accent: -fx-status-failed;
+    -fx-accent: #dc2626;
 }
+
+/* ── PC 제어 탭 — 좌측 sub-내비 ───────────────────────────────────── */
+.pc-control-subnav {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: transparent #e2e8f0 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+.pc-control-subnav-title {
+    -fx-font-size: 11px;
+    -fx-text-fill: #94a3b8;
+    -fx-font-weight: 700;
+    -fx-padding: 0 0 6 4;
+}
+.pc-control-nav-row {
+    -fx-cursor: hand;
+    -fx-background-radius: 8;
+    -fx-text-fill: #334155;
+}
+.pc-control-nav-row .ikonli-font-icon { -fx-icon-color: #64748b; }
+.pc-control-nav-row:hover { -fx-background-color: #f1f5f9; }
+.pc-control-nav-row-active { -fx-background-color: #ffffff; }
+.pc-control-nav-row-active .label { -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.pc-control-nav-row-active .ikonli-font-icon { -fx-icon-color: #2563eb; }
+.pc-control-content { -fx-background-color: transparent; }
+
+/* ── 네트워크 탭 — 차트 카드 + 섹션 ─────────────────────────────────── */
+.network-chart-card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 10;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 10;
+}
+.net-chart-title  { -fx-font-size: 14px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
+.net-section-title { -fx-font-size: 14px; -fx-font-weight: 700; -fx-text-fill: #0f172a; -fx-padding: 4 0 0 0; }
+.net-legend-in    { -fx-font-size: 12px; -fx-text-fill: #2563eb; -fx-font-weight: 600; }
+.net-legend-out   { -fx-font-size: 12px; -fx-text-fill: #f59e0b; -fx-font-weight: 600; }
+
+/* AreaChart 색상 (인바운드=파랑, 아웃바운드=주황) */
+.network-area-chart .default-color0.chart-series-area-fill { -fx-fill: rgba(37,99,235,0.18); }
+.network-area-chart .default-color0.chart-series-area-line { -fx-stroke: #2563eb; -fx-stroke-width: 2; }
+.network-area-chart .default-color1.chart-series-area-fill { -fx-fill: rgba(245,158,11,0.18); }
+.network-area-chart .default-color1.chart-series-area-line { -fx-stroke: #f59e0b; -fx-stroke-width: 2; }
+.network-area-chart .chart-plot-background { -fx-background-color: #ffffff; }
+.network-area-chart .chart-vertical-grid-lines { -fx-stroke: #f1f5f9; }
+.network-area-chart .chart-horizontal-grid-lines { -fx-stroke: #f1f5f9; }
+.network-area-chart .axis { -fx-tick-label-font-size: 10px; -fx-tick-label-fill: #94a3b8; }
+
+/* 상세 패널 합산 KPI 박스 */
+.net-stat-box {
+    -fx-background-color: #f8fafc;
+    -fx-background-radius: 8;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 8;
+}
+.net-stat-label    { -fx-font-size: 11px; -fx-text-fill: #64748b; -fx-font-weight: 600; }
+.net-stat-value-in  { -fx-font-size: 18px; -fx-font-weight: 800; -fx-text-fill: #2563eb; }
+.net-stat-value-out { -fx-font-size: 18px; -fx-font-weight: 800; -fx-text-fill: #f59e0b; }
+/* network-table: app-table 공통 스타일 적용 */
 .network-table {
-    -fx-font-family: "Malgun Gothic", "Segoe UI";
-    -fx-font-size: 14px;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
 }
+.network-table .column-header {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: transparent transparent #e2e8f0 transparent;
+    -fx-padding: 8;
+}
+.network-table .column-header .label { -fx-text-fill: #64748b; -fx-font-size: 12px; -fx-font-weight: 600; }
+.network-table .table-row-cell { -fx-background-color: transparent; -fx-border-color: transparent transparent #f1f5f9 transparent; -fx-padding: 4 0; }
+.network-table .table-row-cell:hover    { -fx-background-color: #f8fafc; }
+.network-table .table-row-cell:selected { -fx-background-color: #f1f5f9; }
+.network-table .table-cell { -fx-text-fill: #334155; -fx-font-size: 13px; }
 .network-stat-box {
     -fx-background-color: -fx-bg-light;
     -fx-border-color: -fx-border-default;
@@ -1158,12 +1659,50 @@
 .gauge-bar-inbound { -fx-accent: -fx-primary-hover; }
 .gauge-bar-outbound { -fx-accent: -fx-status-failed; }
 
+/* ── 반원형 게이지 (CircularGauge) ── */
+.gauge-value {
+    -fx-font-weight: 800;
+    -fx-text-fill: #0f172a;
+}
+.gauge-caption {
+    -fx-text-fill: #94a3b8;
+    -fx-font-weight: 600;
+}
+
+/* 상단 전체 트래픽 카드 */
+.network-total-card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 12;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 12;
+}
+
+/* 강의실별 트래픽 카드 */
+.net-classroom-card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 12;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 12;
+    -fx-padding: 14 18 14 18;
+    -fx-cursor: hand;
+    -fx-min-width: 200;
+}
+.net-classroom-card:hover {
+    -fx-border-color: #2563eb;
+    -fx-background-color: #f8fafc;
+}
+.net-card-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #0f172a;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Command Status Panel
    ═══════════════════════════════════════════════════════════════════ */
 
 .cmd-panel-root {
-    -fx-background-color: #f8fbff;
+    -fx-background-color: #ffffff;
     -fx-background-radius: 10;
     -fx-border-color: -fx-border-default;
     -fx-border-radius: 10;
@@ -1189,7 +1728,7 @@
 }
 .module-panel-title {
     -fx-font-weight: 700;
-    -fx-font-size: 14px;
+    -fx-font-size: 18px;
     -fx-text-fill: -fx-text-heading;
 }
 .module-panel-delete-btn {
@@ -1211,6 +1750,36 @@
     -fx-font-size: 12px;
     -fx-text-fill: -fx-text-body;
 }
+
+/* ── 명령 진행 단계 스텝퍼 (우측 상세 패널) ── */
+.cmd-step-row { -fx-padding: 4 0 4 0; }
+.cmd-step {
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-padding: 4 10 4 10;
+    -fx-background-radius: 12;
+}
+.cmd-step-pending { -fx-text-fill: #94a3b8; -fx-background-color: #f1f5f9; }
+.cmd-step-active  { -fx-text-fill: #ffffff; -fx-background-color: #2563eb; }
+.cmd-step-done    { -fx-text-fill: #ffffff; -fx-background-color: #22c55e; }
+.cmd-step-failed  { -fx-text-fill: #ffffff; -fx-background-color: #ef4444; }
+.cmd-step-connector {
+    -fx-min-width: 12;
+    -fx-pref-height: 2;
+    -fx-max-height: 2;
+    -fx-background-color: #e2e8f0;
+}
+.cmd-step-connector-done { -fx-background-color: #22c55e; }
+.cmd-detail-status {
+    -fx-font-size: 15px;
+    -fx-font-weight: 800;
+    -fx-text-fill: #0f172a;
+}
+.cmd-detail-scroll {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.cmd-detail-scroll > .viewport { -fx-background-color: transparent; }
 
 /* ═══════════════════════════════════════════════════════════════════
    Status Text (for light backgrounds — WCAG AA compliant)
@@ -1278,8 +1847,8 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 .alert-box-info {
-    -fx-background-color: #eff6ff;
-    -fx-text-fill: -fx-primary-dark;
+    -fx-background-color: #f8fafc;
+    -fx-text-fill: -fx-text-body;
     -fx-padding: 6 10;
     -fx-background-radius: 4;
 }
@@ -1310,7 +1879,7 @@
     -fx-font-family: monospace;
     -fx-font-size: 14px;
     -fx-text-fill: -fx-primary;
-    -fx-background-color: #eff6ff;
+    -fx-background-color: #f1f5f9;
     -fx-padding: 4 10 4 10;
     -fx-background-radius: 4;
 }
@@ -1329,13 +1898,13 @@
     -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 8, 0, 0, 2);
 }
 .panel-card-section {
-    -fx-border-color: -fx-primary;
-    -fx-border-width: 1.5;
+    -fx-border-color: #e2e8f0;
+    -fx-border-width: 1;
     -fx-border-radius: 10;
     -fx-background-radius: 10;
     -fx-padding: 14;
-    -fx-background-color: #f9fbff;
-    -fx-effect: dropshadow(three-pass-box, rgba(49,130,206,0.08), 8, 0, 0, 2);
+    -fx-background-color: #ffffff;
+    -fx-effect: dropshadow(three-pass-box, rgba(15,23,42,0.06), 8, 0, 0, 2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1416,15 +1985,15 @@
 }
 
 .alerts-menu-ackall-btn {
-    -fx-background-color: #dbeafe;
-    -fx-text-fill: #1e3a8a;
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #334155;
     -fx-background-radius: 8;
     -fx-padding: 4 10 4 10;
     -fx-font-size: 11px;
     -fx-font-weight: 700;
 }
 .alerts-menu-ackall-btn:hover {
-    -fx-background-color: #bfdbfe;
+    -fx-background-color: #e2e8f0;
 }
 
 .alerts-list-scroll {
@@ -1474,15 +2043,15 @@
 }
 
 .alerts-ack-button {
-    -fx-background-color: #dbeafe;
-    -fx-text-fill: #1e3a8a;
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #334155;
     -fx-font-size: 11px;
     -fx-font-weight: 700;
     -fx-background-radius: 8;
     -fx-padding: 3 10 3 10;
 }
 .alerts-ack-button:hover {
-    -fx-background-color: #bfdbfe;
+    -fx-background-color: #e2e8f0;
 }
 
 .alerts-acknowledged {
@@ -1516,10 +2085,9 @@
     -fx-text-fill: -fx-text-heading;
 }
 .mgmt-section-title {
-    -fx-font-family: "Segoe UI", "Malgun Gothic";
-    -fx-font-weight: bold;
+    -fx-font-weight: 700;
     -fx-font-size: 18px;
-    -fx-text-fill: -fx-text-heading;
+    -fx-text-fill: #0f172a;
 }
 .mgmt-hint-label {
     -fx-text-fill: -fx-text-muted;
@@ -1552,8 +2120,8 @@
 }
 
 .ops-pressure-badge {
-    -fx-background-color: #eef2ff;
-    -fx-text-fill: #1e3a8a;
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #334155;
     -fx-background-radius: 999;
     -fx-padding: 3 10 3 10;
     -fx-font-size: 11px;
@@ -1734,15 +2302,15 @@
     -fx-background-color: #fafbfc;
 }
 .rfe-file-list .list-cell:hover {
-    -fx-background-color: #eff6ff;
+    -fx-background-color: #f8fafc;
     -fx-cursor: hand;
 }
 .rfe-file-list .list-cell:selected {
-    -fx-background-color: #dbeafe;
-    -fx-text-fill: #1e3a8a;
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #334155;
 }
 .rfe-file-list .list-cell:selected:hover {
-    -fx-background-color: #bfdbfe;
+    -fx-background-color: #e2e8f0;
 }
 
 /* 페이징 행 */
@@ -1758,8 +2326,8 @@
     -fx-font-size: 12px;
     -fx-text-fill: -fx-primary;
     -fx-padding: 5 12;
-    -fx-background-color: #eff6ff;
-    -fx-border-color: #bfdbfe;
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
     -fx-border-width: 0 0 1 0;
     -fx-alignment: CENTER_LEFT;
 }
@@ -1821,4 +2389,129 @@
 .rfe-status-text {
     -fx-font-size: 11px;
     -fx-text-fill: -fx-text-muted;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Figma-style Right Edit Panel
+   ═══════════════════════════════════════════════════════════════════ */
+
+.edit-right-panel-wrapper {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e2e8f0;
+    -fx-border-width: 0 0 0 1;
+    -fx-min-width: 200;
+    -fx-pref-width: 256;
+    -fx-max-width: 320;
+}
+
+.edit-right-panel {
+    -fx-background-color: #ffffff;
+    -fx-spacing: 0;
+}
+
+.edit-panel-title {
+    -fx-text-fill: #0f172a;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-letter-spacing: 0.05em;
+}
+
+.edit-panel-separator {
+    -fx-background-color: #e2e8f0;
+    -fx-border-color: #e2e8f0;
+    -fx-padding: 0;
+    -fx-pref-height: 1;
+    -fx-min-height: 1;
+    -fx-max-height: 1;
+}
+
+.edit-panel-section {
+    -fx-background-color: transparent;
+    -fx-spacing: 8;
+}
+
+.edit-panel-section-header {
+    -fx-text-fill: #64748b;
+    -fx-font-size: 10px;
+    -fx-font-weight: 700;
+    -fx-letter-spacing: 0.08em;
+}
+
+.edit-panel-field-label {
+    -fx-text-fill: #64748b;
+    -fx-font-size: 11px;
+    -fx-min-width: 20;
+}
+
+.edit-panel-info-value {
+    -fx-text-fill: #1e293b;
+    -fx-font-size: 11px;
+    -fx-font-family: "Consolas", "Courier New", monospace;
+}
+
+/* Flow direction toggle buttons */
+.edit-panel-flow-btn {
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #475569;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+    -fx-padding: 4 8 4 8;
+    -fx-background-radius: 5;
+    -fx-border-radius: 5;
+    -fx-border-color: #e2e8f0;
+    -fx-cursor: hand;
+}
+
+.edit-panel-flow-btn:hover {
+    -fx-background-color: #e2e8f0;
+    -fx-text-fill: #1e293b;
+}
+
+.edit-panel-flow-btn:selected {
+    -fx-background-color: #3182ce;
+    -fx-text-fill: white;
+    -fx-border-color: #2563eb;
+}
+
+/* Spinners inside the right panel */
+.edit-panel-spinner {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-pref-width: 80;
+    -fx-min-width: 64;
+}
+
+.edit-panel-spinner .text-field {
+    -fx-background-color: #f8fafc;
+    -fx-text-fill: #1e293b;
+    -fx-font-size: 11px;
+    -fx-border-color: transparent;
+    -fx-background-radius: 5 0 0 5;
+    -fx-padding: 3 4 3 6;
+}
+
+.edit-panel-spinner .increment-arrow-button,
+.edit-panel-spinner .decrement-arrow-button {
+    -fx-background-color: #f1f5f9;
+    -fx-border-color: transparent;
+}
+
+.edit-panel-spinner .increment-arrow-button:hover,
+.edit-panel-spinner .decrement-arrow-button:hover {
+    -fx-background-color: #e2e8f0;
+}
+
+.edit-panel-spinner .increment-arrow,
+.edit-panel-spinner .decrement-arrow {
+    -fx-background-color: #64748b;
+}
+
+/* Action buttons */
+.edit-panel-action-btn {
+    -fx-font-size: 12px;
+    -fx-padding: 7 12 7 12;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
 }

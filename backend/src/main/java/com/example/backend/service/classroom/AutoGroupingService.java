@@ -2,7 +2,7 @@ package com.example.backend.service.classroom;
 
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,10 +18,10 @@ import java.util.List;
  * @see ClassroomResolutionService CIDR + startIp/endIp 혼합 방식을 지원하며 캐싱 적용
  */
 @Service
+@RequiredArgsConstructor
 public class AutoGroupingService {
 
-    @Autowired
-    private ClassroomIpRangeRepository ipRangeRepository;
+    private final ClassroomIpRangeRepository ipRangeRepository;
 
     /**
      * IP 주소를 기반으로 적절한 강의실 Group ID를 반환한다.

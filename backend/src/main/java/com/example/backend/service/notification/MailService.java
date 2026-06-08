@@ -1,8 +1,8 @@
 package com.example.backend.service.notification;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
@@ -17,16 +17,12 @@ import org.springframework.stereotype.Service;
  * 메일 장애가 핵심 비즈니스 로직에 영향을 주지 않도록 한다.
  */
 @Service
+@RequiredArgsConstructor
 public class MailService {
 
     private static final Logger log = LoggerFactory.getLogger(MailService.class);
 
     private final JavaMailSender mailSender;
-
-    @Autowired
-    public MailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
-    }
 
     /**
      * 단순 텍스트 이메일을 발송한다.

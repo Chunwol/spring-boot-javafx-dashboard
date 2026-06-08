@@ -1,13 +1,17 @@
 plugins {
     id 'java'
     id 'application'
-    // GraalVM Native Image를 사용하려면 아래 플러그인을 활성화하고
-    // GraalVM JDK로 빌드해야 함 (일반 JDK에서는 주석 처리)
+    // GraalVM Native Image (agent.exe 생성용): 현재 비활성화
+    // 비활성 이유:
+    //   1) GraalVM JDK 필요 (표준 JDK 25 미지원)
+    //   2) oshi-core/okhttp3/jackson 위한 reflect-config.json 별도 작성 필요
+    //   3) jlink로 만든 번들 JRE + agent.jar 조합으로 Java 없는 PC 배포 이미 충족
+    // 활성화하려면: GraalVM 설치 → 아래 플러그인 주석 해제 → META-INF/native-image/ 설정 추가
     // id 'org.graalvm.buildtools.native' version '0.9.28'
 }
 
 group = 'com.example'
-version = '1.0.0'
+version = '1.1.9'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_25
@@ -29,8 +33,8 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.1'
 
-    // 로깅
-    implementation 'org.slf4j:slf4j-simple:2.0.13'
+    // 로깅 (rolling file + 콘솔)
+    implementation 'ch.qos.logback:logback-classic:1.5.6'
 
     // 테스트
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
@@ -66,14 +70,41 @@ compileTestJava {
 jar {
     archiveBaseName = 'agent'
     archiveVersion = '1.0.0'
+    archiveFileName = 'agent.jar'   // watchdog.ps1 / install.bat 모두 agent.jar 기대
     manifest {
-        attributes 'Main-Class': 'com.example.agent.AgentMain'
+        attributes 'Main-Class': 'com.example.agent.AgentMain',
+                   'Implementation-Version': project.version
     }
     // 의존성 포함 fat jar
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+def bundledJreDir = file("${rootDir}/dist/jre-${System.currentTimeMillis()}")
+
+// ═══════════════════════════════════════════════════════════════════════
+// 번들 JRE 생성 (jlink) — Java 설치 불필요 배포용
+// 용법: gradlew :agent:buildJre  (deployPackage가 자동 호출)
+// 출력: dist/jre-*/
+// ═══════════════════════════════════════════════════════════════════════
+tasks.register('buildJre', Exec) {
+    group = 'distribution'
+    description = 'Build minimal bundled JRE with jlink (no Java install required on target)'
+    def jreDir = bundledJreDir
+    doFirst { jreDir.deleteDir() }
+    def javaHome = System.getProperty('java.home')
+    commandLine "${javaHome}/bin/jlink",
+        // java.desktop 포함: 파일 전송 UI/Swing 유틸 경로에서 필요
+        // jdk.httpserver 포함: UpdateCacheServer가 com.sun.net.httpserver API를 사용
+        // jdk.crypto.ec 포함: HTTPS 서버 인증서가 ECDSA 계열일 때 TLS 핸드셰이크 실패 방지
+        '--add-modules', 'java.base,java.sql,java.management,java.naming,jdk.unsupported,java.security.jgss,java.xml,java.desktop,jdk.httpserver,jdk.crypto.ec',
+        '--output', jreDir.absolutePath,
+        '--strip-debug',
+        '--compress=zip-6',
+        '--no-header-files',
+        '--no-man-pages'
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -83,20 +114,33 @@ jar {
 // ═══════════════════════════════════════════════════════════════════════
 tasks.register('deployPackage', Zip) {
     group = 'distribution'
-    description = 'Create deployment package with JAR, config, and scripts'
+    description = 'Create deployment package with JAR, bundled JRE, config, and scripts'
 
     // JAR 파일 포함
     from("${layout.buildDirectory.get()}/libs") {
-        include 'agent-*.jar'
+        include 'agent.jar'
         into 'agent-package'
     }
 
-    // 설정 및 배포 스크립트 포함
+    // 번들 JRE 포함 (Java 설치 불필요)
+    from(bundledJreDir) {
+        into 'agent-package/jre'
+    }
+
+    // 설정 파일: config.template.json을 config.json으로 이름 바꿔 포함
+    // (config.json에는 실제 서버 토큰이 들어있을 수 있으므로 절대 포함하지 않음)
     from("${rootDir}/scripts") {
-        include 'config.json', 'config.template.json'
+        include 'config.template.json'
+        rename 'config.template.json', 'config.json'
+        into 'agent-package'
+    }
+
+    // 배포 스크립트 포함
+    from("${rootDir}/scripts") {
         include 'install.bat'
         include 'uninstall.bat'
         include 'agent-watchdog.ps1'
+        include 'install-helper.ps1'  // 작업 스케줄러 등록 (install.bat이 호출)
         into 'agent-package'
     }
 
@@ -110,8 +154,101 @@ tasks.register('deployPackage', Zip) {
     destinationDirectory = file("${rootDir}/dist")
 }
 
-// deployPackage는 JAR 빌드 완료 후 실행
-tasks.named('deployPackage') { dependsOn(jar) }
+// deployPackage는 JAR + JRE 빌드 완료 후 실행
+tasks.named('deployPackage') { dependsOn(jar, 'buildJre') }
+
+// ═══════════════════════════════════════════════════════════════════════
+// jpackage MSI 빌드 (SYSTEM 첫 설치 부트스트랩 + 번들 JRE 포함)
+// ═══════════════════════════════════════════════════════════════════════
+// 결과: dist/msi/PCAgent-1.0.0.msi
+// 사용자 배포 시 .msi 더블클릭 → 자동 설치 + 작업 스케줄러 등록
+// 제거 시 제어판 → 프로그램 추가/제거 → PCAgent
+//
+// 사전 요구사항 (빌드 PC 1회):
+//   1. WiX Toolset 3.14 (winget install WiXToolset.WiXToolset)
+//   2. WiX bin 경로가 PATH에 있어야 함
+//      예: C:\Program Files (x86)\WiX Toolset v3.14\bin
+//
+// MSI는 사용자 PC에서 msiexec(내장)로 자동 처리 — WiX 불필요
+tasks.register('jpackageMsi', Exec) {
+    group = 'distribution'
+    description = 'Build Windows MSI installer with bundled JRE (first-install bootstrap + schtask self-register)'
+    dependsOn jar, 'buildJre'
+
+    def msiDir = file("${rootDir}/dist/msi")
+    def appInputDir = file("${rootDir}/dist/jpackage-input")
+    def jreDir = bundledJreDir
+    def resourceDir = file("${rootDir}/dist/jpackage-resources")
+
+    doFirst {
+        msiDir.deleteDir()
+        msiDir.mkdirs()
+        appInputDir.deleteDir()
+        appInputDir.mkdirs()
+
+        copy {
+            from "${layout.buildDirectory.get()}/libs/agent.jar"
+            into appInputDir
+        }
+        copy {
+            from("${rootDir}/scripts/config.template.json")
+            rename 'config.template.json', 'config.json'
+            into appInputDir
+        }
+
+        // main.wxs: PCAgent.exe --first-install CA (창 없음)
+        resourceDir.mkdirs()
+        copy {
+            from("${rootDir}/scripts/main.wxs")
+            into resourceDir
+        }
+        println "[OK] main.wxs → ${resourceDir.absolutePath}"
+
+        def wixBin = System.getenv('WIX')
+                ? "${System.getenv('WIX')}\\bin"
+                : 'C:\\Program Files (x86)\\WiX Toolset v3.14\\bin'
+        if (!file(wixBin).exists()) {
+            throw new GradleException("WiX Toolset 3.14 not found.")
+        }
+        environment 'PATH', "${wixBin}${File.pathSeparator}${System.getenv('PATH')}"
+    }
+
+    def javaHome = System.getProperty('java.home')
+    def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+
+    commandLine "${javaHome}/bin/jpackage",
+            '--type', 'msi',
+            '--name', 'PCAgent',
+            '--app-version', appVersion,
+            '--vendor', 'Dongyang Mirae University',
+            '--description', 'PC Classroom Monitoring Agent',
+            '--copyright', 'Copyright (c) 2026',
+            '--input', appInputDir.absolutePath,
+            '--main-jar', 'agent.jar',
+            '--main-class', 'com.example.agent.AgentMain',
+            '--runtime-image', jreDir.absolutePath,
+            '--win-upgrade-uuid', '4f8d2a91-7c3e-4b8a-9e21-3d6f5c8a1b42',
+            '--resource-dir', resourceDir.absolutePath,
+            '--java-options', '-Xms32m',
+            '--java-options', '-Xmx256m',
+            '--java-options', '-XX:+UseG1GC',
+            '--java-options', '-XX:MaxGCPauseMillis=50',
+            '--java-options', '-Djava.awt.headless=true',
+            '--java-options', "-Dpcagent.version=${appVersion}",
+            '--java-options', '-Dpcagent.log.dir=C:\\ProgramData\\PCAgent\\logs',
+            '--dest', msiDir.absolutePath
+    // 자동 시작 흐름:
+    //   설치 → CA: PCAgent.exe --first-install (SYSTEM, 창 없음) → ProgramData + config.json 복사
+    //          백그라운드 1회 실행 → ensureAutostart() → schtask 등록
+    //   재부팅 → schtask가 SYSTEM 권한으로 부팅 자동 실행
+
+    doLast {
+        def msi = file("${msiDir}/PCAgent-${appVersion}.msi")
+        if (msi.exists()) {
+            println "[OK] MSI created: ${msi.absolutePath} (${msi.length() / 1024 / 1024} MB)"
+        }
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Dockerfile 및 Docker Compose 이미지 빌드 (선택사항)

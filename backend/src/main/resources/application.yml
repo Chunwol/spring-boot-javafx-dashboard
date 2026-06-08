@@ -112,11 +112,11 @@ app:
     enabled: ${APP_HTTP_REDIRECT_ENABLED:true}
     port: ${APP_HTTP_REDIRECT_PORT:8888}
   file-distribution:
-    default-wave-size: ${FD_DEFAULT_WAVE_SIZE:20}
-    max-wave-size: ${FD_MAX_WAVE_SIZE:100}
-    default-ramp-up-factor: ${FD_DEFAULT_RAMP_UP_FACTOR:1.8}
+    default-wave-size: ${FD_DEFAULT_WAVE_SIZE:5}
+    max-wave-size: ${FD_MAX_WAVE_SIZE:40}
+    default-ramp-up-factor: ${FD_DEFAULT_RAMP_UP_FACTOR:1.4}
     peer-port: ${FD_PEER_PORT:18777}
-    max-peer-candidates: ${FD_MAX_PEER_CANDIDATES:20}
+    max-peer-candidates: ${FD_MAX_PEER_CANDIDATES:60}
     peer-shared-secret: ${FD_PEER_SHARED_SECRET:change-me-peer-shared-secret}
     fail-threshold: ${FD_FAIL_THRESHOLD:0.20}
     auto-rollback-enabled: ${FD_AUTO_ROLLBACK_ENABLED:true}

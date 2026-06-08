@@ -9,7 +9,7 @@ cd "$PROJECT_ROOT"
 
 echo ""
 echo "============================================================"
-echo "=== Build Frontend Only (ShadowJAR)"
+echo "=== Build Frontend Only (Platform JARs)"
 echo "============================================================"
 echo ""
 
@@ -22,12 +22,15 @@ fi
 echo "[0/1] Cleaning up stale processes..."
 bash ./scripts/cleanup-runtime.sh --quiet
 
-echo "[1/1] Building Frontend ShadowJAR..."
-./gradlew :frontend:shadowJar -x test
+echo "[1/1] Building Frontend platform JARs..."
+./gradlew :frontend:publishPlatformJars -x test
 
 echo ""
-echo "[OK] Frontend JAR created:"
-echo "  frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar"
+echo "[OK] Frontend platform JARs created:"
+echo "  dist/frontend/frontend-win.jar"
+echo "  dist/frontend/frontend-mac.jar"
+echo "  dist/frontend/frontend-mac-aarch64.jar"
+echo "  dist/frontend/frontend-linux.jar"
 echo ""
-echo "Run with: java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar"
+echo "Run on this machine with: ./scripts/run-frontend.sh"
 echo ""

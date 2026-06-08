@@ -175,9 +175,19 @@ public class HeartbeatSender {
             body.put("ipAddress", effectiveIp);
             body.put("osInfo", hardware.getOsInfo());
             body.put("agentVersion", agentVersion);
+            String registerUrl = normalizeBaseUrl(config.getServerUrl()) + "/api/v1/agent/register";
+
+            log.info("에이전트 등록 시도: url={}, configPath={}, installKey={}, tokenPresent={}, mac={}, hostname={}, ip={}",
+                    SensitiveDataMasker.maskUrl(registerUrl),
+                    configLoader.getConfigPath(),
+                    SensitiveDataMasker.maskToken(config.getInstallKey()),
+                    config.getAgentToken() != null && !config.getAgentToken().isBlank(),
+                    effectiveMac,
+                    effectiveHostname,
+                    SensitiveDataMasker.maskIpAddress(effectiveIp));
 
             Request req = new Request.Builder()
-                    .url(config.getServerUrl() + "/api/v1/agent/register")
+                    .url(registerUrl)
                     .header("X-Agent-Install-Key", config.getInstallKey())
                     .header("Content-Type", "application/json")
                     .post(RequestBody.create(mapper.writeValueAsString(body),
@@ -189,23 +199,48 @@ public class HeartbeatSender {
                     JsonNode node = mapper.readTree(resp.body().string());
                     JsonNode tokenNode = node.get("agentToken");
                     if (tokenNode == null || tokenNode.isNull()) {
-                        log.error("에이전트 등록 응답에 agentToken 필드 없음");
+                        log.error("에이전트 등록 응답에 agentToken 필드 없음: body={}",
+                                truncateForLog(node.toString()));
                         return false;
                     }
                     String token = tokenNode.asText();
                     configLoader.saveToken(config, token);
                     // MEDIUM FIX#9: Mask token in logs
-                    log.info("에이전트 등록 완료. 토큰 저장됨. (토큰: {})", SensitiveDataMasker.maskToken(token));
+                    log.info("에이전트 등록 완료. 토큰 저장됨. token={}, configPath={}",
+                            SensitiveDataMasker.maskToken(token), configLoader.getConfigPath());
                     return true;
+                } else if (resp.code() == 423) {
+                    // 관리자가 등록을 차단한 상태 — 워치독이 재시작하면 다시 시도하므로
+                    // 조용히 false 반환 (에러 아님, 의도적 차단)
+                    log.warn("에이전트 등록 차단됨 (HTTP 423). body={}",
+                            truncateForLog(resp.body() != null ? resp.body().string() : ""));
+                    return false;
                 } else {
-                    log.error("에이전트 등록 실패: HTTP {}", resp.code());
+                    String responseBody = resp.body() != null ? resp.body().string() : "";
+                    log.error("에이전트 등록 실패: HTTP {} url={} body={}",
+                            resp.code(),
+                            SensitiveDataMasker.maskUrl(registerUrl),
+                            truncateForLog(responseBody));
+                    if (resp.code() == 401) {
+                        log.error("설치키 불일치 가능성이 큽니다. configPath={}, installKey={}",
+                                configLoader.getConfigPath(),
+                                SensitiveDataMasker.maskToken(config.getInstallKey()));
+                    } else if (resp.code() == 400) {
+                        log.error("등록 요청 데이터 형식 오류 가능성. mac={}, hostname={}, ip={}",
+                                effectiveMac,
+                                effectiveHostname,
+                                SensitiveDataMasker.maskIpAddress(effectiveIp));
+                    }
                     return false;
                 }
             }
         } catch (Exception e) {
             // MEDIUM FIX#9: Mask sensitive data in exception messages
             String maskedMsg = SensitiveDataMasker.maskExceptionMessage(e.getMessage());
-            log.error("에이전트 등록 예외: {}", maskedMsg);
+            log.error("에이전트 등록 예외: serverUrl={}, configPath={}, message={}",
+                    SensitiveDataMasker.maskUrl(config.getServerUrl()),
+                    configLoader.getConfigPath(),
+                    maskedMsg);
             return false;
         }
     }

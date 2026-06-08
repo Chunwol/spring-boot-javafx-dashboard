@@ -132,21 +132,27 @@
 												</Button>
 											</children>
 										</HBox>
-										<StackPane fx:id="canvasStack" VBox.vgrow="ALWAYS">
+										<HBox VBox.vgrow="ALWAYS">
 											<children>
-												<ScrollPane fx:id="dashboardScrollPane" pannable="true" fitToWidth="false" fitToHeight="false" styleClass="dashboard-canvas-scroll">
-													<content>
-														<Group fx:id="dashboardCanvasGroup" />
-													</content>
-												</ScrollPane>
-												<VBox fx:id="toastContainer" mouseTransparent="true" pickOnBounds="false" spacing="8">
-													<padding>
-														<Insets top="12" right="12" bottom="12" left="12" />
-													</padding>
-													<StackPane.alignment>TOP_RIGHT</StackPane.alignment>
-												</VBox>
+												<StackPane fx:id="canvasStack" HBox.hgrow="ALWAYS">
+													<children>
+														<ScrollPane fx:id="dashboardScrollPane" pannable="true" fitToWidth="false" fitToHeight="false" styleClass="dashboard-canvas-scroll">
+															<content>
+																<Group fx:id="dashboardCanvasGroup" />
+															</content>
+														</ScrollPane>
+														<VBox fx:id="toastContainer" mouseTransparent="true" pickOnBounds="false" spacing="8">
+															<padding>
+																<Insets top="12" right="12" bottom="12" left="12" />
+															</padding>
+															<StackPane.alignment>TOP_RIGHT</StackPane.alignment>
+														</VBox>
+													</children>
+												</StackPane>
+												<!-- Figma 스타일 우측 편집 패널 -->
+												<VBox fx:id="editRightPanelSlot" managed="false" visible="false" styleClass="edit-right-panel-wrapper" />
 											</children>
-										</StackPane>
+										</HBox>
 									</children>
 								</VBox>
 							</items>

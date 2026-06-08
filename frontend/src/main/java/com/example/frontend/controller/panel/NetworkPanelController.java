@@ -207,6 +207,7 @@ public class NetworkPanelController {
      * 패널 제거 시 반드시 호출해야 메모리 누수를 방지합니다.
      */
     public void shutdown() {
+        stopAutoRefresh();
         if (inboundBlinkingTimeline != null) {
             inboundBlinkingTimeline.stop();
             inboundBlinkingTimeline = null;
@@ -217,7 +218,7 @@ public class NetworkPanelController {
         }
     }
 
-    // 네트워크 트래픽 데이터 갱신
+    // 네트워크 트래픽 데이터 갱신 (전체 트래픽 — /dashboard/traffic)
     public void updateNetworkChart() {
         apiClient.get("/dashboard/traffic")
                 .thenAccept(body -> {
@@ -225,13 +226,8 @@ public class NetworkPanelController {
                         JsonNode node = apiClient.getObjectMapper().readTree(body);
                         double inTraffic = node.path("inboundMbps").asDouble(0.0);
                         double outTraffic = node.path("outboundMbps").asDouble(0.0);
-                        Platform.runLater(() -> {
-                            String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                            inboundSeries.getData().add(new XYChart.Data<>(now, inTraffic));
-                            outboundSeries.getData().add(new XYChart.Data<>(now, outTraffic));
-                            if (inboundSeries.getData().size() > 20) inboundSeries.getData().remove(0);
-                            if (outboundSeries.getData().size() > 20) outboundSeries.getData().remove(0);
-                        });
+                        // 차트 + 게이지 동시 갱신 (appendTrafficPoint 재사용)
+                        Platform.runLater(() -> appendTrafficPoint(inTraffic, outTraffic));
                     } catch (Exception e) {
                         log.warn("Failed to parse network chart payload", e);
                     }
@@ -240,6 +236,34 @@ public class NetworkPanelController {
                     log.warn("Failed to fetch network traffic for chart", ex);
                     return null;
                 });
+    }
+
+    // ─── 자체 폴링 (탭으로 단독 표시될 때 사용) ────────────────────────────
+    private Timeline autoRefreshTimeline;
+
+    /**
+     * 주기적으로 차트/게이지/PC 트래픽 테이블을 갱신한다.
+     * 탭이 단독으로 표시될 때 MainController가 호출한다.
+     *
+     * @param intervalSec 폴링 간격 (초)
+     */
+    public void startAutoRefresh(int intervalSec) {
+        stopAutoRefresh();
+        // 즉시 1회 + 주기 반복
+        updateNetworkChart();
+        refreshAllPcTraffic();
+        autoRefreshTimeline = new Timeline(new KeyFrame(
+                Duration.seconds(Math.max(5, intervalSec)),
+                e -> { updateNetworkChart(); refreshAllPcTraffic(); }));
+        autoRefreshTimeline.setCycleCount(Timeline.INDEFINITE);
+        autoRefreshTimeline.play();
+    }
+
+    public void stopAutoRefresh() {
+        if (autoRefreshTimeline != null) {
+            autoRefreshTimeline.stop();
+            autoRefreshTimeline = null;
+        }
     }
 
     public void updateNetworkChart(double inboundMbps, double outboundMbps) {

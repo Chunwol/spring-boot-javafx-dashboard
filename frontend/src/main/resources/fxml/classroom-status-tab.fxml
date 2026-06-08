@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.Tooltip?>
+<?import javafx.scene.layout.FlowPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<HBox xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.example.frontend.controller.tab.ClassroomStatusController"
+      styleClass="tab-content" spacing="0">
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━ LEFT: TABLE ━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <VBox styleClass="tab-main" spacing="12" HBox.hgrow="ALWAYS">
+        <padding><Insets top="20" right="20" bottom="20" left="20" /></padding>
+        <children>
+            <!-- 제목 + 필터 + 보기 토글 + 액션 (한 줄) -->
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <children>
+                    <Label text="강의실 현황" styleClass="tab-title" />
+                    <Region HBox.hgrow="ALWAYS" />
+                    <ComboBox fx:id="classroomFilter" promptText="강의실 전체" prefWidth="150" styleClass="filter-combo" />
+                    <ComboBox fx:id="statusFilter" promptText="온라인" prefWidth="120" styleClass="filter-combo" />
+                    <HBox spacing="2" alignment="CENTER" styleClass="main-view-toggle-group">
+                        <children>
+                            <Button fx:id="mainViewListBtn" styleClass="detail-view-toggle">
+                                <graphic><FontIcon iconLiteral="mdi2v-view-list-outline" iconSize="14" /></graphic>
+                                <tooltip><Tooltip text="표 보기" /></tooltip>
+                            </Button>
+                            <Button fx:id="mainViewGridBtn" styleClass="detail-view-toggle">
+                                <graphic><FontIcon iconLiteral="mdi2v-view-grid-outline" iconSize="14" /></graphic>
+                                <tooltip><Tooltip text="그리드 보기" /></tooltip>
+                            </Button>
+                        </children>
+                    </HBox>
+                    <Button fx:id="fullscreenBtn" styleClass="tab-icon-btn">
+                        <graphic><FontIcon iconLiteral="mdi2f-fullscreen" iconSize="16" /></graphic>
+                        <tooltip><Tooltip text="전체화면 / 해제" /></tooltip>
+                    </Button>
+                    <Button fx:id="downloadBtn" styleClass="tab-icon-btn">
+                        <graphic><FontIcon iconLiteral="mdi2d-download" iconSize="16" /></graphic>
+                        <tooltip><Tooltip text="다운로드" /></tooltip>
+                    </Button>
+                    <Button fx:id="printBtn" styleClass="tab-icon-btn">
+                        <graphic><FontIcon iconLiteral="mdi2p-printer" iconSize="16" /></graphic>
+                        <tooltip><Tooltip text="인쇄" /></tooltip>
+                    </Button>
+                    <Button fx:id="addClassroomBtn" styleClass="btn-primary-outline">
+                        <graphic><FontIcon iconLiteral="mdi2p-plus" iconSize="14" /></graphic>
+                        <text> 강의실 추가</text>
+                    </Button>
+                    <Button fx:id="refreshBtn" text="조회" styleClass="btn-primary" />
+                </children>
+            </HBox>
+
+            <!-- 본문: 표/그리드 토글 -->
+            <StackPane VBox.vgrow="ALWAYS">
+                <children>
+                    <TableView fx:id="classroomTable" styleClass="classroom-table">
+                        <columns>
+                            <TableColumn fx:id="colClassroom" text="강의실" prefWidth="120" />
+                            <TableColumn fx:id="colPcStatus" text="PC상태" prefWidth="260" />
+                            <TableColumn fx:id="colOnline" text="온라인" prefWidth="100" />
+                            <TableColumn fx:id="colStatus" text="상태" prefWidth="100" />
+                            <TableColumn fx:id="colUpdated" text="갱신" prefWidth="180" />
+                        </columns>
+                    </TableView>
+                    <ScrollPane fx:id="mainGridScroll" fitToWidth="true"
+                                managed="false" visible="false"
+                                hbarPolicy="NEVER" styleClass="main-grid-scroll">
+                        <content>
+                            <VBox fx:id="mainGridContent" spacing="16" styleClass="main-grid-content">
+                                <padding><Insets top="16" right="16" bottom="16" left="16" /></padding>
+                            </VBox>
+                        </content>
+                    </ScrollPane>
+                </children>
+            </StackPane>
+        </children>
+    </VBox>
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━ RIGHT: DETAIL PANEL ━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <VBox fx:id="detailPanel" styleClass="classroom-detail-panel" spacing="14"
+          minWidth="0" prefWidth="0" managed="false" visible="false">
+        <padding><Insets top="20" right="20" bottom="20" left="20" /></padding>
+        <children>
+            <!-- 헤더 -->
+            <HBox alignment="CENTER_LEFT" spacing="10">
+                <children>
+                    <Label fx:id="detailTitleLabel" text="강의실 상세" styleClass="detail-title" />
+                    <Region HBox.hgrow="ALWAYS" />
+                    <Button fx:id="detailCloseBtn" styleClass="detail-close-btn">
+                        <graphic><FontIcon iconLiteral="mdi2c-close" iconSize="16" /></graphic>
+                    </Button>
+                </children>
+            </HBox>
+
+            <!-- 카운터 카드 (온라인 │ 경고 │ 오프라인) -->
+            <HBox spacing="0" alignment="CENTER" styleClass="detail-counter-row">
+                <children>
+                    <VBox alignment="CENTER" styleClass="detail-counter-card" HBox.hgrow="ALWAYS">
+                        <padding><Insets top="14" right="10" bottom="14" left="10" /></padding>
+                        <children>
+                            <Label text="온라인" styleClass="counter-label" />
+                            <Label fx:id="detailOnlineCount" text="0" styleClass="counter-value-online" />
+                        </children>
+                    </VBox>
+                    <Region styleClass="detail-counter-divider" />
+                    <VBox alignment="CENTER" styleClass="detail-counter-card" HBox.hgrow="ALWAYS">
+                        <padding><Insets top="14" right="10" bottom="14" left="10" /></padding>
+                        <children>
+                            <Label text="경고" styleClass="counter-label" />
+                            <Label fx:id="detailWarnCount" text="0" styleClass="counter-value-warn" />
+                        </children>
+                    </VBox>
+                    <Region styleClass="detail-counter-divider" />
+                    <VBox alignment="CENTER" styleClass="detail-counter-card" HBox.hgrow="ALWAYS">
+                        <padding><Insets top="14" right="10" bottom="14" left="10" /></padding>
+                        <children>
+                            <Label text="오프라인" styleClass="counter-label" />
+                            <Label fx:id="detailOfflineCount" text="0" styleClass="counter-value-offline" />
+                        </children>
+                    </VBox>
+                </children>
+            </HBox>
+
+            <!-- PC 목록 헤더 -->
+            <HBox alignment="CENTER_LEFT" spacing="6">
+                <children>
+                    <Label text="PC 목록" styleClass="detail-section-title" />
+                    <Region HBox.hgrow="ALWAYS" />
+                    <Button fx:id="detailViewListBtn" styleClass="detail-view-toggle">
+                        <graphic><FontIcon iconLiteral="mdi2v-view-list-outline" iconSize="14" /></graphic>
+                    </Button>
+                    <Button fx:id="detailViewGridBtn" styleClass="detail-view-toggle">
+                        <graphic><FontIcon iconLiteral="mdi2v-view-grid-outline" iconSize="14" /></graphic>
+                    </Button>
+                </children>
+            </HBox>
+
+            <!-- PC 목록 — 테이블/그리드 토글 -->
+            <StackPane VBox.vgrow="ALWAYS">
+                <children>
+                    <TableView fx:id="detailPcTable" styleClass="detail-pc-table">
+                        <columns>
+                            <TableColumn fx:id="colPcSeat" text="좌석명" prefWidth="100" />
+                            <TableColumn fx:id="colPcPowerTime" text="전원 시간" prefWidth="180" />
+                        </columns>
+                    </TableView>
+                    <ScrollPane fx:id="detailPcGridScroll" fitToWidth="true"
+                                styleClass="pc-grid-scroll" managed="false" visible="false"
+                                hbarPolicy="NEVER">
+                        <content>
+                            <VBox spacing="6">
+                                <padding><Insets top="4" right="2" bottom="4" left="2" /></padding>
+                                <children>
+                                    <Label fx:id="detailTeacherLabel" text="교수 PC" styleClass="pc-grid-section-label" maxWidth="Infinity" />
+                                    <FlowPane fx:id="detailTeacherGrid" hgap="8" vgap="8" prefWrapLength="320" />
+                                    <Label fx:id="detailStudentLabel" text="학생 PC" styleClass="pc-grid-section-label" maxWidth="Infinity" />
+                                    <FlowPane fx:id="detailStudentGrid" hgap="8" vgap="8" prefWrapLength="320" />
+                                </children>
+                            </VBox>
+                        </content>
+                    </ScrollPane>
+                </children>
+            </StackPane>
+
+            <!-- 마지막 갱신 -->
+            <Label fx:id="detailUpdatedLabel" text="" styleClass="detail-updated-label" />
+
+            <!-- 전체 버튼 -->
+            <HBox spacing="10" alignment="CENTER">
+                <children>
+                    <Button fx:id="detailPowerOnAllBtn" text="전체 켜기" styleClass="btn-primary-outline" maxWidth="Infinity" HBox.hgrow="ALWAYS" />
+                    <Button fx:id="detailPowerOffAllBtn" text="전체 종료" styleClass="btn-danger-outline" maxWidth="Infinity" HBox.hgrow="ALWAYS" />
+                </children>
+            </HBox>
+        </children>
+    </VBox>
+</HBox>

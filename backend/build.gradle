@@ -81,6 +81,9 @@ dependencies {
     // ByteBuddy upgrade for Java 25 class file version support
     testImplementation 'net.bytebuddy:byte-buddy:1.17.5'
     testImplementation 'net.bytebuddy:byte-buddy-agent:1.17.5'
+
+    // PDF → PNG 렌더링 (보고서 육안 검증 테스트 전용)
+    testImplementation 'org.apache.pdfbox:pdfbox:3.0.3'
 }
 
 tasks.named('test') {

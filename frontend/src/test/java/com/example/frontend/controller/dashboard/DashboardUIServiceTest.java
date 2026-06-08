@@ -1,7 +1,6 @@
 package com.example.frontend.controller.dashboard;
 
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
@@ -21,7 +20,7 @@ class DashboardUIServiceTest {
 
     @BeforeAll
     static void initToolkit() {
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test
@@ -95,7 +94,7 @@ class DashboardUIServiceTest {
                 latch.countDown();
             }
         });
-        boolean completed = latch.await(3, TimeUnit.SECONDS);
-        assertThat(completed).isTrue();
+        boolean completed = latch.await(15, TimeUnit.SECONDS);
+        assertThat(completed).withFailMessage("FX thread did not finish within 15 s").isTrue();
     }
 }

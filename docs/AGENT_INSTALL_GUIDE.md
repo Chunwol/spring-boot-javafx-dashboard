@@ -158,8 +158,10 @@ config.json 대신 환경변수로 설정할 수 있습니다:
 
 | OS | 경로 |
 |----|------|
-| Windows | `%APPDATA%\PCAgent\config.json` |
+| Windows | `C:\ProgramData\PCAgent\config.json` |
 | Linux | `~/.pcagent/config.json` |
+
+> 레거시 포터블 실행은 여전히 `%APPDATA%\PCAgent\config.json` 을 읽습니다.
 
 ---
 
@@ -322,6 +324,76 @@ Remove-Item -Recurse -Force C:\PCAgent
 
 ---
 
+## 7.5. MSI 인스톨러 (권장 신규 배포 방식)
+
+`.bat / .ps1` 의존성을 제거한 **단일 MSI 패키지** 방식. JDK 25 jpackage가 자동 생성.
+
+### 빌드 (관리자 PC, 1회 설정)
+
+```cmd
+:: 1. WiX Toolset 3.14 설치 (관리자 PowerShell)
+winget install WiXToolset.WiXToolset --silent --accept-package-agreements --accept-source-agreements
+
+:: 2. MSI 빌드
+gradlew.bat :agent:jpackageMsi
+```
+
+결과: `dist/msi/PCAgent-1.0.0.msi` (≈ 51 MB)
+
+### 배포 (관리자 PC → 사용자 PC)
+
+사용자 PC에서 MSI 더블클릭 → 자동 설치:
+- `C:\Program Files\PCAgent\` 에 파일 복사
+- 작업 스케줄러 `PCAgent` 등록 (`LocalSystem`, 부팅 시 자동 실행)
+- 다음 부팅 시 자동 시작 (즉시 시작도 가능)
+- 로그: `C:\ProgramData\PCAgent\agent.log`
+
+### 제거
+
+제어판 → 프로그램 추가/제거 → **PCAgent** → 제거
+
+또는 명령어:
+```cmd
+msiexec /x PCAgent-1.0.0.msi /qn
+```
+
+→ 작업 스케줄러 작업 자동 중지 + 삭제 + 파일 제거.
+
+### MSI 방식의 이점
+
+| 항목 | 기존 .bat + .ps1 | MSI |
+|---|---|---|
+| 설치 파일 수 | 6개 (jar, ps1×2, bat×2, config) + jre 폴더 | **1개 (.msi)** |
+| PowerShell 의존 | `-ExecutionPolicy Bypass` 사용 | 없음 |
+| Task Scheduler 사용 | SYSTEM 권한 작업 (AV 의심) | 부팅 시 자동 실행 작업 |
+| 자동 재시작 | watchdog.ps1 폴링 | 에이전트 자체 재시도 + 작업 스케줄러 |
+| 무인 배포 (GPO/SCCM) | 어려움 | **표준 지원** |
+| Defender SmartScreen | 미서명 PowerShell → 차단 가능 | msiexec = Microsoft 플랫폼 |
+| 평판 누적 | 매 빌드 새 .bat 해시 | 일관된 MSI ProductCode |
+
+### 작업 스케줄러 관리 (설치 후)
+
+```cmd
+:: 상태 확인
+schtasks /Query /TN PCAgent /V /FO LIST
+
+:: 수동 실행
+schtasks /Run /TN PCAgent
+
+:: 작업 삭제
+schtasks /Delete /TN PCAgent /F
+```
+
+### 방화벽 / 전원 정책
+
+MSI는 OS 설정을 건드리지 않음. 에이전트가 **첫 실행 시 자체 적용**:
+- 방화벽 규칙(`netsh advfirewall firewall add rule`) 자동 등록 (이미 있으면 무시)
+- 절전/최대절전 비활성화(`powercfg`) 매 기동 시 재적용
+
+GPO로 사전 푸시한 환경에서는 그냥 두면 됨 (중복 등록 시 netsh가 무시).
+
+---
+
 ## 8. 보안 고려사항
 
 | 항목 | 설명 |
@@ -331,3 +403,101 @@ Remove-Item -Recurse -Force C:\PCAgent
 | **명령 실행** | 서버 인증된 명령만 실행 (토큰 검증) |
 | **스크립트 검증** | SHA-256 해시 검증 후에만 실행 |
 | **최소 권한** | 에이전트 서비스는 필요한 최소 권한으로 실행 |
+
+---
+
+## 9. 안티바이러스 / Defender 화이트리스트 가이드
+
+에이전트는 정상 동작을 위해 보안 SW가 **악성 행위로 오인할 수 있는 패턴**을 다수 사용합니다.
+배포 전 IT 담당자가 다음 항목을 안티바이러스 예외에 등록해야 합니다.
+
+### 9.1 행위 기반 탐지 우회 (예외 등록 권장)
+
+| 동작 | 사유 | 안티바이러스 신호 |
+|------|------|------|
+| SYSTEM 권한 작업 스케줄러 | 사용자 로그아웃 무관 24/7 동작 보장 | Trojan.Persistence |
+| AtStartup 트리거 | 부팅 시 자동 시작 | Trojan.AutoStart |
+| 12초 주기 외부 HTTPS POST | 서버에 상태 보고 (heartbeat) | C2 Beacon |
+| 시스템 정보 수집 (MAC/IP/HW) | PC 식별 + 강의실 매핑 | Reconnaissance |
+| TCP 18777 인바운드 listen | P2P 업데이트 캐시 (대역폭 절감) | Backdoor Port |
+| 원격 명령 실행 (cmd/PS) | 일괄 종료/WOL/스크립트 배포 | Remote Code Execution |
+| 절전/최대절전 비활성 | 모니터링 연속성 | System Tampering |
+| 방화벽 규칙 추가 | 통신 보장 | Firewall Bypass |
+| `Get-CimInstance Win32_Process` (uninstall) | 잔존 워치독 강제 종료 | Process Enumeration |
+
+### 9.2 Windows Defender 예외 등록 (관리자 명령어)
+
+```powershell
+# 폴더 단위 예외
+Add-MpPreference -ExclusionPath "C:\Program Files\PCAgent"
+
+# 프로세스 단위 예외
+Add-MpPreference -ExclusionProcess "C:\Program Files\PCAgent\jre\bin\java.exe"
+Add-MpPreference -ExclusionProcess "C:\Program Files\PCAgent\agent.jar"
+```
+
+### 9.3 그룹 정책(GPO) 권장 설정 (대규모 배포)
+
+1. **Defender Application Control**: PCAgent 경로 화이트리스트
+2. **AppLocker**: `C:\Program Files\PCAgent\*` 허용 규칙
+3. **방화벽 GPO**: 사전 푸시로 install.bat의 firewall 단계 생략 (`--skip-firewall`)
+4. **전원 정책 GPO**: 절전 OFF를 사전 적용 (`--skip-power-policy`)
+
+### 9.4 옵트아웃 설치 옵션
+
+설치 시 일부 단계를 건너뛸 수 있습니다:
+
+```cmd
+# 전원 정책 변경 건너뜀 (랩탑/배터리 사용 환경)
+install.bat --skip-power-policy
+
+# 방화벽 규칙 추가 건너뜀 (GPO로 사전 푸시한 경우)
+install.bat --skip-firewall
+
+# 두 가지 동시
+install.bat --skip-power-policy --skip-firewall
+```
+
+---
+
+## 10. 코드 서명 (선택 — 권장)
+
+서명되지 않은 .jar/.ps1는 Windows SmartScreen의 평판 검사를 통과하지 못해
+"게시자 알 수 없음" 경고가 표시됩니다. 코드 서명 인증서로 서명하면:
+
+- Defender 휴리스틱 탐지 점수 ~15% 감소
+- SmartScreen "알 수 없는 게시자" 경고 제거
+- `-ExecutionPolicy Bypass` 대신 `Signed` 정책 사용 가능
+
+### 10.1 인증서
+
+| 종류 | 비용/년 | 특징 |
+|------|------|------|
+| Standard Code Signing | $300~500 | 일반 서명 (시간 경과 후 평판 누적) |
+| EV (Extended Validation) | $1200~2000 | SmartScreen 즉시 신뢰 (HSM 동글 필요) |
+
+권장 발급처: Sectigo, DigiCert, GlobalSign, SSL.com
+
+### 10.2 JAR 서명 (jarsigner — JDK 포함)
+
+```bash
+jarsigner -keystore mycert.p12 -storetype PKCS12 \
+    -tsa http://timestamp.sectigo.com/rfc3161 \
+    agent-package/agent.jar my-alias
+```
+
+### 10.3 PowerShell 스크립트 서명
+
+```powershell
+$cert = Get-PfxCertificate -FilePath mycert.p12
+foreach ($f in 'agent-watchdog.ps1','install-helper.ps1') {
+    Set-AuthenticodeSignature -FilePath "agent-package/$f" `
+        -Certificate $cert `
+        -TimestampServer http://timestamp.sectigo.com/rfc3161
+}
+```
+
+### 10.4 빌드 파이프라인 자동화
+
+`agent/build.gradle` 의 `deployPackage` 태스크에 서명 단계를 추가하여
+CI/CD에서 자동 서명할 수 있습니다. (옵션, 인증서 보관소 분리 권장)

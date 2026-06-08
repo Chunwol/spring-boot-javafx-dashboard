@@ -3,7 +3,9 @@ package com.example.agent.config;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
- * %APPDATA%\PCAgent\config.json 구조.
+ * 에이전트 config.json 구조.
+ * Windows 설치형은 C:\ProgramData\PCAgent\config.json,
+ * 레거시는 %APPDATA%\PCAgent\config.json 을 지원한다.
  * agentToken이 비어 있으면 최초 등록 플로우를 시작한다.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)

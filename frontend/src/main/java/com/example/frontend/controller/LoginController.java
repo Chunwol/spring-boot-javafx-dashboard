@@ -9,6 +9,7 @@ import javafx.application.Platform;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.control.CheckBox;
@@ -60,6 +61,10 @@ public class LoginController {
     public void initialize() {
         // 숨김 시 레이아웃 공간도 해제
         messageLabel.managedProperty().bind(messageLabel.visibleProperty());
+        messageLabel.setWrapText(true);
+        messageLabel.setTextOverrun(OverrunStyle.CLIP);
+        messageLabel.prefWidthProperty().bind(usernameField.widthProperty());
+        messageLabel.maxWidthProperty().bind(usernameField.widthProperty());
 
         hostField.setText(PREFS.get(PREF_SERVER_HOST, apiClient.currentLoginHost()));
         portField.setText(PREFS.get(PREF_SERVER_PORT, Integer.toString(apiClient.currentLoginPort())));
@@ -161,9 +166,11 @@ public class LoginController {
     }
 
     private void showDashboard() throws Exception {
-        var fxmlUrl = getClass().getResource("/fxml/dashboard.fxml");
+        // 2026-06 리디자인: dashboard.fxml(Figma 편집기) → main.fxml(탭형 통합 관제)
+        // 구 dashboard.fxml은 controller/legacy 에 격리되어 더 이상 진입점이 아님
+        var fxmlUrl = getClass().getResource("/fxml/main.fxml");
         if (fxmlUrl == null) {
-            throw new RuntimeException("dashboard.fxml 리소스를 찾을 수 없습니다: /fxml/dashboard.fxml (classpath 경로 문제)");
+            throw new RuntimeException("main.fxml 리소스를 찾을 수 없습니다: /fxml/main.fxml (classpath 경로 문제)");
         }
         FXMLLoader loader = new FXMLLoader(fxmlUrl);
         Parent root = loader.load();

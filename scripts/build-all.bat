@@ -51,9 +51,9 @@ echo.
 
 REM 4. Frontend module
 echo [4/6] Building Frontend Module...
-call gradlew.bat :frontend:shadowJar -x test
+call gradlew.bat :frontend:publishPlatformJars -x test
 if !errorlevel! equ 0 (
-    echo [OK] Frontend JAR: frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
+    echo [OK] Frontend platform JARs generated in dist\frontend\
 ) else (
     echo [ERROR] Frontend build failed
     exit /b 1
@@ -61,7 +61,7 @@ if !errorlevel! equ 0 (
 
 echo.
 echo [5/6] Packaging Frontend EXE (app-image)...
-call gradlew.bat :frontend:packageExe
+call gradlew.bat :frontend:packagePortable
 if !errorlevel! equ 0 (
     echo [OK] Frontend EXE: frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe
 ) else (
@@ -87,7 +87,6 @@ if not exist dist\frontend mkdir dist\frontend
 
 copy /Y backend\build\libs\backend-0.0.1-SNAPSHOT.jar dist\backend\backend.jar >nul
 copy /Y agent\build\libs\agent-1.0.0.jar dist\agent\agent.jar >nul
-copy /Y frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar dist\frontend\frontend-all.jar >nul
 
 if exist frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe (
     copy /Y frontend\build\package\ClassroomDashboard\ClassroomDashboard.exe dist\frontend\ClassroomDashboard.exe >nul
@@ -105,7 +104,10 @@ echo.
 echo Generated artifacts:
 echo   - Backend:  dist\backend\backend.jar
 echo   - Agent:    dist\agent\agent.jar
-echo   - Frontend fat JAR: dist\frontend\frontend-all.jar
+echo   - Frontend JAR: dist\frontend\frontend-win.jar
+echo   - Frontend JAR: dist\frontend\frontend-mac.jar
+echo   - Frontend JAR: dist\frontend\frontend-mac-aarch64.jar
+echo   - Frontend JAR: dist\frontend\frontend-linux.jar
 echo   - Frontend EXE:     dist\frontend\ClassroomDashboard.exe
 echo   - Frontend MSI:     dist\frontend\ClassroomDashboard.msi ^(if generated^)
 echo.

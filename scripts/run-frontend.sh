@@ -13,14 +13,37 @@ echo "=== Frontend (Packaged JAR)"
 echo "============================================================"
 echo ""
 
-# Check if JAR exists
-if [ ! -f "frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar" ]; then
-    echo "Building Frontend JAR first..."
-    ./gradlew :frontend:shadowJar -x test
+detect_platform_jar() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    case "$os" in
+        Darwin)
+            case "$arch" in
+                arm64|aarch64) echo "frontend-mac-aarch64.jar" ;;
+                *) echo "frontend-mac.jar" ;;
+            esac
+            ;;
+        Linux)
+            echo "frontend-linux.jar"
+            ;;
+        *)
+            echo "frontend-linux.jar"
+            ;;
+    esac
+}
+
+JAR_NAME="$(detect_platform_jar)"
+JAR_PATH="dist/frontend/${JAR_NAME}"
+
+if [ ! -f "$JAR_PATH" ]; then
+    echo "Building current-platform Frontend JAR first..."
+    ./gradlew :frontend:publishCurrentPlatformJar -x test
 fi
 
 echo "Starting Frontend GUI..."
 echo "Press Ctrl+C to stop"
 echo ""
 
-java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar
+java -jar "$JAR_PATH"

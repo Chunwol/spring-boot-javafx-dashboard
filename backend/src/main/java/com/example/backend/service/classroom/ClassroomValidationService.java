@@ -1,6 +1,6 @@
 package com.example.backend.service.classroom;
 
-import com.example.backend.common.error.ConflictException;
+import com.example.backend.common.exception.ConflictException;
 import com.example.backend.event.AlertEvent;
 import com.example.backend.model.classroom.ClassroomIpRange;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;

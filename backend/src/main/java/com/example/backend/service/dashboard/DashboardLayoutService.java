@@ -119,6 +119,40 @@ public class DashboardLayoutService {
         return dashboardPanelRepository.save(panel);
     }
 
+    /** 여러 패널의 위치/크기/Z-순서를 1개 트랜잭션에서 일괄 업데이트. */
+    @Transactional
+    public java.util.List<DashboardPanel> batchUpdatePositions(
+            Long dashboardId,
+            com.example.backend.dto.dashboard.DashboardPanelBatchPositionRequest request) {
+        if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
+            return java.util.List.of();
+        }
+        java.util.List<DashboardPanel> updated = new java.util.ArrayList<>(request.getItems().size());
+        String now = LocalDateTime.now().toString();
+        for (var item : request.getItems()) {
+            if (item == null || item.getPanelId() == null) continue;
+            DashboardPanel panel = dashboardPanelRepository.findById(item.getPanelId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Panel", item.getPanelId()));
+            if (!dashboardId.equals(panel.getDashboardId())) {
+                throw new ConflictException("Panel", "Dashboard ID mismatch");
+            }
+            applyPositionItem(panel, item);
+            panel.setUpdatedAt(now);
+            updated.add(panel);
+        }
+        return dashboardPanelRepository.saveAll(updated);
+    }
+
+    private void applyPositionItem(DashboardPanel panel,
+                                    com.example.backend.dto.dashboard.DashboardPanelBatchPositionRequest.Item item) {
+        if (item.getX() != null) panel.setX(item.getX());
+        if (item.getY() != null) panel.setY(item.getY());
+        if (item.getWidth() != null && item.getWidth() > 0) panel.setWidth(item.getWidth());
+        if (item.getHeight() != null && item.getHeight() > 0) panel.setHeight(item.getHeight());
+        if (item.getZIndex() != null) panel.setZIndex(item.getZIndex());
+        if (item.getVisible() != null) panel.setVisible(item.getVisible());
+    }
+
     @Transactional
     public void deletePanel(Long dashboardId, Long panelId) {
         DashboardPanel panel = dashboardPanelRepository.findById(panelId)

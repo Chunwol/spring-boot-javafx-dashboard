@@ -3,6 +3,7 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
 
@@ -10,9 +11,11 @@
       xmlns:fx="http://javafx.com/fxml">
     <children>
         <Label text="보기:" styleClass="pcmgmt-label-title" />
-        <ComboBox fx:id="viewTypeCombo" prefWidth="140.0" promptText="보기 유형 선택" />
-        <ComboBox fx:id="viewClassroomCombo" prefWidth="150.0" visible="false" managed="false" promptText="강의실 선택" />
-        <Button fx:id="refreshBtn" text="새로고침" styleClass="pcmgmt-refresh-btn" />
+        <ComboBox fx:id="viewTypeCombo" prefWidth="130.0" promptText="보기 유형 선택" />
+        <ComboBox fx:id="viewClassroomCombo" prefWidth="140.0" visible="false" managed="false" promptText="강의실 선택" />
+        <ComboBox fx:id="statusFilterCombo" prefWidth="120.0" promptText="상태" />
+        <TextField fx:id="searchField" prefWidth="200.0" promptText="검색: PC명, IP, MAC" />
+        <Button fx:id="refreshBtn" text="새로고침" styleClass="btn-primary" />
         <Label fx:id="summaryLabel" styleClass="pcmgmt-summary-label" HBox.hgrow="ALWAYS" />
     </children>
 </HBox>

@@ -35,8 +35,11 @@
 # Linux/Mac
 ./gradlew :frontend:run
 
-# 또는 JAR 직접 실행
-java -jar frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar
+# 또는 플랫폼별 JAR 직접 실행
+java -jar dist/frontend/frontend-win.jar
+java -jar dist/frontend/frontend-mac.jar
+java -jar dist/frontend/frontend-mac-aarch64.jar
+java -jar dist/frontend/frontend-linux.jar
 ```
 
 ---

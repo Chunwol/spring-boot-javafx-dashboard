@@ -173,4 +173,39 @@ class AgentConfigLoaderTest {
             }
         }
     }
+
+    @Test
+    void resolveDefaultBaseDir_prefersProgramDataOverLegacyAppData() throws Exception {
+        Path workingDir = tempDir.resolve("working");
+        Path launchDir = tempDir.resolve("launch");
+        Path programDataDir = tempDir.resolve("ProgramData").resolve("PCAgent");
+        Path appDataDir = tempDir.resolve("AppData").resolve("PCAgent");
+        Path homeDir = tempDir.resolve("home");
+
+        Files.createDirectories(programDataDir);
+        Files.writeString(programDataDir.resolve("config.json"), "{}\n");
+        Files.createDirectories(appDataDir);
+        Files.writeString(appDataDir.resolve("config.json"), "{}\n");
+
+        Path resolved = AgentConfigLoader.resolveDefaultBaseDir(
+                workingDir, launchDir, programDataDir, appDataDir, homeDir);
+
+        assertThat(resolved).isEqualTo(programDataDir);
+    }
+
+    @Test
+    void resolveDefaultBaseDir_usesLegacyAppDataWhenProgramDataMissing() throws Exception {
+        Path workingDir = tempDir.resolve("working");
+        Path launchDir = tempDir.resolve("launch");
+        Path appDataDir = tempDir.resolve("AppData").resolve("PCAgent");
+        Path homeDir = tempDir.resolve("home");
+
+        Files.createDirectories(appDataDir);
+        Files.writeString(appDataDir.resolve("config.json"), "{}\n");
+
+        Path resolved = AgentConfigLoader.resolveDefaultBaseDir(
+                workingDir, launchDir, null, appDataDir, homeDir);
+
+        assertThat(resolved).isEqualTo(appDataDir);
+    }
 }

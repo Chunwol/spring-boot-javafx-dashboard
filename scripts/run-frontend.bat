@@ -11,9 +11,11 @@ echo === Frontend (Packaged JAR)
 echo ============================================================
 echo.
 
-if not exist "frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar" (
-    echo Building Frontend JAR first...
-    call gradlew.bat :frontend:shadowJar -x test
+set "JAR_PATH=dist\frontend\frontend-win.jar"
+
+if not exist "%JAR_PATH%" (
+    echo Building current-platform Frontend JAR first...
+    call gradlew.bat :frontend:publishCurrentPlatformJar -x test
 )
 
 echo.
@@ -21,7 +23,7 @@ echo Starting Frontend GUI...
 echo Press Ctrl+C to stop
 echo.
 
-java -jar frontend\build\libs\frontend-0.0.1-SNAPSHOT-all.jar
+java -jar "%JAR_PATH%"
 set EXIT_CODE=%ERRORLEVEL%
 endlocal
 exit /b %EXIT_CODE%

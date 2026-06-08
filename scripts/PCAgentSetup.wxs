@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!--
+      SYSTEM account runs PCAgent.exe with the first-install flag after files are installed.
+
+      KEY: Deferred CAs must be placed BEFORE InstallFinalize in the sequence.
+           InstallFinalize collects and executes all deferred CAs.
+           Placing After="InstallFinalize" means the CA never runs.
+
+      Placement:
+        CA_SetExe    - immediate, After="CostFinalize" (sets property for deferred CA)
+        CA_PCAgentFirstInstall - deferred, After="InstallFiles" (files available, before InstallFinalize)
+    -->
+
+    <Property Id="PCAGENT_EXE" Secure="yes" />
+
+    <!-- Immediate: capture launcher path before deferred execution phase -->
+    <CustomAction Id="CA_SetExe"
+                  Property="PCAGENT_EXE"
+                  Value="[INSTALLDIR]PCAgent.exe"
+                  Execute="immediate" />
+
+    <!-- Deferred (SYSTEM): run launcher bootstrap AFTER files installed, BEFORE InstallFinalize -->
+    <CustomAction Id="CA_PCAgentFirstInstall"
+                  Property="PCAGENT_EXE"
+                  ExeCommand="--first-install"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <!-- immediate CA: runs during UI/costing phase -->
+      <Custom Action="CA_SetExe" After="CostFinalize">NOT Installed OR UPGRADINGPRODUCTCODE</Custom>
+      <!-- deferred CA: MUST be before InstallFinalize so it gets picked up by InstallFinalize -->
+      <Custom Action="CA_PCAgentFirstInstall" After="InstallFiles">NOT Installed OR UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

@@ -4,7 +4,7 @@ import com.example.backend.model.pc.PcMaster;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,17 +22,11 @@ import java.util.Map;
  * heartbeat마다 알림이 발생하는 중복 알림을 방지하기 위함이다.
  */
 @Service
+@RequiredArgsConstructor
 public class TrafficService {
 
     private final PcMasterRepository pcMasterRepository;
     private final TrafficLogsRepository trafficLogRepository;
-
-    @Autowired
-    public TrafficService(PcMasterRepository pcMasterRepository,
-                          TrafficLogsRepository trafficLogRepository) {
-        this.pcMasterRepository = pcMasterRepository;
-        this.trafficLogRepository = trafficLogRepository;
-    }
 
     /**
      * 에이전트 heartbeat를 처리한다.

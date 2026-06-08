@@ -1,12 +1,12 @@
 package com.example.backend.controller.admin;
 
 import com.example.backend.dto.command.CommandRequestDto;
-import com.example.backend.model.agent.AgentAuthToken;
-import com.example.backend.model.pc.PcMaster;
-import com.example.backend.repository.agent.AgentAuthTokenRepository;
-import com.example.backend.repository.pc.PcMasterRepository;
+import com.example.backend.model.user.User;
+import com.example.backend.repository.user.UserRepository;
+import com.example.backend.service.admin.AdminService;
 import com.example.backend.service.agent.AgentTokenService;
 import com.example.backend.service.audit.AuditService;
+import com.example.backend.service.command.CommandLifecycleService;
 import com.example.backend.service.command.CommandService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,12 +17,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
-import org.springframework.transaction.annotation.Transactional;
-
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,18 +40,39 @@ import java.util.Map;
 public class AdminController {
 
     private final CommandService commandService;
+    private final CommandLifecycleService commandLifecycleService;
     private final AgentTokenService agentTokenService;
     private final AuditService auditService;
     private final JdbcTemplate jdbcTemplate;
-    private final PcMasterRepository pcMasterRepository;
-    private final AgentAuthTokenRepository agentAuthTokenRepository;
+    private final AdminService adminService;
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Value("${agent.install-key:INST-CHANGE-ME-BEFORE-DEPLOY}")
     private String installKey;
 
-    /**
-     * 빠른 API로 PC 단일 개에 명령 단큐라는 단순한 방식.
-     */
+    @PutMapping("/change-password")
+    @Operation(summary = "관리자 비밀번호 변경", description = "현재 비밀번호 확인 후 새 비밀번호로 변경합니다.")
+    @ApiResponse(responseCode = "200", description = "변경 성공")
+    @ApiResponse(responseCode = "400", description = "현재 비밀번호 불일치 또는 입력 오류")
+    public ResponseEntity<Map<String, String>> changePassword(@RequestBody Map<String, String> body) {
+        String current = body.getOrDefault("currentPassword", "");
+        String next    = body.getOrDefault("newPassword", "");
+        if (current.isBlank() || next.isBlank() || next.length() < 8) {
+            return ResponseEntity.badRequest().body(Map.of("error", "새 비밀번호는 8자 이상이어야 합니다."));
+        }
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
+        if (!passwordEncoder.matches(current, user.getPassword())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "현재 비밀번호가 일치하지 않습니다."));
+        }
+        user.changePassword(passwordEncoder.encode(next));
+        userRepository.save(user);
+        auditService.log(username, "CHANGE_PASSWORD", "USER", username);
+        return ResponseEntity.ok(Map.of("status", "ok"));
+    }
+
     @PostMapping("/enqueue")
     @Operation(
         summary = "PC 명령 단순 큐",
@@ -68,9 +88,7 @@ public class AdminController {
         req.setType(type);
         req.setScriptUrl(scriptUrl);
         commandService.enqueueCommand(req);
-        Map<String, Object> resp = new HashMap<>();
-        resp.put("status", "queued");
-        return ResponseEntity.ok(resp);
+        return ResponseEntity.ok(Map.of("status", "queued"));
     }
 
     @PostMapping("/group/wol")
@@ -81,10 +99,17 @@ public class AdminController {
     @ApiResponse(responseCode = "200", description = "WOL 전송 성공 또는 온라인 리더 없음")
     public ResponseEntity<Map<String, Object>> groupWol(
             @Parameter(description = "강의실 그룹 ID") @RequestParam Long groupId) {
-        boolean ok = commandService.sendGroupWol(groupId);
-        Map<String, Object> resp = new HashMap<>();
-        resp.put("status", ok ? "ok" : "no-leader");
-        return ResponseEntity.ok(resp);
+        var req = new CommandRequestDto();
+        req.setScope("GROUP");
+        req.setGroupId(groupId);
+        req.setType("PCON");
+        req.setRole("ALL");
+        Map<String, Object> result = commandLifecycleService.enqueue(req);
+        int queued = Integer.parseInt(String.valueOf(result.getOrDefault("queued", 0)));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", queued > 0 ? "ok" : "no-leader");
+        response.putAll(result);
+        return ResponseEntity.ok(response);
     }
 
     @PutMapping("/agents/{mac}/revoke")
@@ -99,15 +124,12 @@ public class AdminController {
             @PathVariable String mac) {
         agentTokenService.revokeByMac(mac);
         auditService.log("ADMIN", "REVOKE_TOKEN", "AGENT", mac);
-        Map<String, Object> resp = new HashMap<>();
-        resp.put("status", "revoked");
-        resp.put("mac", mac);
-        return ResponseEntity.ok(resp);
+        return ResponseEntity.ok(Map.of("status", "revoked", "mac", mac));
     }
 
     @GetMapping("/install-key")
     @Operation(summary = "에이전트 설치키 조회", description = "설치키 설정 여부와 앞 4자리만 반환합니다 (평문 노출 방지).")
-    public ResponseEntity<Map<String, Object>> getInstallKey() {
+    public ResponseEntity<Map<String, Object>> findInstallKey() {
         boolean configured = installKey != null && !installKey.isBlank()
                 && !installKey.startsWith("INST-CHANGE-ME") && !installKey.startsWith("CHANGE_ME");
         String preview = (installKey != null && installKey.length() > 4)
@@ -115,6 +137,8 @@ public class AdminController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("configured", configured);
         resp.put("keyPreview", preview);
+        // 관리자 대시보드에서 복사/배포를 위해 전체 키도 반환 (관리자 전용 엔드포인트)
+        resp.put("key", configured ? installKey : "-");
         return ResponseEntity.ok(resp);
     }
 
@@ -122,112 +146,22 @@ public class AdminController {
     @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다. pc_master에 없는 고아 토큰도 포함됩니다.")
     @ApiResponse(responseCode = "200", description = "에이전트 목록 조회 성공")
     @ApiResponse(responseCode = "401", description = "인증 실패")
-    public ResponseEntity<List<Map<String, Object>>> listAgents() {
-        List<PcMaster> pcs = pcMasterRepository.findAll();
-        Map<String, PcMaster> pcByMac = new HashMap<>();
-        for (PcMaster pc : pcs) {
-            if (pc.getMacAddress() != null) {
-                pcByMac.put(pc.getMacAddress(), pc);
-            }
-        }
-
-        List<AgentAuthToken> tokens = agentAuthTokenRepository.findAll();
-        Map<String, AgentAuthToken> tokenByMac = new LinkedHashMap<>();
-        for (AgentAuthToken token : tokens) {
-            if (token.getMacAddress() == null) {
-                continue;
-            }
-            AgentAuthToken existing = tokenByMac.get(token.getMacAddress());
-            if (existing == null || isPreferredToken(token, existing)) {
-                tokenByMac.put(token.getMacAddress(), token);
-            }
-        }
-
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (PcMaster pc : pcs) {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("macAddress", pc.getMacAddress());
-            row.put("pcName", pc.getPcName());
-            row.put("ipAddress", pc.getIpAddress());
-            row.put("status", pc.getStatus());
-            row.put("role", pc.getRole());
-            row.put("lastSeen", pc.getLastSeen());
-            AgentAuthToken tok = tokenByMac.get(pc.getMacAddress());
-            row.put("tokenActive", tok != null && !tok.isRevoked());
-            row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
-            row.put("tokenLastUsedAt", tok != null ? tok.getLastUsedAt() : null);
-            row.put("orphan", false);
-            result.add(row);
-        }
-
-        // token만 존재하고 pc_master에는 없는 고아 레코드도 노출하여 운영자가 정리 가능하게 함
-        for (Map.Entry<String, AgentAuthToken> e : tokenByMac.entrySet()) {
-            String mac = e.getKey();
-            if (pcByMac.containsKey(mac)) {
-                continue;
-            }
-            AgentAuthToken tok = e.getValue();
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("macAddress", mac);
-            row.put("pcName", "(미등록 PC)");
-            row.put("ipAddress", "-");
-            row.put("status", "UNREGISTERED");
-            row.put("role", "-");
-            row.put("lastSeen", null);
-            row.put("tokenActive", tok != null && !tok.isRevoked());
-            row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
-            row.put("tokenLastUsedAt", tok != null ? tok.getLastUsedAt() : null);
-            row.put("orphan", true);
-            result.add(row);
-        }
-        return ResponseEntity.ok(result);
-    }
-
-    private boolean isPreferredToken(AgentAuthToken candidate, AgentAuthToken existing) {
-        if (candidate == null) {
-            return false;
-        }
-        if (existing == null) {
-            return true;
-        }
-
-        if (candidate.getLastUsedAt() != null && existing.getLastUsedAt() != null) {
-            if (candidate.getLastUsedAt().isAfter(existing.getLastUsedAt())) {
-                return true;
-            }
-            if (candidate.getLastUsedAt().isBefore(existing.getLastUsedAt())) {
-                return false;
-            }
-        } else if (candidate.getLastUsedAt() != null) {
-            return true;
-        } else if (existing.getLastUsedAt() != null) {
-            return false;
-        }
-
-        if (candidate.getIssuedAt() != null && existing.getIssuedAt() != null) {
-            return candidate.getIssuedAt().isAfter(existing.getIssuedAt());
-        }
-        return candidate.getIssuedAt() != null && existing.getIssuedAt() == null;
+    public ResponseEntity<List<Map<String, Object>>> findAll() {
+        return ResponseEntity.ok(adminService.findAll());
     }
 
     @DeleteMapping("/agents/{mac}")
     @Operation(summary = "에이전트 강제 삭제", description = "PC 레코드와 토큰을 모두 삭제합니다.")
-    @Transactional
-    public ResponseEntity<Map<String, Object>> deleteAgent(@PathVariable String mac) {
-        agentAuthTokenRepository.findAllByMacAddress(mac).forEach(agentAuthTokenRepository::delete);
-        pcMasterRepository.findById(mac).ifPresent(pcMasterRepository::delete);
-        auditService.log("ADMIN", "DELETE_AGENT", "AGENT", mac);
-        Map<String, Object> resp = new HashMap<>();
-        resp.put("status", "deleted");
-        resp.put("mac", mac);
-        return ResponseEntity.ok(resp);
+    public ResponseEntity<Map<String, Object>> delete(@PathVariable String mac) {
+        adminService.delete(mac);
+        return ResponseEntity.ok(Map.of("status", "deleted", "mac", mac));
     }
 
     @GetMapping("/audit/logs")
     @Operation(summary = "감사 로그 조회", description = "action 또는 actor 기준으로 최근 감사 로그를 조회합니다. 기본 최대 100건.")
     @ApiResponse(responseCode = "200", description = "감사 로그 목록")
     @ApiResponse(responseCode = "401", description = "인증 실패")
-    public ResponseEntity<List<Map<String, Object>>> getAuditLogs(
+    public ResponseEntity<List<Map<String, Object>>> findAuditLogs(
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String actor,
             @RequestParam(defaultValue = "100") int limit) {

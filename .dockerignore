@@ -19,3 +19,6 @@ node_modules/
 .npm
 *.md
 !README.md
+.claude/
+*.tar
+frontend/build/

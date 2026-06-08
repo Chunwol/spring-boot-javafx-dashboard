@@ -17,7 +17,7 @@ import java.util.Set;
  */
 public final class DashboardAlertSupport {
 
-    private static final DateTimeFormatter ALERT_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
+    private static final DateTimeFormatter ALERT_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
 
     private DashboardAlertSupport() {
     }

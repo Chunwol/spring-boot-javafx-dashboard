@@ -4,7 +4,6 @@ import com.example.dto.dashboard.LayoutBackup;
 import com.example.frontend.service.DashboardLayoutService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
@@ -30,7 +29,7 @@ class DashboardLayoutActionModuleTest {
 
     @BeforeAll
     static void initToolkit() {
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test

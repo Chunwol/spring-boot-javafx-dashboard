@@ -19,6 +19,13 @@ FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 
+# PDF 보고서 한글 렌더링용 나눔고딕 폰트 설치 (OFL 라이선스)
+# ReportService가 /usr/share/fonts/truetype/nanum/NanumGothic.ttf 를 로드함
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends fonts-nanum fontconfig \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
+
 # 빌드 스테이지에서 생성된 Boot JAR 복사
 COPY --from=builder /build/backend/build/libs/backend-0.0.1-SNAPSHOT.jar /app/app.jar
 

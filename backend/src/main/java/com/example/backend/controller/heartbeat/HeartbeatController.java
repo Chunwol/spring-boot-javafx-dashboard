@@ -64,8 +64,8 @@ public class HeartbeatController {
         // 서비스에서 PC 갱신 + 트래픽 저장 + 명령 조회를 한 트랜잭션으로 처리
         Map<String, Object> pendingCmd = heartbeatService.processHeartbeat(heartbeat);
 
-        auditService.log(heartbeat.getMacAddress(), "HEARTBEAT", "PC",
-                heartbeat.getMacAddress(), null, heartbeat.getIpAddress());
+        // 매 heartbeat audit 로그 제거 (800대 × 12s = 5.7M rows/day → 5,700배 감소)
+        // 의미 있는 이벤트(상태 변경, 그룹 재배정, 명령 실행)는 HeartbeatService에서 별도 로그.
 
         Map<String, Object> resp = new HashMap<>();
         if (pendingCmd != null) {

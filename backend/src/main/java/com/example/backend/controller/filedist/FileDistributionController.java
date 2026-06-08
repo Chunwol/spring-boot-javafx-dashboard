@@ -61,12 +61,12 @@ public class FileDistributionController {
         String uploadId = String.valueOf(body.getOrDefault("uploadId", ""));
         String originalFilename = String.valueOf(body.getOrDefault("originalFilename", "unknown.bin"));
         int totalChunks = toInt(body.get("totalChunks"), 1);
-        int waveSize = toInt(body.get("waveSize"), 20);
+        int waveSize = toInt(body.get("waveSize"), 5);
         boolean canaryOnly = Boolean.parseBoolean(String.valueOf(body.getOrDefault("canaryOnly", false)));
         Long groupId = parseOptionalLong(body.get("groupId"), "groupId");
         Long artifactId = parseOptionalLong(body.get("artifactId"), "artifactId");
         String targetVersion = body.get("targetVersion") == null ? null : String.valueOf(body.get("targetVersion"));
-        String sourceMode = String.valueOf(body.getOrDefault("sourceMode", "SERVER_ONLY"));
+        String sourceMode = String.valueOf(body.getOrDefault("sourceMode", "HYBRID_PEER"));
         Double rampUpFactor = parseOptionalDouble(body.get("rampUpFactor"), "rampUpFactor");
 
         if (uploadId.isBlank()) {

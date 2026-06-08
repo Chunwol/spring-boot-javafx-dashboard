@@ -33,6 +33,7 @@ import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * 강의실 패널의 생성/업데이트/삭제, 드래그/리사이즈,
@@ -81,6 +82,8 @@ public class DashboardClassroomModule {
     private final Map<Long, Button> classroomDeleteBtns = new HashMap<>();
     private final Map<Long, Button> gridSettingsBtns = new HashMap<>();
     private final Map<Long, Node> resizeHandleNodes = new HashMap<>();
+    private BiConsumer<Node, Boolean> onSelectCallback;
+    private Supplier<Set<Node>> selectedNodesSupplier;
     private final Map<Long, List<PcStatusDto>> pcCacheByGroupId = new HashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean skipGroupCommandConfirm = new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final String ORDER_BY_PC_NAME = "PC_NAME";
@@ -136,6 +139,33 @@ public class DashboardClassroomModule {
                 });
     }
 
+    public void setOnSelectCallback(BiConsumer<Node, Boolean> callback) {
+        this.onSelectCallback = callback;
+    }
+
+    public void setSelectedNodesSupplier(Supplier<Set<Node>> supplier) {
+        this.selectedNodesSupplier = supplier;
+    }
+
+    public void setSmartGuides(DashboardSmartGuides guides) {
+        this.dashboardInteractionService.setSmartGuides(guides);
+    }
+
+    public void showGridSettingsForPanel(Long panelId) {
+        VBox panel = panelManager.getPanels().stream()
+                .filter(p -> p.getType() == PanelInfo.PanelType.CLASSROOM && p.getId() == panelId)
+                .map(PanelInfo::getPanel).findFirst().orElse(null);
+        if (panel == null) return;
+        Long groupId = (Long) panel.getProperties().get("groupId");
+        GridPane pcGrid = (GridPane) panel.getProperties().get("pcGrid");
+        int totalPcs = 0;
+        Label totalLabel = (Label) panel.getProperties().get("totalLabel");
+        if (totalLabel != null) {
+            try { totalPcs = Integer.parseInt(totalLabel.getText().replace(" 대", "")); } catch (NumberFormatException ignored) {}
+        }
+        showGridSettingsDialog(panel, groupId, totalPcs, pcGrid);
+    }
+
     private boolean ensureWritePermission(String actionName) {
         if (!apiClient.isViewerRole()) {
             return true;
@@ -158,8 +188,10 @@ public class DashboardClassroomModule {
             summaryByGroupId.put(summary.getGroupId(), summary);
         }
 
+        // zIndex 오름차순 정렬 → add() 순서가 화면 z-order와 일치 (DB 영속 zIndex 반영)
         List<DashboardPanelDto> classroomPanels = dashboardPanels.stream()
                 .filter(p -> "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType()))
+                .sorted(Comparator.comparingInt(p -> p.getZIndex() == null ? 0 : p.getZIndex()))
                 .toList();
 
         List<Long> activePanelIds = classroomPanels.stream().map(DashboardPanelDto::getId).toList();
@@ -327,20 +359,15 @@ public class DashboardClassroomModule {
                 });
     }
 
-    /** editMode 연동: 삭제 버튼 visibility 토글 */
+    /** editMode 연동: 선택 해제만 처리 (버튼/핸들은 선택 시에만 표시) */
     public void applyEditMode(boolean editMode) {
-        classroomDeleteBtns.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        gridSettingsBtns.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        resizeHandleNodes.values().forEach(node -> {
-            node.setVisible(editMode);
-            node.setManaged(editMode);
-        });
+        if (!editMode) {
+            // 편집 모드 종료 시 리사이즈 핸들 숨김
+            resizeHandleNodes.values().forEach(node -> {
+                node.setVisible(false);
+                node.setManaged(false);
+            });
+        }
     }
 
     // ─── 패널 내부 빌더 (private) ──────────────────────────────────────────
@@ -358,6 +385,10 @@ public class DashboardClassroomModule {
 
         panel.getProperties().put("dashboardPanelId", panelDto.getId());
         panel.getProperties().put("groupId", summary.getGroupId());
+        panel.getProperties().put("panelType", "classroom");
+        if (panelDto.getZIndex() != null) {
+            panel.getProperties().put("zIndex", panelDto.getZIndex());
+        }
         panel.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 20.0);
         panel.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 20.0);
         panel.setPrefWidth(panelDto.getWidth() != null ? panelDto.getWidth() : 360.0);
@@ -384,8 +415,7 @@ public class DashboardClassroomModule {
         nameLabel.setMaxWidth(Double.MAX_VALUE);
 
         deleteBtn.getStyleClass().add("btn-sm");
-        deleteBtn.setVisible(editModeSupplier.getAsBoolean());
-        deleteBtn.setManaged(editModeSupplier.getAsBoolean());
+        // headerBar is permanently hidden in FXML; button actions wired for right-panel use
         deleteBtn.setOnAction(e -> {
             e.consume();
             Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "이 강의실 패널을 대시보드에서 제거하시겠습니까?", ButtonType.YES, ButtonType.NO);
@@ -398,8 +428,6 @@ public class DashboardClassroomModule {
         });
         classroomDeleteBtns.put(panelDto.getId(), deleteBtn);
         gridSettingsBtn.getStyleClass().add("btn-sm");
-        gridSettingsBtn.setVisible(editModeSupplier.getAsBoolean());
-        gridSettingsBtn.setManaged(editModeSupplier.getAsBoolean());
         gridSettingsBtn.setOnAction(e -> {
             e.consume();
             GridPane pg = (GridPane) panel.getProperties().get("pcGrid");
@@ -432,6 +460,7 @@ public class DashboardClassroomModule {
         panel.getProperties().put("gridMaxCols", 20);
         panel.getProperties().put("resizeHandleBox", resizeHandleBox);
         panel.getProperties().put("resizeHandleLabel", resizeHandleLabel);
+        panel.getProperties().put("resizeHandleNode", resizeHandleBox);
 
         // configJson에서 gridOrderMode 복원 (DB 영속)
         String savedOrderMode = ORDER_BY_PC_NAME;
@@ -847,13 +876,22 @@ public class DashboardClassroomModule {
                 panel,
                 editModeSupplier,
                 this::applySnap,
+                selectedNodesSupplier,
                 () -> {
-            panel.setOpacity(1.0);
-            updateDashboardPanelPosition(dashboardPanelId,
-                    panel.getLayoutX(), panel.getLayoutY(),
-                    panel.getPrefWidth(), panel.getPrefHeight(), true);
+                    panel.setOpacity(1.0);
+                    updateDashboardPanelPosition(dashboardPanelId,
+                            panel.getLayoutX(), panel.getLayoutY(),
+                            panel.getPrefWidth(), panel.getPrefHeight(), true);
                 }
         );
+        panel.setOnMouseClicked(e -> {
+            if (!editModeSupplier.getAsBoolean()) return;
+            boolean dragged = Boolean.TRUE.equals(panel.getProperties().get("__dragging__"));
+            if (!dragged && onSelectCallback != null) {
+                onSelectCallback.accept(panel, e.isControlDown());
+                e.consume();
+            }
+        });
     }
 
     private void makeResizable(VBox panel, ClassroomSummaryDto summary, Long dashboardPanelId) {
@@ -872,8 +910,9 @@ public class DashboardClassroomModule {
         resizeHandle.setTextFill(Color.GRAY);
         resizeHandle.setCursor(Cursor.SE_RESIZE);
         resizeHandle.setAlignment(Pos.BOTTOM_RIGHT);
-        handleBox.setVisible(editModeSupplier.getAsBoolean());
-        handleBox.setManaged(editModeSupplier.getAsBoolean());
+        // Handle visibility managed by selection, not edit mode
+        handleBox.setVisible(false);
+        handleBox.setManaged(false);
         resizeHandleNodes.put(dashboardPanelId, handleBox);
 
         dashboardInteractionService.attachResizeHandlers(
@@ -910,8 +949,14 @@ public class DashboardClassroomModule {
             put("height", height);
             put("visible", visible);
         }}).exceptionally(ex -> {
-            Platform.runLater(() -> new Alert(Alert.AlertType.ERROR,
-                    "패널 위치 저장 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.")).show());
+            Platform.runLater(() -> {
+                String msg = "패널 위치 저장 실패: " + resolveErrorMessage(ex, "요청을 처리하지 못했습니다.");
+                if (showToast != null) {
+                    showToast.accept(msg, true);
+                } else {
+                    log.warn(msg);
+                }
+            });
             return null;
         });
     }

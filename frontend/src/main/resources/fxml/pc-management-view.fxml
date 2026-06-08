@@ -1,30 +1,75 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
 
-<ScrollPane xmlns:fx="http://javafx.com/fxml"
-            fitToWidth="true"
-            fitToHeight="false"
-            pannable="true"
-            hbarPolicy="AS_NEEDED"
-            vbarPolicy="AS_NEEDED">
-    <content>
-        <VBox fx:id="rootContainer"
-              spacing="12"
-              fillWidth="true"
-              maxWidth="1.7976931348623157E308"
-              styleClass="pcmgmt-root">
-            <padding>
-                <Insets top="15" right="15" bottom="15" left="15" />
-            </padding>
-            <children>
-                <StackPane fx:id="viewControlsSlot" />
-                <StackPane fx:id="pcTableSlot" VBox.vgrow="ALWAYS" />
-                <StackPane fx:id="commandSectionSlot" />
-            </children>
-        </VBox>
-    </content>
-</ScrollPane>
+<!-- 루트: tab-content (외부 배경 + 16px 패딩) — inTabContent() 래핑 불필요 -->
+<HBox xmlns:fx="http://javafx.com/fxml"
+      styleClass="tab-content" spacing="0"
+      maxWidth="1.7976931348623157E308"
+      maxHeight="1.7976931348623157E308">
+
+    <!-- ─── 좌측: 메인 컨텐츠 ─────────────────────────────────────── -->
+    <VBox fx:id="rootContainer" styleClass="tab-main" spacing="12"
+          HBox.hgrow="ALWAYS"
+          maxWidth="1.7976931348623157E308"
+          maxHeight="1.7976931348623157E308">
+        <padding><Insets top="20" right="20" bottom="20" left="20"/></padding>
+        <children>
+            <Label text="PC 관제" styleClass="tab-title"/>
+            <StackPane fx:id="viewControlsSlot"/>
+            <StackPane fx:id="pcTableSlot" VBox.vgrow="ALWAYS"/>
+            <StackPane fx:id="commandSectionSlot"/>
+        </children>
+    </VBox>
+
+    <!-- ─── 우측: 전송 확인 슬라이드 패널 (초기 숨김) ─────────────── -->
+    <VBox fx:id="sendPanel" styleClass="classroom-detail-panel" spacing="10"
+          minWidth="0" prefWidth="0" managed="false" visible="false">
+        <padding><Insets top="20" right="20" bottom="20" left="20"/></padding>
+        <children>
+
+            <!-- 헤더 -->
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <children>
+                    <Label text="명령 전송 확인" styleClass="detail-title"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="sendPanelCloseBtn" styleClass="detail-close-btn">
+                        <graphic><FontIcon iconLiteral="mdi2c-close" iconSize="16"/></graphic>
+                    </Button>
+                </children>
+            </HBox>
+
+            <!-- 요약 -->
+            <VBox fx:id="sendSummaryBox" spacing="4" styleClass="detail-counter-row">
+                <padding><Insets top="10" right="12" bottom="10" left="12"/></padding>
+            </VBox>
+
+            <Separator/>
+
+            <!-- 옵션 (파일 전송·스크립트용, 동적으로 채움) -->
+            <VBox fx:id="sendOptionsBox" spacing="10"/>
+
+            <!-- 여백 -->
+            <Region VBox.vgrow="ALWAYS"/>
+
+            <!-- 버튼 -->
+            <HBox spacing="8" alignment="CENTER_RIGHT">
+                <children>
+                    <Button fx:id="sendCancelBtn"  text="취소"      styleClass="btn-neutral"/>
+                    <Button fx:id="sendConfirmBtn" text="전송 실행" styleClass="btn-primary"/>
+                </children>
+            </HBox>
+
+        </children>
+    </VBox>
+
+</HBox>

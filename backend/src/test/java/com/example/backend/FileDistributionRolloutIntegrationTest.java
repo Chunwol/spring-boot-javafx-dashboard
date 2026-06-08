@@ -41,6 +41,7 @@ class FileDistributionRolloutIntegrationTest {
     private static final Path SCRIPTS_DIR = Path.of("build", "tmp", "fd-rollout-uploads-" + System.currentTimeMillis())
             .toAbsolutePath()
             .normalize();
+    private static final String JWT_SECRET = "file-distribution-rollout-test-secret-2026";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -71,6 +72,8 @@ class FileDistributionRolloutIntegrationTest {
         registry.add("app.scripts.dir", () -> SCRIPTS_DIR.toString());
         registry.add("DEFAULT_ADMIN_SYNC_ON_STARTUP", () -> "false");
         registry.add("DEFAULT_VIEWER_SYNC_ON_STARTUP", () -> "false");
+        registry.add("JWT_SECRET", () -> JWT_SECRET);
+        registry.add("app.jwt.secret", () -> JWT_SECRET);
         registry.add("app.file-distribution.auto-rollback-enabled", () -> "true");
         registry.add("app.file-distribution.auto-catchup-on-heartbeat", () -> "true");
         registry.add("app.file-distribution.fail-threshold", () -> "0.20");
@@ -179,11 +182,66 @@ class FileDistributionRolloutIntegrationTest {
                 .contains("AUTO_CATCHUP_CREATED");
     }
 
+    @Test
+    void hybridPeerCandidatesPreferClassroomAndRotatePerTarget() throws Exception {
+        PcMaster seed1 = saveOnlinePc("AA:BB:CC:DD:30:01", "10.30.1.11", "session-31", "1.0.0", 301L);
+        PcMaster seed2 = saveOnlinePc("AA:BB:CC:DD:30:02", "10.30.1.12", "session-32", "1.0.0", 301L);
+        PcMaster target1 = saveOnlinePc("AA:BB:CC:DD:30:03", "10.30.1.13", "session-33", "1.0.0", 301L);
+        PcMaster target2 = saveOnlinePc("AA:BB:CC:DD:30:04", "10.30.1.14", "session-34", "1.0.0", 301L);
+        PcMaster target3 = saveOnlinePc("AA:BB:CC:DD:30:05", "10.30.1.15", "session-35", "1.0.0", 301L);
+        ScriptArtifact artifact = saveArtifact("agent-3.0.0.msi", "d".repeat(64));
+
+        FileDistributionJob job = orchestrator.createJob(
+                "hybrid-peer-job-" + System.currentTimeMillis(),
+                artifact.getOriginalFilename(),
+                1,
+                2,
+                false,
+                null,
+                artifact.getId(),
+                "3.0.0",
+                "HYBRID_PEER",
+                1.0,
+                List.of(
+                        seed1.getMacAddress(),
+                        seed2.getMacAddress(),
+                        target1.getMacAddress(),
+                        target2.getMacAddress(),
+                        target3.getMacAddress()
+                )
+        );
+
+        orchestrator.reportAgentResult(job.getId(), seed1.getMacAddress(), true, null);
+        orchestrator.reportAgentResult(job.getId(), seed2.getMacAddress(), true, null);
+
+        List<CommandQueue> waveOneCommands = commandQueueRepository.findAll().stream()
+                .filter(command -> "AGENT_UPDATE".equalsIgnoreCase(command.getCommandType()))
+                .filter(command -> job.getId().equals(extractPayloadLong(command, "jobId")))
+                .filter(command -> Long.valueOf(1L).equals(extractPayloadLong(command, "wave")))
+                .toList();
+
+        assertThat(waveOneCommands).hasSize(3);
+        for (CommandQueue command : waveOneCommands) {
+            JsonNode payload = objectMapper.readTree(command.getPayloadJson());
+            assertThat(payload.get("sourceMode").asText()).isEqualTo("HYBRID_PEER");
+            JsonNode candidates = payload.get("peerCandidates");
+            assertThat(candidates).isNotNull();
+            assertThat(candidates.size()).isEqualTo(2);
+            assertThat(candidates.get(0).get("peerScope").asText()).isEqualTo("SAME_CLASSROOM");
+            assertThat(candidates.get(1).get("peerScope").asText()).isEqualTo("SAME_CLASSROOM");
+        }
+    }
+
     private PcMaster saveOnlinePc(String mac, String ip, String sessionId, String version) {
+        return saveOnlinePc(mac, ip, sessionId, version, null);
+    }
+
+    private PcMaster saveOnlinePc(String mac, String ip, String sessionId, String version, Long groupId) {
         PcMaster pc = new PcMaster();
         pc.setMacAddress(mac);
         pc.setPcName("PC-" + mac.substring(mac.length() - 2));
         pc.setIpAddress(ip);
+        pc.setGroupId(groupId);
         pc.setStatus("ONLINE");
         pc.setLastSeen(LocalDateTime.now());
         pc.setLastAgentSessionId(sessionId);

@@ -18,6 +18,8 @@ import com.example.agent.util.UiThreadUtils;
 
 import java.io.*;
 import java.net.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
@@ -59,6 +61,8 @@ public class CommandExecutor {
     private static final long COLLECT_UPLOAD_RETRY_BACKOFF_MS = 350L;
     private static final long AGENT_UPDATE_EXIT_DELAY_MS = 4_000L;
     private static final int AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE = 64 * 1024;
+    private static final long AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE = 8L * 1024 * 1024;
+    private static final int AGENT_UPDATE_DOWNLOAD_MAX_RETRY = 3;
 
     private final AgentConfig config;
     private final AgentConfigLoader configLoader;
@@ -1048,8 +1052,17 @@ public class CommandExecutor {
                     : Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
             Path updateDir = Files.createDirectories(parentDir.resolve("agent-update"));
 
-            String fileName = selfPath.getFileName() == null ? "pcagent.jar" : selfPath.getFileName().toString();
-            String ext = fileName.toLowerCase(Locale.ROOT).endsWith(".exe") ? ".exe" : ".jar";
+            // 파일 확장자는 downloadUrl 기준 결정 (.msi 우선 → jpackage 산출물).
+            // 현재 셀프 바이너리 경로 확장자는 jpackage 런처 EXE라 .msi와 무관.
+            String urlLower = downloadUrl.toLowerCase(Locale.ROOT);
+            boolean isMsi = urlLower.endsWith(".msi");
+            String ext;
+            if (isMsi) {
+                ext = ".msi";
+            } else {
+                String fileName = selfPath.getFileName() == null ? "pcagent.jar" : selfPath.getFileName().toString();
+                ext = fileName.toLowerCase(Locale.ROOT).endsWith(".exe") ? ".exe" : ".jar";
+            }
             long now = System.currentTimeMillis();
             Path stagedFile = updateDir.resolve("agent-next-" + taskId + "-" + now + ext);
             Path backupFile = updateDir.resolve("agent-backup-" + taskId + "-" + now + ext);
@@ -1064,10 +1077,11 @@ public class CommandExecutor {
                 }
             }
 
-            Files.copy(selfPath, backupFile, StandardCopyOption.REPLACE_EXISTING);
-
             if (updateCacheServer != null) {
                 try {
+                    // 첫 AGENT_UPDATE 명령 수신 시 캐시 서버 on-demand 시작
+                    // (평소엔 꺼두고 필요할 때만 켜서 CPU 스파이크 방지)
+                    updateCacheServer.start();
                     String cacheToken = peerToken == null ? "" : peerToken;
                     updateCacheServer.registerArtifact(actualSha256, stagedFile, cacheToken);
                 } catch (Exception cacheEx) {
@@ -1075,8 +1089,17 @@ public class CommandExecutor {
                 }
             }
 
-            if (!scheduleAgentBinarySwap(selfPath, stagedFile, backupFile)) {
-                return new CommandResult(1, "", "업데이트 교체 프로세스 시작 실패");
+            if (isMsi) {
+                // MSI 흐름: msiexec가 파일 교체/롤백 자동 처리 → swap 스크립트 불필요
+                if (!scheduleMsiInstall(stagedFile)) {
+                    return new CommandResult(1, "", "MSI 설치 프로세스 시작 실패");
+                }
+            } else {
+                // 레거시 jar/exe 흐름 (백업 후 swap)
+                Files.copy(selfPath, backupFile, StandardCopyOption.REPLACE_EXISTING);
+                if (!scheduleAgentBinarySwap(selfPath, stagedFile, backupFile)) {
+                    return new CommandResult(1, "", "업데이트 교체 프로세스 시작 실패");
+                }
             }
 
             scheduleSelfExit(AGENT_UPDATE_EXIT_DELAY_MS);
@@ -1104,39 +1127,184 @@ public class CommandExecutor {
                 continue;
             }
             String url = candidate.trim();
+            Path partial = destination.resolveSibling(destination.getFileName().toString() + ".part");
             try {
-                Request.Builder requestBuilder = new Request.Builder().url(url).get();
-                if (isServerHostedUrl(url) && config.getAgentToken() != null && !config.getAgentToken().isBlank()) {
-                    requestBuilder.header("X-Agent-Token", config.getAgentToken());
-                }
-                if (peerToken != null && !peerToken.isBlank()) {
-                    requestBuilder.header("X-Agent-Update-Token", peerToken);
-                }
-                Request request = requestBuilder.build();
-                try (Response response = httpClient.newCall(request).execute()) {
-                    if (!response.isSuccessful() || response.body() == null) {
-                        throw new IOException("HTTP " + response.code());
-                    }
-                    byte[] buffer = new byte[AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE];
-                    try (InputStream in = response.body().byteStream();
-                         OutputStream out = Files.newOutputStream(destination,
-                                 StandardOpenOption.CREATE,
-                                 StandardOpenOption.TRUNCATE_EXISTING,
-                                 StandardOpenOption.WRITE)) {
-                        int read;
-                        while ((read = in.read(buffer)) > 0) {
-                            out.write(buffer, 0, read);
-                        }
-                    }
-                    return;
-                }
+                Files.deleteIfExists(partial);
+                downloadCandidateInChunks(url, partial, peerToken);
+                Files.move(partial, destination, StandardCopyOption.REPLACE_EXISTING);
+                return;
             } catch (IOException ex) {
                 lastError = ex;
+                try {
+                    Files.deleteIfExists(partial);
+                } catch (IOException ignored) {
+                }
             }
         }
         throw lastError == null
                 ? new IOException("다운로드 가능한 업데이트 소스가 없습니다.")
                 : new IOException("업데이트 파일 다운로드 실패: " + lastError.getMessage(), lastError);
+    }
+
+    private void downloadCandidateInChunks(String url, Path partial, String peerToken) throws IOException {
+        log.info("업데이트 파일 청크 다운로드 시작 source={} chunkSize={}MB",
+                SensitiveDataMasker.maskUrl(url), AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE / 1024 / 1024);
+        long nextOffset = 0L;
+        long totalSize = -1L;
+        while (totalSize < 0 || nextOffset < totalSize) {
+            long end = totalSize > 0
+                    ? Math.min(totalSize - 1, nextOffset + AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE - 1)
+                    : nextOffset + AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE - 1;
+            RangeDownloadResult result = downloadRangeWithRetry(url, partial, nextOffset, end, peerToken);
+            if (result.fullResponse) {
+                log.info("업데이트 파일 다운로드 완료 source={} size={} bytes mode=single-stream-fallback",
+                        SensitiveDataMasker.maskUrl(url), result.nextOffset);
+                return;
+            }
+            if (result.totalSize <= 0 || result.nextOffset <= nextOffset) {
+                throw new IOException("잘못된 청크 다운로드 응답");
+            }
+            totalSize = result.totalSize;
+            nextOffset = result.nextOffset;
+        }
+        log.info("업데이트 파일 청크 다운로드 완료 source={} size={} bytes",
+                SensitiveDataMasker.maskUrl(url), totalSize);
+    }
+
+    private RangeDownloadResult downloadRangeWithRetry(String url,
+                                                       Path partial,
+                                                       long start,
+                                                       long end,
+                                                       String peerToken) throws IOException {
+        IOException lastError = null;
+        for (int attempt = 1; attempt <= AGENT_UPDATE_DOWNLOAD_MAX_RETRY; attempt++) {
+            try {
+                return downloadRange(url, partial, start, end, peerToken);
+            } catch (IOException ex) {
+                lastError = ex;
+                if (attempt < AGENT_UPDATE_DOWNLOAD_MAX_RETRY) {
+                    try {
+                        Thread.sleep(COLLECT_UPLOAD_RETRY_BACKOFF_MS * attempt);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("청크 다운로드 재시도 중 인터럽트", interrupted);
+                    }
+                }
+            }
+        }
+        throw lastError == null ? new IOException("청크 다운로드 실패") : lastError;
+    }
+
+    private RangeDownloadResult downloadRange(String url,
+                                              Path partial,
+                                              long start,
+                                              long end,
+                                              String peerToken) throws IOException {
+        Request request = buildUpdateDownloadRequest(url, peerToken)
+                .header("Range", "bytes=" + start + "-" + end)
+                .build();
+        try (Response response = httpClient.newCall(request).execute()) {
+            ResponseBody body = response.body();
+            if (body == null) {
+                throw new IOException("HTTP " + response.code() + " empty body");
+            }
+            if (response.code() == 200 && start == 0) {
+                long written = writeResponseBody(partial, 0, body);
+                return new RangeDownloadResult(written, written, true);
+            }
+            if (response.code() != 206) {
+                throw new IOException("HTTP " + response.code());
+            }
+            ContentRange contentRange = ContentRange.parse(response.header("Content-Range"));
+            if (contentRange == null || contentRange.start != start || contentRange.end < contentRange.start) {
+                throw new IOException("잘못된 Content-Range 응답");
+            }
+            long written = writeResponseBody(partial, start, body);
+            long expectedLength = contentRange.end - contentRange.start + 1;
+            if (written != expectedLength) {
+                throw new IOException("청크 크기 불일치 expected=" + expectedLength + " actual=" + written);
+            }
+            return new RangeDownloadResult(contentRange.end + 1, contentRange.totalSize, false);
+        }
+    }
+
+    private Request.Builder buildUpdateDownloadRequest(String url, String peerToken) {
+        Request.Builder requestBuilder = new Request.Builder().url(url).get();
+        if (isServerHostedUrl(url) && config.getAgentToken() != null && !config.getAgentToken().isBlank()) {
+            requestBuilder.header("X-Agent-Token", config.getAgentToken());
+        }
+        if (peerToken != null && !peerToken.isBlank()) {
+            requestBuilder.header("X-Agent-Update-Token", peerToken);
+        }
+        return requestBuilder;
+    }
+
+    private long writeResponseBody(Path target, long offset, ResponseBody body) throws IOException {
+        Path parent = target.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        long written = 0L;
+        byte[] buffer = new byte[AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE];
+        try (InputStream in = body.byteStream();
+             SeekableByteChannel channel = Files.newByteChannel(target,
+                     StandardOpenOption.CREATE,
+                     StandardOpenOption.WRITE)) {
+            channel.position(offset);
+            int read;
+            while ((read = in.read(buffer)) > 0) {
+                ByteBuffer byteBuffer = ByteBuffer.wrap(buffer, 0, read);
+                while (byteBuffer.hasRemaining()) {
+                    channel.write(byteBuffer);
+                }
+                written += read;
+            }
+        }
+        return written;
+    }
+
+    private static final class RangeDownloadResult {
+        private final long nextOffset;
+        private final long totalSize;
+        private final boolean fullResponse;
+
+        private RangeDownloadResult(long nextOffset, long totalSize, boolean fullResponse) {
+            this.nextOffset = nextOffset;
+            this.totalSize = totalSize;
+            this.fullResponse = fullResponse;
+        }
+    }
+
+    private static final class ContentRange {
+        private final long start;
+        private final long end;
+        private final long totalSize;
+
+        private ContentRange(long start, long end, long totalSize) {
+            this.start = start;
+            this.end = end;
+            this.totalSize = totalSize;
+        }
+
+        private static ContentRange parse(String header) {
+            if (header == null || !header.startsWith("bytes ")) {
+                return null;
+            }
+            try {
+                String value = header.substring("bytes ".length()).trim();
+                int dash = value.indexOf('-');
+                int slash = value.indexOf('/');
+                if (dash < 0 || slash < 0 || slash <= dash) {
+                    return null;
+                }
+                long start = Long.parseLong(value.substring(0, dash));
+                long end = Long.parseLong(value.substring(dash + 1, slash));
+                long total = Long.parseLong(value.substring(slash + 1));
+                return new ContentRange(start, end, total);
+            } catch (Exception ex) {
+                return null;
+            }
+        }
     }
 
     private boolean isServerHostedUrl(String url) {
@@ -1177,6 +1345,38 @@ public class CommandExecutor {
             }
         }
         return null;
+    }
+
+    /**
+     * MSI 파일을 detached PowerShell로 설치한다.
+     * 현재 프로세스가 종료되면 msiexec가 --win-upgrade-uuid 기반으로 자동 업그레이드 수행 →
+     * 완료 후 schtasks /Run으로 새 에이전트 실행.
+     */
+    private boolean scheduleMsiInstall(Path msiFile) {
+        try {
+            Path script = Files.createTempFile("pcagent-msi-install-", ".ps1");
+            String body = """
+                    param([Parameter(Mandatory=$true)][string]$Msi)
+                    Start-Sleep -Seconds 6
+                    $p = Start-Process msiexec.exe -ArgumentList '/i', $Msi, '/quiet', '/norestart' -PassThru -Wait
+                    if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+                      Start-Process schtasks.exe -ArgumentList '/Run', '/TN', 'PCAgent' -Wait
+                    }
+                    Remove-Item -LiteralPath $Msi -ErrorAction SilentlyContinue
+                    """;
+            Files.writeString(script, body, StandardCharsets.UTF_8);
+            script.toFile().deleteOnExit();
+            new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-WindowStyle", "Hidden",
+                    "-File", script.toAbsolutePath().toString(),
+                    msiFile.toAbsolutePath().toString()
+            ).start();
+            return true;
+        } catch (Exception ex) {
+            log.warn("MSI 설치 프로세스 시작 실패: {}", ex.getMessage());
+            return false;
+        }
     }
 
     private boolean scheduleAgentBinarySwap(Path targetBinary, Path stagedBinary, Path backupBinary) {

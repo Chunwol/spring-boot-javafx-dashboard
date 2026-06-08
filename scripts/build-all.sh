@@ -59,8 +59,8 @@ echo ""
 
 # 4. Frontend module
 echo -e "${YELLOW}[4/5] Building Frontend Module...${NC}"
-if ./gradlew :frontend:shadowJar -x test; then
-    echo -e "${GREEN}✓ Frontend JAR: frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar${NC}"
+if ./gradlew :frontend:publishPlatformJars -x test; then
+    echo -e "${GREEN}✓ Frontend platform JARs: dist/frontend/frontend-{win,mac,mac-aarch64,linux}.jar${NC}"
 else
     echo -e "${RED}✗ Frontend build failed${NC}"
     exit 1
@@ -71,7 +71,6 @@ echo -e "${YELLOW}[5/5] Collecting release artifacts to dist/${NC}"
 mkdir -p dist/backend dist/agent dist/frontend
 cp -f backend/build/libs/backend-0.0.1-SNAPSHOT.jar dist/backend/backend.jar
 cp -f agent/build/libs/agent-1.0.0.jar dist/agent/agent.jar
-cp -f frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar dist/frontend/frontend-all.jar
 
 if [[ "$(uname -s)" == "Darwin" || "$(uname -s)" == "Linux" ]]; then
     echo -e "${YELLOW}i EXE/MSI packaging is Windows-only. Run scripts/build-all.bat on Windows for installer output.${NC}"
@@ -85,7 +84,10 @@ echo ""
 echo "Generated artifacts:"
 echo "  • Backend:  dist/backend/backend.jar"
 echo "  • Agent:    dist/agent/agent.jar"
-echo "  • Frontend: dist/frontend/frontend-all.jar"
+echo "  • Frontend: dist/frontend/frontend-win.jar"
+echo "  • Frontend: dist/frontend/frontend-mac.jar"
+echo "  • Frontend: dist/frontend/frontend-mac-aarch64.jar"
+echo "  • Frontend: dist/frontend/frontend-linux.jar"
 echo ""
 echo "Next steps:"
 echo "  1. Distribute dist/ folder"

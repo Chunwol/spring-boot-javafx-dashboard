@@ -18,6 +18,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 import java.util.NoSuchElementException;
 
@@ -263,6 +265,38 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(resp);
     }
 
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiErrorResponse> handleMaxUploadSizeExceeded(
+            MaxUploadSizeExceededException ex,
+            HttpServletRequest request) {
+        long maxUploadSize = ex.getMaxUploadSize();
+        String message = maxUploadSize > 0
+                ? "업로드 가능한 최대 크기를 초과했습니다. 현재 한도: " + formatBytes(maxUploadSize) + "입니다."
+                : "업로드 가능한 최대 크기를 초과했습니다.";
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.PAYLOAD_TOO_LARGE.value(),
+                "PAYLOAD_TOO_LARGE",
+                message,
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(resp);
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiErrorResponse> handleMultipartException(
+            MultipartException ex,
+            HttpServletRequest request) {
+        Throwable cause = ex.getCause();
+        if (cause instanceof MaxUploadSizeExceededException maxUploadSizeExceededException) {
+            return handleMaxUploadSizeExceeded(maxUploadSizeExceededException, request);
+        }
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.BAD_REQUEST.value(),
+                "MULTIPART_ERROR",
+                "업로드 요청을 처리하지 못했습니다. 파일 크기 또는 전송 형식을 확인해주세요.",
+                request.getRequestURI());
+        return ResponseEntity.badRequest().body(resp);
+    }
+
     // ======== GENERIC EXCEPTION ========
 
     /**
@@ -281,5 +315,16 @@ public class GlobalExceptionHandler {
                 "서버 내부 오류가 발생했습니다.",
                 request.getRequestURI());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(resp);
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024) return String.format("%.1f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024) return String.format("%.1f MB", mb);
+        double gb = mb / 1024.0;
+        if (gb < 1024) return String.format("%.2f GB", gb);
+        return String.format("%.2f TB", gb / 1024.0);
     }
 }

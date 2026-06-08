@@ -597,13 +597,16 @@ public class FileDistributionOrchestrator {
         ScriptArtifact artifact = artifactOpt.get();
         String peerToken = buildPeerToken(job, artifact.getSha256());
 
-        List<Map<String, Object>> peerCandidates = buildPeerCandidates(job, wave, artifact.getSha256(), peerToken);
-
         int queued = 0;
         int failed = 0;
+        int maxPeerCandidateCount = 0;
         for (FileDistributionAgentStatus status : targets) {
             String agentId = status.getAgentId();
             try {
+                List<Map<String, Object>> peerCandidates =
+                        buildPeerCandidates(job, wave, agentId, artifact.getSha256(), peerToken);
+                maxPeerCandidateCount = Math.max(maxPeerCandidateCount, peerCandidates.size());
+
                 CommandQueue command = new CommandQueue();
                 command.setMacAddress(agentId);
                 command.setCommandType("AGENT_UPDATE");
@@ -629,7 +632,7 @@ public class FileDistributionOrchestrator {
                 "queued", queued,
                 "enqueueFailed", failed,
                 "sourceMode", job.getSourceMode(),
-                "peerCandidates", peerCandidates.size()
+                "maxPeerCandidates", maxPeerCandidateCount
         )));
 
         if (queued == 0) {
@@ -663,6 +666,7 @@ public class FileDistributionOrchestrator {
 
     private List<Map<String, Object>> buildPeerCandidates(FileDistributionJob job,
                                                            int currentWave,
+                                                           String targetAgentId,
                                                            String sha256,
                                                            String peerToken) {
         if (!SOURCE_MODE_HYBRID_PEER.equals(normalizeSourceMode(job.getSourceMode())) || currentWave <= 0) {
@@ -670,12 +674,21 @@ public class FileDistributionOrchestrator {
         }
 
         List<FileDistributionAgentStatus> statuses = agentStatusRepo.findByJobIdOrderByWaveAscIdAsc(job.getId());
-        List<Map<String, Object>> peers = new ArrayList<>();
+        PcMaster targetPc = targetAgentId == null ? null : pcMasterRepository.findById(targetAgentId).orElse(null);
+        Long targetGroupId = targetPc == null ? null : targetPc.getGroupId();
+        String targetSubnet = targetPc == null ? null : ipv4Slash24(targetPc.getIpAddress());
+
+        List<Map<String, Object>> sameGroupPeers = new ArrayList<>();
+        List<Map<String, Object>> sameSubnetPeers = new ArrayList<>();
+        List<Map<String, Object>> fallbackPeers = new ArrayList<>();
         for (FileDistributionAgentStatus status : statuses) {
             if (!"COMPLETED".equals(status.getStatus())) {
                 continue;
             }
             if (status.getWave() == null || status.getWave() >= currentWave) {
+                continue;
+            }
+            if (targetAgentId != null && targetAgentId.equalsIgnoreCase(status.getAgentId())) {
                 continue;
             }
             PcMaster pc = pcMasterRepository.findById(status.getAgentId()).orElse(null);
@@ -689,13 +702,65 @@ public class FileDistributionOrchestrator {
             row.put("port", peerPort);
             row.put("url", "http://" + pc.getIpAddress() + ":" + peerPort + "/pcagent/update-cache/" + sha256);
             row.put("token", peerToken);
-            peers.add(row);
-
-            if (peers.size() >= Math.max(1, maxPeerCandidates)) {
-                break;
+            if (targetGroupId != null && targetGroupId.equals(pc.getGroupId())) {
+                row.put("peerScope", "SAME_CLASSROOM");
+                sameGroupPeers.add(row);
+            } else if (targetSubnet != null && targetSubnet.equals(ipv4Slash24(pc.getIpAddress()))) {
+                row.put("peerScope", "SAME_SUBNET");
+                sameSubnetPeers.add(row);
+            } else {
+                row.put("peerScope", "FALLBACK");
+                fallbackPeers.add(row);
             }
         }
-        return peers;
+
+        if (sameGroupPeers.isEmpty() && sameSubnetPeers.isEmpty() && fallbackPeers.isEmpty()) {
+            return List.of();
+        }
+        int limit = Math.max(1, maxPeerCandidates);
+        int totalPeerCount = sameGroupPeers.size() + sameSubnetPeers.size() + fallbackPeers.size();
+        List<Map<String, Object>> spread = new ArrayList<>(Math.min(limit, totalPeerCount));
+        appendRotatedPeers(spread, sameGroupPeers, limit, targetAgentId, "group");
+        appendRotatedPeers(spread, sameSubnetPeers, limit, targetAgentId, "subnet");
+        appendRotatedPeers(spread, fallbackPeers, limit, targetAgentId, "fallback");
+        return spread;
+    }
+
+    private void appendRotatedPeers(List<Map<String, Object>> out,
+                                    List<Map<String, Object>> peers,
+                                    int limit,
+                                    String targetAgentId,
+                                    String salt) {
+        if (out.size() >= limit || peers == null || peers.isEmpty()) {
+            return;
+        }
+        int offset = targetAgentId == null
+                ? 0
+                : Math.floorMod((targetAgentId + "|" + salt).hashCode(), peers.size());
+        for (int i = 0; i < peers.size() && out.size() < limit; i++) {
+            out.add(peers.get((offset + i) % peers.size()));
+        }
+    }
+
+    private String ipv4Slash24(String ip) {
+        if (ip == null || ip.isBlank()) {
+            return null;
+        }
+        String[] parts = ip.trim().split("\\.");
+        if (parts.length != 4) {
+            return null;
+        }
+        for (String part : parts) {
+            try {
+                int value = Integer.parseInt(part);
+                if (value < 0 || value > 255) {
+                    return null;
+                }
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+        }
+        return parts[0] + "." + parts[1] + "." + parts[2];
     }
 
     private void markWaveFailed(FileDistributionJob job,

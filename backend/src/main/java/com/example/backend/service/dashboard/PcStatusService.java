@@ -1,10 +1,13 @@
 package com.example.backend.service.dashboard;
 
 import com.example.dto.dashboard.PcStatusDto;
+import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.util.PaginationUtil;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -12,11 +15,15 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Service for PC status management including broken PC tracking and updates.
  */
 @Service
+@RequiredArgsConstructor
 public class PcStatusService {
 
     private static final Logger logger = LoggerFactory.getLogger(PcStatusService.class);
@@ -24,12 +31,7 @@ public class PcStatusService {
 
     private final PcMasterRepository pcMasterRepository;
     private final ClassroomResolutionService classroomResolutionService;
-
-    public PcStatusService(PcMasterRepository pcMasterRepository,
-                           ClassroomResolutionService classroomResolutionService) {
-        this.pcMasterRepository = pcMasterRepository;
-        this.classroomResolutionService = classroomResolutionService;
-    }
+    private final ClassroomGroupRepository classroomGroupRepository;
 
     /**
      * Get all PC statuses for a classroom
@@ -134,6 +136,48 @@ public class PcStatusService {
      */
     private boolean isBrokenPlaceholder(PcMaster pc) {
         return pc.getMacAddress() != null && pc.getMacAddress().startsWith(BROKEN_PLACEHOLDER_PREFIX);
+    }
+
+    // ── 상태 조회 (StatusController 위임용) ───────────────────────────────────
+
+    public List<PcStatusDto> findAll() {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findAll().stream()
+                .map(p -> toPcStatusDtoWithGroup(p, groupNames))
+                .toList();
+    }
+
+    public Optional<PcStatusDto> findByMac(String mac) {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findById(mac)
+                .map(p -> toPcStatusDtoWithGroup(p, groupNames));
+    }
+
+    public List<PcStatusDto> findByRole(String role) {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findAll().stream()
+                .filter(p -> role.equalsIgnoreCase(p.getRole()))
+                .map(p -> toPcStatusDtoWithGroup(p, groupNames))
+                .toList();
+    }
+
+    public List<PcStatusDto> findByGroupId(Long groupId) {
+        Map<Long, String> groupNames = loadGroupNameMap();
+        return pcMasterRepository.findByGroupId(groupId).stream()
+                .map(p -> toPcStatusDtoWithGroup(p, groupNames))
+                .toList();
+    }
+
+    private Map<Long, String> loadGroupNameMap() {
+        return classroomGroupRepository.findAll().stream()
+                .collect(Collectors.toMap(ClassroomGroup::getId, ClassroomGroup::getName, (a, b) -> a));
+    }
+
+    private PcStatusDto toPcStatusDtoWithGroup(PcMaster pc, Map<Long, String> groupNames) {
+        PcStatusDto dto = toPcStatusDto(pc);
+        dto.setGroupName(pc.getGroupId() != null ? groupNames.getOrDefault(pc.getGroupId(), "-") : "-");
+        dto.setOnline("ONLINE".equals(pc.getStatus()));
+        return dto;
     }
 
     /**

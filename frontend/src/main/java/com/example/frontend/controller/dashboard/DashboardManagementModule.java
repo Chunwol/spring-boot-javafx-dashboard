@@ -55,7 +55,7 @@ import org.slf4j.LoggerFactory;
 
 public class DashboardManagementModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardManagementModule.class);
-    private static final DateTimeFormatter PERF_TIME_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
+    private static final DateTimeFormatter PERF_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
     private final String apiBaseUrl;
     private final Supplier<javafx.scene.Scene> sceneSupplier;
     private final ApiClient apiClient;
@@ -68,6 +68,9 @@ public class DashboardManagementModule {
     private TableView<PcStatusDto> brokenPcTable;
     private TableView<Map<String, Object>> agentTable;
     private Label installKeyLabel;
+    private Label registrationStatusLabel;
+    private Button toggleRegistrationBtn;
+    private volatile boolean registrationEnabled = true;
     private Label perfUpdatedAtLabel;
     private Label perfPcOnlineLabel;
     private Label perfPcRatioLabel;
@@ -79,6 +82,9 @@ public class DashboardManagementModule {
     private Label perfQueuePressureLabel;
     private Label perfStalePressureLabel;
     private Button refreshAgentBtnRef;
+    private TextField agentSearchField;
+    private final List<Map<String, Object>> allAgents = new ArrayList<>();
+    private ScrollPane mgmtScrollPane;
     private final ClassroomSummaryDto allClassroomOption = createAllClassroomOption();
     private List<PcStatusDto> cachedBrokenPcs = List.of();
 
@@ -91,30 +97,87 @@ public class DashboardManagementModule {
 
     public Node createView() {
         ScrollPane scrollPane;
-        StackPane metricsSlot, agentSlot, ipRangeSlot, teacherSlot, brokenPcSlot, reportSlot;
+        StackPane agentSlot, ipRangeSlot, teacherSlot, brokenPcSlot;
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-view.fxml"));
             scrollPane   = loader.load();
-            metricsSlot  = (StackPane) loader.getNamespace().get("metricsSlot");
             agentSlot    = (StackPane) loader.getNamespace().get("agentSlot");
             ipRangeSlot  = (StackPane) loader.getNamespace().get("ipRangeSlot");
             teacherSlot  = (StackPane) loader.getNamespace().get("teacherSlot");
             brokenPcSlot = (StackPane) loader.getNamespace().get("brokenPcSlot");
-            reportSlot   = (StackPane) loader.getNamespace().get("reportSlot");
         } catch (Exception e) {
             throw new IllegalStateException("관리 뷰 FXML 로딩 실패", e);
         }
 
-        metricsSlot.getChildren().setAll(buildPerformanceBox());
+        mgmtScrollPane = scrollPane;
         agentSlot.getChildren().setAll(buildAgentInstallBox());
         ipRangeSlot.getChildren().setAll(buildIpRangeBox());
         teacherSlot.getChildren().setAll(buildTeacherDeviceBox());
         brokenPcSlot.getChildren().setAll(buildBrokenPcBox());
-        reportSlot.getChildren().setAll(buildReportBox());
 
         reloadData();
-
         return scrollPane;
+    }
+
+    /** 설정 탭 sub-내비 — 강의실 IP 대역 섹션만. */
+    public Node createIpRangeView() {
+        VBox section = (VBox) buildIpRangeBox();
+        loadIpRangesAndGroups();
+        return section;
+    }
+
+    /** 설정 탭 sub-내비 — 교사 PC 관리 섹션만. */
+    public Node createTeacherView() {
+        VBox section = (VBox) buildTeacherDeviceBox();
+        loadTeacherDevices();
+        return section;
+    }
+
+    /** 설정 탭 sub-내비 — 시스템(현재 비어있음 안내). */
+    public Node createSystemView() {
+        VBox box = new VBox(12);
+        box.setPadding(new javafx.geometry.Insets(20));
+        box.getStyleClass().add("tab-main");
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setMaxHeight(Double.MAX_VALUE);
+        Label title = new Label("시스템");
+        title.getStyleClass().add("mgmt-section-title");
+        Label hint = new Label("계정·알림·OTA 등 시스템 설정은 추후 추가됩니다.");
+        hint.getStyleClass().add("mgmt-hint-label");
+        box.getChildren().addAll(title, hint);
+        return box;
+    }
+
+    /** PC 제어 탭 — 고장 PC 섹션 단독 뷰. */
+    public Node createBrokenPcView() {
+        VBox section = (VBox) buildBrokenPcBox();
+        loadBrokenPcs();
+        loadIpRangesAndGroups(); // 강의실 필터 콤보 채우기
+        return section;
+    }
+
+    private VBox wrapWithPadding(Node child) {
+        VBox v = new VBox(child);
+        v.setPadding(new javafx.geometry.Insets(20));
+        return v;
+    }
+
+    /** 보고서 탭 전용 뷰 — 운영 매트릭 + 주간/월간 보고서 2섹션. */
+    public Node createReportView() {
+        VBox root;
+        StackPane metricsSlot, reportSlot;
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/report-view.fxml"));
+            root        = loader.load();
+            metricsSlot = (StackPane) loader.getNamespace().get("metricsSlot");
+            reportSlot  = (StackPane) loader.getNamespace().get("reportSlot");
+        } catch (Exception e) {
+            throw new IllegalStateException("보고서 뷰 FXML 로딩 실패", e);
+        }
+        metricsSlot.getChildren().setAll(buildPerformanceBox());
+        reportSlot.getChildren().setAll(buildReportBox());
+        loadPerformanceSnapshot();
+        return root;
     }
 
     public void reloadData() {
@@ -122,7 +185,25 @@ public class DashboardManagementModule {
         loadIpRangesAndGroups();
         loadAgentList();
         loadInstallKey();
+        loadRegistrationStatus();
         loadBrokenPcs();
+    }
+
+    public void refreshReportData() {
+        loadPerformanceSnapshot();
+    }
+
+    public void refreshIpRangeData() {
+        loadIpRangesAndGroups();
+    }
+
+    public void refreshTeacherData() {
+        loadIpRangesAndGroups();
+    }
+
+    public void refreshBrokenPcData() {
+        loadBrokenPcs();
+        loadIpRangesAndGroups();
     }
 
     @SuppressWarnings("unchecked")
@@ -134,22 +215,32 @@ public class DashboardManagementModule {
         Button refreshAgentBtn;
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-agent-section.fxml"));
-            box             = loader.load();
-            installKeyLabel = (Label)  loader.getNamespace().get("installKeyLabel");
-            copyKeyBtn      = (Button) loader.getNamespace().get("copyKeyBtn");
-            refreshKeyBtn   = (Button) loader.getNamespace().get("refreshKeyBtn");
-            downloadConfigBtn = (Button) loader.getNamespace().get("downloadConfigBtn");
-            refreshAgentBtn   = (Button) loader.getNamespace().get("refreshAgentBtn");
-            agentTable        = (TableView<Map<String, Object>>) loader.getNamespace().get("agentTable");
+            box                     = loader.load();
+            installKeyLabel         = (Label)  loader.getNamespace().get("installKeyLabel");
+            registrationStatusLabel = (Label)  loader.getNamespace().get("registrationStatusLabel");
+            toggleRegistrationBtn   = (Button) loader.getNamespace().get("toggleRegistrationBtn");
+            copyKeyBtn              = (Button) loader.getNamespace().get("copyKeyBtn");
+            refreshKeyBtn           = (Button) loader.getNamespace().get("refreshKeyBtn");
+            downloadConfigBtn       = (Button) loader.getNamespace().get("downloadConfigBtn");
+            refreshAgentBtn         = (Button) loader.getNamespace().get("refreshAgentBtn");
+            agentTable              = (TableView<Map<String, Object>>) loader.getNamespace().get("agentTable");
+            agentSearchField        = (TextField) loader.getNamespace().get("agentSearchField");
         } catch (Exception e) {
             throw new IllegalStateException("에이전트 섹션 FXML 로딩 실패", e);
         }
+
+        if (agentSearchField != null) {
+            agentSearchField.textProperty().addListener((obs, ov, nv) -> applyAgentFilter());
+        }
+
+        // ── 등록 토글 버튼 동작 연결 ──
+        toggleRegistrationBtn.setOnAction(e -> toggleRegistration());
 
         // ── 설치 키 행 버튼 동작 연결 ──
         final Button copyKeyBtnFinal = copyKeyBtn;
         copyKeyBtn.setOnAction(e -> {
             String key = installKeyLabel.getText();
-            if (!key.isBlank() && !key.equals("불러오는 중...") && !key.equals("조회 실패")) {
+            if (!key.isBlank() && !key.equals("불러오는 중...") && !key.equals("조회 실패") && !key.equals("-")) {
                 ClipboardContent content = new ClipboardContent();
                 content.putString(key);
                 Clipboard.getSystemClipboard().setContent(content);
@@ -280,7 +371,11 @@ public class DashboardManagementModule {
     private void loadInstallKey() {
         apiClient.getJson("/admin/install-key", new TypeReference<Map<String, Object>>() {})
                 .thenAccept(resp -> Platform.runLater(() -> {
-                    String key = resp != null ? str(resp.get("installKey")) : "-";
+                    // key = 전체 키, keyPreview = 앞4자리**** (fallback)
+                    String key = resp != null
+                            ? (str(resp.get("key")).equals("-") || str(resp.get("key")).isBlank()
+                               ? str(resp.get("keyPreview")) : str(resp.get("key")))
+                            : "-";
                     installKeyLabel.setText(key);
                 }))
                 .exceptionally(ex -> {
@@ -289,16 +384,82 @@ public class DashboardManagementModule {
                 });
     }
 
+    private void loadRegistrationStatus() {
+        if (registrationStatusLabel == null || toggleRegistrationBtn == null) return;
+        apiClient.getJson("/agent/registration-status", new TypeReference<Map<String, Object>>() {})
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    boolean enabled = resp != null && Boolean.TRUE.equals(resp.get("enabled"));
+                    applyRegistrationState(enabled);
+                }))
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        if (registrationStatusLabel != null) {
+                            registrationStatusLabel.setText("—");
+                            registrationStatusLabel.getStyleClass().removeAll("status-online", "status-offline");
+                        }
+                        if (toggleRegistrationBtn != null) toggleRegistrationBtn.setDisable(true);
+                    });
+                    return null;
+                });
+    }
+
+    private void toggleRegistration() {
+        boolean newEnabled = !registrationEnabled;
+        String confirmMsg = newEnabled
+                ? "에이전트 신규 등록을 허용하시겠습니까?\n(등록 준비가 완료된 PC만 켜져 있을 때 허용하세요.)"
+                : "에이전트 신규 등록을 차단하시겠습니까?\n(윈도우 이미지 배포 중에는 차단 상태를 유지하세요.)";
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, confirmMsg, ButtonType.OK, ButtonType.CANCEL);
+        confirm.setTitle("등록 상태 변경");
+        confirm.showAndWait().ifPresent(bt -> {
+            if (bt != ButtonType.OK) return;
+            toggleRegistrationBtn.setDisable(true);
+            apiClient.putJson("/agent/registration-status", Map.of("enabled", newEnabled))
+                    .thenAccept(resp -> Platform.runLater(() -> applyRegistrationState(newEnabled)))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            new Alert(Alert.AlertType.ERROR, "상태 변경 실패: " + errorMessage(ex)).show();
+                            toggleRegistrationBtn.setDisable(false);
+                        });
+                        return null;
+                    });
+        });
+    }
+
+    private void applyRegistrationState(boolean enabled) {
+        registrationEnabled = enabled;
+        if (registrationStatusLabel != null) {
+            registrationStatusLabel.setText(enabled ? "✔ 허용 중 — 새 에이전트 등록 가능" : "✖ 차단 중 — 신규 등록 불가");
+            registrationStatusLabel.getStyleClass().removeAll("status-online", "status-offline");
+            registrationStatusLabel.getStyleClass().add(enabled ? "status-online" : "status-offline");
+        }
+        if (toggleRegistrationBtn != null) {
+            toggleRegistrationBtn.setText(enabled ? "차단으로 전환" : "허용으로 전환");
+            toggleRegistrationBtn.getStyleClass().removeAll("btn-danger", "btn-success", "btn-neutral");
+            toggleRegistrationBtn.getStyleClass().add(enabled ? "btn-danger" : "btn-success");
+            toggleRegistrationBtn.setDisable(false);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private void loadAgentList() {
         if (agentTable == null) return;
         // 항상 FX 스레드에서 호출되므로 runLater 불필요
         agentTable.setPlaceholder(new Label("로딩 중..."));
-        if (refreshAgentBtnRef != null) refreshAgentBtnRef.setDisable(true);
+        if (refreshAgentBtnRef != null) {
+            double savedVvalue = mgmtScrollPane != null ? mgmtScrollPane.getVvalue() : 0;
+            refreshAgentBtnRef.setDisable(true);
+            // setDisable(true) causes focus to move elsewhere, which may scroll the pane.
+            // Restore the scroll position on the next pulse.
+            if (mgmtScrollPane != null) {
+                final double v = savedVvalue;
+                Platform.runLater(() -> mgmtScrollPane.setVvalue(v));
+            }
+        }
         apiClient.getPagedList("/admin/agents", new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(list -> Platform.runLater(() -> {
                     agentTable.setPlaceholder(new Label("등록된 에이전트가 없습니다."));
                     if (refreshAgentBtnRef != null) refreshAgentBtnRef.setDisable(false);
+                    allAgents.clear();
                     if (list == null) {
                         agentTable.getItems().setAll(List.of());
                         return;
@@ -310,7 +471,8 @@ public class DashboardManagementModule {
                         if (ao == bo) return 0;
                         return ao ? -1 : 1;
                     });
-                    agentTable.getItems().setAll(sorted);
+                    allAgents.addAll(sorted);
+                    applyAgentFilter();
                 }))
                 .exceptionally(ex -> {
                     log.warn("에이전트 목록 조회 실패", ex);
@@ -320,6 +482,23 @@ public class DashboardManagementModule {
                     });
                     return null;
                 });
+    }
+
+    /** 검색어(PC명/IP/MAC)로 에이전트 목록을 필터링해 테이블에 반영. */
+    private void applyAgentFilter() {
+        if (agentTable == null) return;
+        String q = agentSearchField != null && agentSearchField.getText() != null
+                ? agentSearchField.getText().trim().toLowerCase() : "";
+        if (q.isEmpty()) {
+            agentTable.getItems().setAll(allAgents);
+            return;
+        }
+        List<Map<String, Object>> filtered = allAgents.stream()
+                .filter(a -> str(a.get("pcName")).toLowerCase().contains(q)
+                        || str(a.get("ipAddress")).toLowerCase().contains(q)
+                        || str(a.get("macAddress")).toLowerCase().contains(q))
+                .collect(java.util.stream.Collectors.toList());
+        agentTable.getItems().setAll(filtered);
     }
 
     private void revokeAgent(String mac) {
@@ -360,7 +539,7 @@ public class DashboardManagementModule {
 
     private void downloadConfigJson() {
         String key = installKeyLabel.getText();
-        if (key.isBlank() || key.equals("불러오는 중...") || key.equals("조회 실패")) {
+        if (key.isBlank() || key.equals("불러오는 중...") || key.equals("조회 실패") || key.equals("-")) {
             new Alert(Alert.AlertType.WARNING, "설치키를 먼저 불러와 주세요.").show();
             return;
         }
@@ -505,7 +684,6 @@ public class DashboardManagementModule {
                 setGraphic(empty ? null : box);
             }
         });
-        teacherDeviceTable.setPrefHeight(220);
         return teacherBox;
     }
 
@@ -817,15 +995,19 @@ public class DashboardManagementModule {
                     }
 
                     Platform.runLater(() -> {
-                        groupComboBox.getItems().setAll(options);
-                        teacherGroupCombo.getItems().setAll(options);
+                        if (groupComboBox != null) {
+                            groupComboBox.getItems().setAll(options);
+                            groupComboBox.getSelectionModel().selectFirst(); // valueProperty 리스너가 loadIpRangesForGroup 호출
+                        }
+                        if (teacherGroupCombo != null) {
+                            teacherGroupCombo.getItems().setAll(options);
+                            teacherGroupCombo.getSelectionModel().selectFirst();
+                            loadTeacherDevices();
+                        }
                         if (brokenGroupCombo != null) {
                             brokenGroupCombo.getItems().setAll(options);
                             brokenGroupCombo.getSelectionModel().selectFirst();
                         }
-                        groupComboBox.getSelectionModel().selectFirst(); // valueProperty 리스너가 loadIpRangesForGroup 호출
-                        teacherGroupCombo.getSelectionModel().selectFirst();
-                        loadTeacherDevices();
                     });
                 } catch (Exception e) {
                     log.warn("Failed while preparing classroom list", e);

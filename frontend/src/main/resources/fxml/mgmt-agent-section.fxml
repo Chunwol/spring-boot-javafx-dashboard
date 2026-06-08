@@ -5,7 +5,11 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox fx:id="agentBox" spacing="10.0" alignment="TOP_LEFT" styleClass="panel-card-section"
@@ -14,24 +18,43 @@
     <children>
         <Label text="에이전트 설치 관리" styleClass="mgmt-section-title" />
 
+        <!-- 등록 허용/차단 토글 행 -->
+        <HBox fx:id="registrationRow" spacing="8.0" alignment="CENTER_LEFT">
+            <children>
+                <Label text="신규 등록:" styleClass="mgmt-section-label" />
+                <Label fx:id="registrationStatusLabel" text="불러오는 중..." styleClass="mgmt-hint-label" />
+                <Button fx:id="toggleRegistrationBtn" text="..." styleClass="btn-neutral,btn-sm" disable="true">
+                    <tooltip><Tooltip text="윈도우 이미지 배포 시 동일 MAC 중복 등록 방지용. 배포 중에는 차단, 개별 세팅 완료 후 허용으로 전환하세요." /></tooltip>
+                </Button>
+            </children>
+        </HBox>
+
         <HBox fx:id="keyRow" spacing="8.0" alignment="CENTER_LEFT">
             <children>
                 <Label text="설치 키:" styleClass="mgmt-section-label" />
                 <Label fx:id="installKeyLabel" styleClass="code-tag" text="불러오는 중..." />
-                <Button fx:id="copyKeyBtn"        text="복사"           styleClass="btn-primary,btn-sm" />
-                <Button fx:id="refreshKeyBtn"     text="↺"             styleClass="btn-neutral,btn-sm" />
-                <Button fx:id="downloadConfigBtn" text="설정 파일 다운로드" styleClass="btn-success,btn-sm" />
+                <Button fx:id="copyKeyBtn"        text="복사"           styleClass="btn-primary,btn-sm">
+                    <tooltip><Tooltip text="설치 키를 클립보드에 복사합니다" /></tooltip>
+                </Button>
+                <Button fx:id="refreshKeyBtn"     text="↺"             styleClass="btn-neutral,btn-sm">
+                    <tooltip><Tooltip text="설치 키 새로 발급 (기존 키는 무효화됩니다)" /></tooltip>
+                </Button>
+                <Button fx:id="downloadConfigBtn" text="설정 파일 다운로드" styleClass="btn-success,btn-sm">
+                    <tooltip><Tooltip text="에이전트 설치에 필요한 설정 파일을 다운로드합니다" /></tooltip>
+                </Button>
             </children>
         </HBox>
 
         <HBox fx:id="tableHeader" spacing="8.0" alignment="CENTER_LEFT">
             <children>
                 <Label text="등록된 에이전트 목록" styleClass="mgmt-section-label" />
-                <Button fx:id="refreshAgentBtn" text="새로고침" styleClass="btn-success,btn-sm" />
+                <TextField fx:id="agentSearchField" prefWidth="220.0" promptText="검색: PC명, IP, MAC" />
+                <Region HBox.hgrow="ALWAYS" />
+                <Button fx:id="refreshAgentBtn" text="새로고침" styleClass="btn-primary,btn-sm" />
             </children>
         </HBox>
 
-        <TableView fx:id="agentTable" prefHeight="260.0">
+        <TableView fx:id="agentTable" styleClass="app-table" prefHeight="260.0">
             <placeholder><Label text="등록된 에이전트가 없습니다." /></placeholder>
             <columns>
                 <TableColumn fx:id="agentPcNameCol" text="PC명" prefWidth="130.0" />

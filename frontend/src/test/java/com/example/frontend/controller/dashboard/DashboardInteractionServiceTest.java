@@ -1,6 +1,5 @@
 package com.example.frontend.controller.dashboard;
 
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.input.MouseButton;
@@ -23,8 +22,7 @@ class DashboardInteractionServiceTest {
 
     @BeforeAll
     static void initToolkit() {
-        // Initialize JavaFX runtime once for event handler wiring.
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test

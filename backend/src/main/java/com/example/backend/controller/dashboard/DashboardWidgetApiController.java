@@ -1,11 +1,12 @@
 package com.example.backend.controller.dashboard;
 
 import com.example.backend.model.dashboard.DashboardWidgetItem;
-import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
+import com.example.backend.service.dashboard.DashboardWidgetItemService;
 import com.example.backend.service.storage.FileStorageService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,53 +25,46 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1")
+@RequiredArgsConstructor
 public class DashboardWidgetApiController {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardWidgetApiController.class);
 
-    private final DashboardWidgetItemRepository repository;
+    private final DashboardWidgetItemService widgetItemService;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
     @Value("${SERVER_BASE_URL:http://localhost:8888}")
     private String serverBaseUrl;
 
-    public DashboardWidgetApiController(DashboardWidgetItemRepository repository,
-                                        FileStorageService fileStorageService,
-                                        ObjectMapper objectMapper) {
-        this.repository = repository;
-        this.fileStorageService = fileStorageService;
-        this.objectMapper = objectMapper;
-    }
-
     // ---- 레거시/신규 공통 ----
 
     @GetMapping("/dashboard/widgets")
     public ResponseEntity<List<DashboardWidgetItem>> getAllWidgets() {
-        return ResponseEntity.ok(repository.findAll());
+        return ResponseEntity.ok(widgetItemService.findAll());
     }
 
     @PostMapping("/dashboard/widgets")
     public ResponseEntity<DashboardWidgetItem> createWidget(@RequestBody DashboardWidgetItem item) {
-        return ResponseEntity.status(201).body(repository.save(item));
+        return ResponseEntity.status(201).body(widgetItemService.save(item));
     }
 
     @PutMapping("/dashboard/widgets/{id}")
     public ResponseEntity<DashboardWidgetItem> updateWidget(@PathVariable Long id, @RequestBody DashboardWidgetItem details) {
-        return repository.findById(id).map(item -> {
+        return widgetItemService.findById(id).map(item -> {
             if (details.getX() != null) item.setX(details.getX());
             if (details.getY() != null) item.setY(details.getY());
             if (details.getWidth() != null) item.setWidth(details.getWidth());
             if (details.getHeight() != null) item.setHeight(details.getHeight());
             // visible은 명시적으로 전달된 경우에만 변경 (primitive boolean이므로 항상 false 기본값 주의)
-            return ResponseEntity.ok(repository.save(item));
+            return ResponseEntity.ok(widgetItemService.save(item));
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/dashboard/widgets/{id}")
     public ResponseEntity<Void> deleteWidget(@PathVariable Long id) {
-        if (!repository.existsById(id)) return ResponseEntity.notFound().build();
-        repository.deleteById(id);
+        if (!widgetItemService.existsById(id)) return ResponseEntity.notFound().build();
+        widgetItemService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -79,9 +73,7 @@ public class DashboardWidgetApiController {
     @GetMapping("/dashboard/texts")
     public List<Map<String, Object>> listTextItems(@RequestParam(required = false) Long dashboardId) {
         try {
-            List<DashboardWidgetItem> items = (dashboardId != null && dashboardId > 0)
-                    ? repository.findByTypeIgnoreCaseAndDashboardId("TEXT", dashboardId)
-                    : repository.findByTypeIgnoreCase("TEXT");
+            List<DashboardWidgetItem> items = widgetItemService.findByType("TEXT", dashboardId);
             return items.stream().map(this::toTextMap).toList();
         } catch (Exception e) {
             log.error("Failed to list text dashboard widgets", e);
@@ -95,36 +87,36 @@ public class DashboardWidgetApiController {
         item.setType("TEXT");
         applyCommon(item, req, 50.0, 50.0, 200.0, 120.0, true);
         item.setConfig(writeConfig(req));
-        DashboardWidgetItem saved = repository.save(item);
+        DashboardWidgetItem saved = widgetItemService.save(item);
         return ResponseEntity.status(201).body(toTextMap(saved));
     }
 
     @PutMapping("/dashboard/texts/{id}")
     public ResponseEntity<Map<String, Object>> updateTextItem(@PathVariable Long id,
                                                                @RequestBody Map<String, Object> req) {
-        return repository.findById(id).map(item -> {
+        return widgetItemService.findById(id).map(item -> {
             item.setType("TEXT");
             applyCommon(item, req, item.getX(), item.getY(), item.getWidth(), item.getHeight(), item.isVisible());
 
             Map<String, Object> current = readConfig(item.getConfig());
             req.forEach((k, v) -> { if (!NON_CONFIG_KEYS.contains(k)) current.put(k, v); });
             item.setConfig(writeConfig(current));
-            DashboardWidgetItem saved = repository.save(item);
+            DashboardWidgetItem saved = widgetItemService.save(item);
             return ResponseEntity.ok(toTextMap(saved));
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/dashboard/texts/{id}")
     public ResponseEntity<Void> deleteTextItem(@PathVariable Long id) {
-        if (!repository.existsById(id)) return ResponseEntity.notFound().build();
-        repository.deleteById(id);
+        if (!widgetItemService.existsById(id)) return ResponseEntity.notFound().build();
+        widgetItemService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/dashboard/texts/{id}/rename")
     public ResponseEntity<Map<String, Object>> renameTextItem(@PathVariable Long id,
                                                                @RequestBody Map<String, Object> req) {
-        return repository.findById(id).map(item -> {
+        return widgetItemService.findById(id).map(item -> {
             Map<String, Object> cfg = readConfig(item.getConfig());
             if (req.containsKey("name")) cfg.put("name", req.get("name"));
             item.setConfig(writeConfig(cfg));
@@ -132,7 +124,7 @@ public class DashboardWidgetApiController {
                 long did = asLong(req.get("dashboardId"));
                 if (did > 0) item.setDashboardId(did);
             }
-            DashboardWidgetItem saved = repository.save(item);
+            DashboardWidgetItem saved = widgetItemService.save(item);
             return ResponseEntity.ok(toTextMap(saved));
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -145,7 +137,7 @@ public class DashboardWidgetApiController {
             item.setType("TEXT");
             applyCommon(item, req, 50.0, 50.0, 200.0, 120.0, true);
             item.setConfig(writeConfig(req));
-            createdIds.add(repository.save(item).getId());
+            createdIds.add(widgetItemService.save(item).getId());
         }
         return ResponseEntity.ok(Map.of("restored", createdIds.size(), "ids", createdIds));
     }
@@ -155,9 +147,7 @@ public class DashboardWidgetApiController {
     @GetMapping("/dashboard/images")
     public List<Map<String, Object>> listImageItems(@RequestParam(required = false) Long dashboardId) {
         try {
-            List<DashboardWidgetItem> items = (dashboardId != null && dashboardId > 0)
-                    ? repository.findByTypeIgnoreCaseAndDashboardId("IMAGE", dashboardId)
-                    : repository.findByTypeIgnoreCase("IMAGE");
+            List<DashboardWidgetItem> items = widgetItemService.findByType("IMAGE", dashboardId);
             return items.stream().map(this::toImageMap).toList();
         } catch (Exception e) {
             log.error("Failed to list image dashboard widgets", e);
@@ -171,29 +161,29 @@ public class DashboardWidgetApiController {
         item.setType("IMAGE");
         applyCommon(item, req, 100.0, 100.0, 300.0, 200.0, true);
         item.setConfig(writeConfig(req));
-        DashboardWidgetItem saved = repository.save(item);
+        DashboardWidgetItem saved = widgetItemService.save(item);
         return ResponseEntity.status(201).body(toImageMap(saved));
     }
 
     @PutMapping("/dashboard/images/{id}")
     public ResponseEntity<Map<String, Object>> updateImageItem(@PathVariable Long id,
                                                                 @RequestBody Map<String, Object> req) {
-        return repository.findById(id).map(item -> {
+        return widgetItemService.findById(id).map(item -> {
             item.setType("IMAGE");
             applyCommon(item, req, item.getX(), item.getY(), item.getWidth(), item.getHeight(), item.isVisible());
 
             Map<String, Object> current = readConfig(item.getConfig());
             req.forEach((k, v) -> { if (!NON_CONFIG_KEYS.contains(k)) current.put(k, v); });
             item.setConfig(writeConfig(current));
-            DashboardWidgetItem saved = repository.save(item);
+            DashboardWidgetItem saved = widgetItemService.save(item);
             return ResponseEntity.ok(toImageMap(saved));
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/dashboard/images/{id}")
     public ResponseEntity<Void> deleteImageItem(@PathVariable Long id) {
-        if (!repository.existsById(id)) return ResponseEntity.notFound().build();
-        repository.deleteById(id);
+        if (!widgetItemService.existsById(id)) return ResponseEntity.notFound().build();
+        widgetItemService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
@@ -233,7 +223,7 @@ public class DashboardWidgetApiController {
             applyCommon(item, req, 100.0, 100.0, 360.0, 240.0, true);
             if (dashboardId != null && dashboardId > 0) item.setDashboardId(dashboardId);
             item.setConfig(writeConfig(req));
-            DashboardWidgetItem saved = repository.save(item);
+            DashboardWidgetItem saved = widgetItemService.save(item);
             return ResponseEntity.status(201).body(toImageMap(saved));
         } catch (Exception e) {
             log.error("Image upload failed", e);

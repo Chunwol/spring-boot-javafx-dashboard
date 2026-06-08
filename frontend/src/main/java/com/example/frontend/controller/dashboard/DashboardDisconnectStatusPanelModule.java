@@ -47,7 +47,7 @@ import java.util.function.Supplier;
 public class DashboardDisconnectStatusPanelModule {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardDisconnectStatusPanelModule.class);
-    private static final DateTimeFormatter LOG_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter LOG_TIME_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
     private static final double LAYOUT_EPSILON = 0.5;
 
     private final ApiClient apiClient = ApiClient.getInstance();
@@ -71,6 +71,23 @@ public class DashboardDisconnectStatusPanelModule {
     private final Map<Long, VBox> panelMap = new HashMap<>();
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
     private final Map<Long, Label> resizeHandleMap = new HashMap<>();
+    private java.util.function.BiConsumer<javafx.scene.Node, Boolean> onSelectCallback;
+    private Supplier<java.util.Set<javafx.scene.Node>> selectedNodesSupplier;
+
+    public void setOnSelectCallback(java.util.function.BiConsumer<javafx.scene.Node, Boolean> callback) {
+        this.onSelectCallback = callback;
+    }
+
+    public void setSelectedNodesSupplier(Supplier<java.util.Set<javafx.scene.Node>> supplier) {
+        this.selectedNodesSupplier = supplier;
+    }
+
+    public void deletePanel(Long panelId) {
+        Long dashboardId = dashboardIdSupplier.get();
+        if (dashboardId == null || panelId == null) return;
+        runBeforePanelMutation();
+        dashboardService.deletePanelAsync(dashboardId, panelId, onPanelsChanged);
+    }
     // 접속 상태 변화 추적: MAC → 상태 (최대 500개 유지, 초과 시 임의 제거)
     private final Map<String, String> previousStatusByMac = Collections.synchronizedMap(new LinkedHashMap<String, String>() {
         private static final int MAX_SIZE = 500;
@@ -173,20 +190,16 @@ public class DashboardDisconnectStatusPanelModule {
             throw new IllegalStateException("Failed to load disconnect-status-panel.fxml", e);
         }
 
-        deleteBtn.setVisible(canInteract.getAsBoolean());
-        deleteBtn.setManaged(canInteract.getAsBoolean());
+        // Delete button permanently hidden; action wired for right-panel use
+        deleteBtn.setVisible(false);
+        deleteBtn.setManaged(false);
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
-        deleteBtn.setOnAction(e -> {
-            Long dashboardId = dashboardIdSupplier.get();
-            if (dashboardId != null) {
-                runBeforePanelMutation();
-                dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
-            }
-        });
+        deleteBtn.setOnAction(e -> deletePanel(panelDto.getId()));
 
         table.setItems(logRows);
 
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
+        wrapper.getProperties().put("panelType", "disconnect");
         wrapper.getProperties().put("summaryLabel", summary);
         wrapper.getProperties().put("resizeHandleHolder", resizeHandleHolder);
 
@@ -313,17 +326,19 @@ public class DashboardDisconnectStatusPanelModule {
                 panel,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
+                selectedNodesSupplier,
                 () -> persistPosition(panel, panelId)
         );
 
         StackPane handleHolder = (StackPane) panel.getProperties().get("resizeHandleHolder");
         Label handle = new Label("◢");
         handle.getStyleClass().add("drag-handle");
-        handle.setVisible(canInteract.getAsBoolean());
-        handle.setManaged(canInteract.getAsBoolean());
+        handle.setVisible(false);
+        handle.setManaged(false);
         resizeHandleMap.put(panelId, handle);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
         handleHolder.getChildren().setAll(handle);
+        panel.getProperties().put("resizeHandleNode", handle);
 
         interactionService.attachResizeHandlers(
                 panel,
@@ -334,17 +349,24 @@ public class DashboardDisconnectStatusPanelModule {
                 snapFn,
                 () -> persistPosition(panel, panelId)
         );
+
+        panel.setOnMouseClicked(e -> {
+            if (!canInteract.getAsBoolean()) return;
+            boolean dragged = Boolean.TRUE.equals(panel.getProperties().get("__dragging__"));
+            if (!dragged && onSelectCallback != null) {
+                onSelectCallback.accept(panel, e.isControlDown());
+                e.consume();
+            }
+        });
     }
 
     public void applyEditMode(boolean editMode) {
-        deleteBtnMap.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        resizeHandleMap.values().forEach(handle -> {
-            handle.setVisible(editMode);
-            handle.setManaged(editMode);
-        });
+        if (!editMode) {
+            resizeHandleMap.values().forEach(handle -> {
+                handle.setVisible(false);
+                handle.setManaged(false);
+            });
+        }
     }
 
     private void persistPosition(VBox panel, Long panelId) {

@@ -7,8 +7,10 @@ import oshi.software.os.OperatingSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.URI;
 import java.util.Enumeration;
 
 /**
@@ -29,30 +31,132 @@ public class HardwareCollector {
     private long lastBytesSent = -1;
     private long lastMeasureTime = -1;
 
-    /** 주요 NIC 선택 (업 상태 + IP 보유 NIC 우선) */
-    private NetworkIF getPrimaryNic() {
-        for (NetworkIF nic : hal.getNetworkIFs(false)) {
-            if (!hasValidMac(nic)) continue;
-            nic.updateAttributes();
-            if (isInterfaceUsable(nic) && hasAnyIpAddress(nic)) {
-                return nic;
+    /** 백엔드 서버 호스트/포트 (라우팅 기반 IP 탐지에 사용) */
+    private final String serverHost;
+    private final int serverPort;
+
+    public HardwareCollector(String serverUrl) {
+        String host = null;
+        int port = 8888;
+        if (serverUrl != null && !serverUrl.isBlank()) {
+            try {
+                URI uri = URI.create(serverUrl.trim());
+                host = uri.getHost();
+                port = uri.getPort() > 0 ? uri.getPort()
+                        : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
+            } catch (Exception e) {
+                log.debug("serverUrl 파싱 실패: {}", e.getMessage());
             }
         }
-        // fallback: 기존 동작과의 호환을 위해 "첫 번째 물리 NIC"도 허용
+        this.serverHost = host;
+        this.serverPort = port;
+    }
+
+    public HardwareCollector() {
+        this(null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 라우팅 기반 IP/NIC 탐지
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * 백엔드 서버로 향하는 실제 로컬 IP.
+     * UDP DatagramSocket.connect()를 이용해 OS 라우팅 테이블만 조회 — 실제 패킷 미발송.
+     * VMware/VPN/복수 NIC 환경에서 항상 올바른 IP를 반환한다.
+     */
+    private String getRoutingLocalIp() {
+        if (serverHost == null || serverHost.isBlank()) return null;
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(InetAddress.getByName(serverHost), serverPort);
+            String ip = socket.getLocalAddress().getHostAddress();
+            if (ip == null || ip.isBlank() || ip.equals("0.0.0.0") || ip.startsWith("127.")) return null;
+            log.debug("라우팅 IP 조회: {} (서버: {}:{})", ip, serverHost, serverPort);
+            return ip;
+        } catch (Exception e) {
+            log.debug("라우팅 IP 조회 실패 ({}:{}): {}", serverHost, serverPort, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 지정 IPv4 주소를 보유한 NIC 반환. */
+    private NetworkIF findNicByIp(String ip) {
+        for (NetworkIF nic : hal.getNetworkIFs(false)) {
+            nic.updateAttributes();
+            for (String addr : nic.getIPv4addr()) {
+                if (ip.equals(addr)) return nic;
+            }
+        }
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 키워드 기반 가상 어댑터 필터 (라우팅 탐지 실패 시 fallback)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** VMware·VirtualBox·Hyper-V 등 가상 어댑터 키워드 */
+    private static final java.util.List<String> VIRTUAL_KEYWORDS = java.util.List.of(
+        "vmware", "vmnet", "virtualbox", "vbox", "hyper-v", "hyperv",
+        "tap", "isatap", "teredo", "6to4", "tunnel", "bluetooth",
+        "loopback", "pseudo", "miniport", "wan miniport"
+    );
+
+    /** 가상 어댑터 여부 판별 (displayName 또는 name 기반). */
+    private boolean isVirtualAdapter(NetworkIF nic) {
+        String dn = nic.getDisplayName() != null ? nic.getDisplayName().toLowerCase() : "";
+        String nm = nic.getName()        != null ? nic.getName().toLowerCase()        : "";
+        return VIRTUAL_KEYWORDS.stream().anyMatch(k -> dn.contains(k) || nm.contains(k));
+    }
+
+    /**
+     * 주요 NIC 선택 (fallback) — 우선순위:
+     * 1) 실물 NIC (가상 어댑터 제외) + UP + IP 보유
+     * 2) 모든 NIC (가상 포함) + UP + IP 보유  (가상만 있는 환경 fallback)
+     * 3) 첫 번째 MAC 보유 NIC
+     */
+    private NetworkIF getPrimaryNic() {
+        // 1순위: 물리 어댑터만 (VMware·VirtualBox 등 제외)
+        for (NetworkIF nic : hal.getNetworkIFs(false)) {
+            if (!hasValidMac(nic) || isVirtualAdapter(nic)) continue;
+            nic.updateAttributes();
+            if (isInterfaceUsable(nic) && hasAnyIpAddress(nic)) return nic;
+        }
+        // 2순위: 가상 어댑터 포함 (물리 NIC가 없는 환경 fallback)
         for (NetworkIF nic : hal.getNetworkIFs(false)) {
             if (!hasValidMac(nic)) continue;
             nic.updateAttributes();
+            if (isInterfaceUsable(nic) && hasAnyIpAddress(nic)) return nic;
+        }
+        // 3순위: MAC만 있으면 반환
+        for (NetworkIF nic : hal.getNetworkIFs(false)) {
+            if (!hasValidMac(nic)) continue;
             return nic;
         }
         return null;
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 공개 API
+    // ─────────────────────────────────────────────────────────────────────
+
     public String getMacAddress() {
+        // 1순위: 라우팅 IP와 일치하는 NIC의 MAC (VMware/VPN 무관하게 항상 정확)
+        String routingIp = getRoutingLocalIp();
+        if (routingIp != null) {
+            synchronized (networkLock) {
+                NetworkIF nic = findNicByIp(routingIp);
+                if (nic != null && hasValidMac(nic)) {
+                    log.debug("MAC 조회 (라우팅 기반): {} NIC={}", nic.getMacaddr(), nic.getDisplayName());
+                    return nic.getMacaddr().toUpperCase();
+                }
+            }
+        }
+        // 2순위: 키워드 기반 NIC 탐지 (fallback)
         synchronized (networkLock) {
             NetworkIF nic = getPrimaryNic();
             if (nic != null) return nic.getMacaddr().toUpperCase();
         }
-        // fallback: Java standard library
+        // 3순위: Java 표준 라이브러리
         try {
             Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
             while (ifaces.hasMoreElements()) {
@@ -74,6 +178,10 @@ public class HardwareCollector {
     }
 
     public String getIpAddress() {
+        // 1순위: 백엔드 서버와 실제 통신하는 로컬 IP (OS 라우팅 테이블 기반)
+        String routingIp = getRoutingLocalIp();
+        if (routingIp != null) return routingIp;
+        // 2순위: NIC 기반 탐지 (서버URL 미설정 또는 DNS 실패 시 fallback)
         synchronized (networkLock) {
             NetworkIF nic = getPrimaryNic();
             if (nic != null && nic.getIPv4addr().length > 0) {

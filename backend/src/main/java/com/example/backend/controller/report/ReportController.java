@@ -1,6 +1,9 @@
 package com.example.backend.controller.report;
 
+import com.example.backend.model.report.MonthlyReport;
 import com.example.backend.model.traffic.TrafficLog;
+import com.example.backend.repository.report.MonthlyReportRepository;
+import com.example.backend.service.report.MonthlyReportService;
 import com.example.backend.service.report.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -33,9 +36,43 @@ import java.util.*;
 public class ReportController {
 
     private final ReportService reportService;
+    private final MonthlyReportService monthlyReportService;
+    private final MonthlyReportRepository monthlyReportRepository;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService,
+                              MonthlyReportService monthlyReportService,
+                              MonthlyReportRepository monthlyReportRepository) {
         this.reportService = reportService;
+        this.monthlyReportService = monthlyReportService;
+        this.monthlyReportRepository = monthlyReportRepository;
+    }
+
+    // ─── 월간 보고서 (DB 영구 보존) ──────────────────────────────────────────
+
+    @GetMapping("/monthly")
+    @Operation(summary = "월간 보고서 목록", description = "분기 정리 이전 집계 스냅샷 (최신 월 우선)")
+    public ResponseEntity<List<MonthlyReport>> listMonthlyReports() {
+        return ResponseEntity.ok(monthlyReportRepository.findAllByOrderByYearMonthDesc());
+    }
+
+    @GetMapping("/monthly/{yearMonth}")
+    @Operation(summary = "특정 월 보고서 조회", description = "yearMonth='2026-05' 형식")
+    public ResponseEntity<MonthlyReport> getMonthlyReport(@PathVariable String yearMonth) {
+        return monthlyReportRepository.findByYearMonth(yearMonth)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/monthly/{yearMonth}/regenerate")
+    @Operation(summary = "월간 보고서 강제 재생성",
+               description = "ADMIN 전용 — 누락된 월 또는 데이터 보정 후 재집계")
+    public ResponseEntity<MonthlyReport> regenerate(@PathVariable String yearMonth) {
+        try {
+            YearMonth ym = YearMonth.parse(yearMonth);
+            return ResponseEntity.ok(monthlyReportService.generate(ym));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 
     // ─── PDF 보고서 ────────────────────────────────────────────────────────

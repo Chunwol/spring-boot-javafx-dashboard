@@ -18,7 +18,7 @@
         <Insets top="18" right="16" bottom="16" left="16" />
     </padding>
     <children>
-        <HBox fx:id="headerBar" alignment="CENTER_RIGHT" spacing="4">
+        <HBox fx:id="headerBar" alignment="CENTER_RIGHT" spacing="4" managed="false" visible="false">
             <children>
                 <Region HBox.hgrow="ALWAYS" />
                 <Button fx:id="gridSettingsBtn" text="⚙" styleClass="btn-neutral">
@@ -88,7 +88,9 @@
 
         <HBox fx:id="resizeHandleBox" alignment="CENTER_RIGHT" managed="false" visible="false">
             <children>
-                <Label fx:id="resizeHandleLabel" text="◢" />
+                <Label fx:id="resizeHandleLabel" text="◢">
+                    <tooltip><Tooltip text="드래그하여 패널 크기 조정" /></tooltip>
+                </Label>
             </children>
         </HBox>
     </children>

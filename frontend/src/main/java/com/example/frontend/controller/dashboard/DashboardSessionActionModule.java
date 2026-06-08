@@ -42,16 +42,22 @@ public class DashboardSessionActionModule {
      * @param shouldShutdown true면 이동 전에 정리 콜백 실행
      */
     public void moveToLoginScreen(Window window, String alertMessage, boolean shouldShutdown) throws Exception {
-        // 윈도우 핸들 사전 검증 (토큰 지우기 전)
-        if (!(window instanceof Stage stage)) {
-            showToast("윈도우 핸들을 찾을 수 없습니다.", true);
-            return;
+        // 토큰 제거 및 정리 — 화면 전환 성공 여부와 무관하게 항상 최우선 수행
+        // (세션 클리어는 UI 실패·창 없음 상황에서도 보장돼야 한다)
+        apiClient.setBearerToken(null);
+        if (shouldShutdown && shutdownAction != null) {
+            shutdownAction.run();
         }
 
-        // FXML 경로는 classpath 절대경로로 고정 (클래스 패키지 무관)
+        // FXML 가용 여부를 창 핸들보다 먼저 확인 (창이 없어도 오류 메시지 표시)
         URL fxmlUrl = DashboardSessionActionModule.class.getResource("/fxml/login.fxml");
         if (fxmlUrl == null) {
             showToast("로그인 화면을 찾을 수 없습니다.", true);
+            return;
+        }
+
+        // 창 핸들 검증 — 화면 전환에만 필요
+        if (!(window instanceof Stage stage)) {
             return;
         }
 
@@ -61,12 +67,6 @@ public class DashboardSessionActionModule {
 
         // 즉시 화면을 숨겨 사용자가 "멈춘" 느낌을 받지 않도록 함
         stage.hide();
-
-        // 토큰 제거 및 정리 (화면 숨긴 후 진행)
-        apiClient.setBearerToken(null);
-        if (shouldShutdown && shutdownAction != null) {
-            shutdownAction.run();
-        }
 
         loginController.setPrimaryStage(stage);
         Scene loginScene = new Scene(loginRoot, 460, 360);

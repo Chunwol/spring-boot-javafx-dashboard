@@ -1,0 +1,9 @@
+data/
+nginx/
+scripts/
+*.sql
+*.dump
+*.tar
+.env
+.env.example
+README.md

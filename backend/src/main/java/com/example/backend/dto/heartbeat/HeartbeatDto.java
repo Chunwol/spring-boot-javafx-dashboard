@@ -1,10 +1,14 @@
 package com.example.backend.dto.heartbeat;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import java.util.List;
 
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
 public class HeartbeatDto {
     private String macAddress;
     private String hostname;

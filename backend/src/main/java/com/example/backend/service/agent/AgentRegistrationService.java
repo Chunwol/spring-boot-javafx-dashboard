@@ -2,8 +2,10 @@ package com.example.backend.service.agent;
 
 import com.example.backend.dto.agent.AgentRegisterRequest;
 import com.example.backend.dto.agent.AgentRegisterResponse;
+import com.example.backend.model.UserSetting;
 import com.example.backend.model.agent.AgentAuthToken;
 import com.example.backend.model.pc.PcMaster;
+import com.example.backend.repository.UserSettingRepository;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -32,8 +34,12 @@ public class AgentRegistrationService {
 
     private static final int LOCK_STRIPE_COUNT = 512;
 
+    /** user_settings 테이블에서 등록 허용 여부를 관리하는 키 */
+    static final String SETTING_KEY_REGISTRATION_ENABLED = "agent.registration.enabled";
+
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
+    private final UserSettingRepository userSettingRepository;
     /**
      * Stripe Lock: MAC 해시 기반으로 512개의 독립 잠금 슬롯을 사용.
      * 모든 등록 요청을 단일 lock으로 직렬화하면 성능 병목이 발생하므로,
@@ -47,9 +53,32 @@ public class AgentRegistrationService {
     private String installKey;
 
     public AgentRegistrationService(PcMasterRepository pcMasterRepository,
-                                    AgentAuthTokenRepository agentAuthTokenRepository) {
+                                    AgentAuthTokenRepository agentAuthTokenRepository,
+                                    UserSettingRepository userSettingRepository) {
         this.pcMasterRepository = pcMasterRepository;
         this.agentAuthTokenRepository = agentAuthTokenRepository;
+        this.userSettingRepository = userSettingRepository;
+    }
+
+    /**
+     * 에이전트 등록 허용 여부를 반환한다.
+     * user_settings 테이블에 키가 없으면 기본값 true(허용)로 동작한다.
+     */
+    public boolean isRegistrationEnabled() {
+        return userSettingRepository.findById(SETTING_KEY_REGISTRATION_ENABLED)
+                .map(s -> !"false".equalsIgnoreCase(s.getValue()))
+                .orElse(true);
+    }
+
+    /**
+     * 에이전트 등록 허용 여부를 설정한다.
+     */
+    @Transactional
+    public void setRegistrationEnabled(boolean enabled) {
+        UserSetting setting = userSettingRepository.findById(SETTING_KEY_REGISTRATION_ENABLED)
+                .orElse(new UserSetting(SETTING_KEY_REGISTRATION_ENABLED, "true"));
+        setting.setValue(String.valueOf(enabled));
+        userSettingRepository.save(setting);
     }
 
     /**
@@ -61,6 +90,10 @@ public class AgentRegistrationService {
      */
     @Transactional
     public AgentRegisterResponse registerAgent(String requestInstallKey, AgentRegisterRequest request) {
+        // 등록 차단 상태 확인 — 윈도우 이미지 배포 시 중복 등록 방지용
+        if (!isRegistrationEnabled()) {
+            throw new RegistrationDisabledException("에이전트 등록이 비활성화되어 있습니다. 관리자에게 문의하세요.");
+        }
         validateInstallKey(requestInstallKey);
         validateRequest(request);
 
@@ -105,7 +138,7 @@ public class AgentRegistrationService {
             }
         }
 
-        return new AgentRegisterResponse(plainToken, "등록 완료. 하트비트를 시작하세요.");
+        return AgentRegisterResponse.of(plainToken, "등록 완료. 하트비트를 시작하세요.");
     }
 
     /**
@@ -201,6 +234,13 @@ public class AgentRegistrationService {
             return HexFormat.of().formatHex(hash);
         } catch (Exception e) {
             throw new IllegalStateException("토큰 해시 계산 실패", e);
+        }
+    }
+
+    /** 에이전트 등록이 관리자에 의해 비활성화된 경우 발생하는 예외 */
+    public static class RegistrationDisabledException extends RuntimeException {
+        public RegistrationDisabledException(String message) {
+            super(message);
         }
     }
 }

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -18,7 +19,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,6 +34,9 @@ import java.util.function.Consumer;
 
 public class ApiClient {
     private static final Logger log = LoggerFactory.getLogger(ApiClient.class);
+    private static final int SCRIPT_UPLOAD_CHUNK_SIZE_BYTES = 8 * 1024 * 1024;
+    private static final Duration LARGE_UPLOAD_CHUNK_TIMEOUT = Duration.ofMinutes(5);
+    private static final Duration LARGE_UPLOAD_ASSEMBLE_TIMEOUT = Duration.ofHours(2);
     public static final String UNAUTHORIZED_MESSAGE = "인증이 필요합니다. 다시 로그인해주세요.";
     public static final String FORBIDDEN_MESSAGE = "권한이 없습니다. 관리자에게 권한을 요청해주세요.";
 
@@ -38,13 +46,14 @@ public class ApiClient {
     public static final int DEFAULT_LOGIN_PORT;
 
     static {
-        // FrontendEnvConfig에서 직접 읽기
+        // FrontendEnvConfig에서 직접 읽기 (.env / 시스템 프로퍼티 우선)
         String apiUrl = buildApiUrl();
         String wsUrl = buildWebSocketUrl();
-        String loginHost = FrontendEnvConfig.getProperty("API_SERVER_HOST", "localhost");
-        int loginPort = FrontendEnvConfig.getIntProperty("API_SERVER_PORT", 8888);
+        // 로그인 화면 기본 host/port: .env에 API_SERVER_HOST 있으면 그것, 없으면 아래 application.properties 폴백
+        String loginHost = FrontendEnvConfig.getProperty("API_SERVER_HOST", "");
+        int loginPort = FrontendEnvConfig.getIntProperty("API_SERVER_PORT", 0);
 
-        // 폴백: application.properties 읽기
+        // 폴백: application.properties 읽기 (JAR 내장 기본 서버 설정)
         try (var stream = ApiClient.class.getResourceAsStream("/application.properties")) {
             if (stream != null) {
                 java.util.Properties props = new java.util.Properties();
@@ -56,10 +65,22 @@ public class ApiClient {
                 if (wsUrl.equals("ws://localhost:8888/ws/websocket")) {
                     wsUrl = readSetting(props, "WEBSOCKET_STOMP_URL", "WEBSOCKET_STOMP_URL", wsUrl);
                 }
+                // 로그인 화면 기본값도 application.properties의 DEFAULT_LOGIN_HOST/PORT에서 폴백
+                if (loginHost.isBlank()) {
+                    loginHost = readSetting(props, "DEFAULT_LOGIN_HOST", "FRONTEND_DEFAULT_LOGIN_HOST", "");
+                }
+                if (loginPort <= 0) {
+                    String p = readSetting(props, "DEFAULT_LOGIN_PORT", "FRONTEND_DEFAULT_LOGIN_PORT", "");
+                    try { loginPort = Integer.parseInt(p.trim()); } catch (Exception ignore) { /* 아래 기본값 */ }
+                }
             }
         } catch (Exception e) {
             log.debug("application.properties 로드 실패 (정상: .env 사용)", e);
         }
+
+        // 최종 기본값 보정 (어디서도 못 읽었을 때)
+        if (loginHost.isBlank()) loginHost = "localhost";
+        if (loginPort <= 0) loginPort = 443;
 
         DEFAULT_BASE_URL = apiUrl;
         DEFAULT_WS_URL = wsUrl;
@@ -188,6 +209,10 @@ public class ApiClient {
         Throwable cause = unwrapFailure(error);
         if (cause instanceof ApiClientException apiEx) {
             if (apiEx.getStatusCode() == 401) {
+                String apiMessage = apiEx.getMessage();
+                if (apiEx.preferServerMessage() && apiMessage != null && !apiMessage.isBlank()) {
+                    return apiMessage;
+                }
                 return UNAUTHORIZED_MESSAGE;
             }
             if (apiEx.getStatusCode() == 403) {
@@ -391,6 +416,69 @@ public class ApiClient {
         }
     }
 
+    /**
+     * /api/v1/scripts 업로드를 청크 방식으로 수행한다.
+     * 대용량 파일/폴더 전송용이며 진행률 콜백을 지원한다.
+     */
+    public CompletableFuture<String> uploadScriptFile(File file) {
+        return uploadScriptFile(file, null);
+    }
+
+    public CompletableFuture<String> uploadScriptFile(File file, BiConsumer<Long, Long> onProgress) {
+        if (file == null || !file.isFile()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("업로드할 파일을 찾을 수 없습니다."));
+        }
+        long totalBytes = file.length();
+        if (totalBytes <= 0) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("빈 파일은 업로드할 수 없습니다."));
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            String uploadId = "frontend-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().replace("-", "");
+            int totalChunks = (int) ((totalBytes + SCRIPT_UPLOAD_CHUNK_SIZE_BYTES - 1) / SCRIPT_UPLOAD_CHUNK_SIZE_BYTES);
+            long uploadedBytes = 0L;
+            if (onProgress != null) {
+                onProgress.accept(0L, totalBytes);
+            }
+            try (InputStream in = Files.newInputStream(file.toPath())) {
+                for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                    byte[] chunkBytes = readChunkBytes(in, SCRIPT_UPLOAD_CHUNK_SIZE_BYTES);
+                    if (chunkBytes.length == 0) {
+                        throw new IOException("업로드 파일을 읽는 중 예상보다 빨리 끝났습니다.");
+                    }
+                    String chunkHash = sha256Hex(chunkBytes);
+                    String path = "/file-chunks"
+                            + "?uploadId=" + encodeQuery(uploadId)
+                            + "&chunkIndex=" + chunkIndex
+                            + "&totalChunks=" + totalChunks
+                            + "&chunkHash=" + encodeQuery(chunkHash);
+                    HttpResponse<String> response = sendBlockingMultipart(
+                            path,
+                            file.getName(),
+                            "application/octet-stream",
+                            chunkBytes,
+                            LARGE_UPLOAD_CHUNK_TIMEOUT);
+                    ensureSuccess(response);
+                    uploadedBytes += chunkBytes.length;
+                    if (onProgress != null) {
+                        onProgress.accept(Math.min(uploadedBytes, totalBytes), totalBytes);
+                    }
+                }
+                String assemblePath = "/file-chunks/assemble"
+                        + "?uploadId=" + encodeQuery(uploadId)
+                        + "&originalFilename=" + encodeQuery(file.getName())
+                        + "&totalChunks=" + totalChunks;
+                HttpRequest assembleRequest = build(assemblePath)
+                        .timeout(LARGE_UPLOAD_ASSEMBLE_TIMEOUT)
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build();
+                HttpResponse<String> assembleResponse = sendBlockingString(assembleRequest);
+                return ensureSuccess(assembleResponse).body();
+            } catch (Exception e) {
+                throw rethrowUploadFailure(e);
+            }
+        });
+    }
+
     public <T> CompletableFuture<T> getJson(String path, Class<T> clazz) {
         return get(path).thenApply(body -> readValue(body, clazz));
     }
@@ -438,6 +526,40 @@ public class ApiClient {
         } catch (Exception e) {
             return CompletableFuture.failedFuture(e);
         }
+    }
+
+    private HttpResponse<String> sendBlockingString(HttpRequest request) throws IOException, InterruptedException {
+        try {
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException ex) {
+            notifyConnectionFailure(ex);
+            throw ex;
+        }
+    }
+
+    private HttpResponse<String> sendBlockingMultipart(String path,
+                                                       String filename,
+                                                       String mimeType,
+                                                       byte[] fileBytes,
+                                                       Duration timeout) throws IOException, InterruptedException {
+        String boundary = "----ChunkBoundary" + UUID.randomUUID().toString().replace("-", "");
+        String header = "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n"
+                + "Content-Type: " + mimeType + "\r\n\r\n";
+        String footer = "\r\n--" + boundary + "--\r\n";
+        byte[] headerBytes = header.getBytes(StandardCharsets.UTF_8);
+        byte[] footerBytes = footer.getBytes(StandardCharsets.UTF_8);
+        byte[] body = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
+        System.arraycopy(headerBytes, 0, body, 0, headerBytes.length);
+        System.arraycopy(fileBytes, 0, body, headerBytes.length, fileBytes.length);
+        System.arraycopy(footerBytes, 0, body, headerBytes.length + fileBytes.length, footerBytes.length);
+
+        HttpRequest request = build(path)
+                .timeout(timeout)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build();
+        return sendBlockingString(request);
     }
 
     private HttpRequest.Builder build(String path) {
@@ -512,9 +634,16 @@ public class ApiClient {
         if (code >= 200 && code < 300) {
             return response;
         }
+        if (code >= 400 && code < 500) {
+            // 진단: 어떤 URL이 4xx를 반환했는지 + 토큰 부착 여부 기록
+            log.warn("HTTP {} ← {} (tokenAttached={})", code, response.request().uri(),
+                    bearerToken != null && !bearerToken.isBlank());
+        }
         if (code == 401) {
-            ApiClientException exception = new ApiClientException(code, UNAUTHORIZED_MESSAGE);
-            notifyAuthFailure(exception);
+            ApiClientException exception = buildUnauthorizedException(response);
+            if (!exception.preferServerMessage()) {
+                notifyAuthFailure(exception);
+            }
             throw new CompletionException(exception);
         }
         if (code == 403) {
@@ -537,6 +666,14 @@ public class ApiClient {
             throw new CompletionException(new ApiClientException(code, FORBIDDEN_MESSAGE));
         }
         throw new CompletionException(new ApiClientException(code, "HTTP " + code));
+    }
+
+    private ApiClientException buildUnauthorizedException(HttpResponse<String> response) {
+        String path = response.request().uri().getPath();
+        if (path != null && path.endsWith("/auth/login")) {
+            return new ApiClientException(401, extractMessage(response.body()), true);
+        }
+        return new ApiClientException(401, UNAUTHORIZED_MESSAGE);
     }
 
     private String extractMessage(String body) {
@@ -573,6 +710,38 @@ public class ApiClient {
 
     private static String readSetting(java.util.Properties props, String propertyKey, String envKey, String defaultValue) {
         return readEnv(envKey, props.getProperty(propertyKey, defaultValue));
+    }
+
+    private byte[] readChunkBytes(InputStream in, int chunkSize) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(chunkSize);
+        byte[] buffer = new byte[Math.min(chunkSize, 64 * 1024)];
+        int remaining = chunkSize;
+        while (remaining > 0) {
+            int read = in.read(buffer, 0, Math.min(buffer.length, remaining));
+            if (read < 0) {
+                break;
+            }
+            out.write(buffer, 0, read);
+            remaining -= read;
+        }
+        return out.toByteArray();
+    }
+
+    private String sha256Hex(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(digest.digest(bytes));
+    }
+
+    private String encodeQuery(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private RuntimeException rethrowUploadFailure(Throwable error) {
+        Throwable cause = unwrapFailure(error);
+        if (cause instanceof RuntimeException runtimeException) {
+            return runtimeException;
+        }
+        return new CompletionException(cause);
     }
 
     private static String readEnv(String envKey, String defaultValue) {

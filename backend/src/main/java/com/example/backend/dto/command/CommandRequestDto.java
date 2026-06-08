@@ -5,6 +5,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import java.util.List;
+
 public class CommandRequestDto {
     @NotBlank(message = "scope는 필수입니다.")
     @Pattern(regexp = "^(?i)(SINGLE|GROUP)$", message = "scope는 SINGLE 또는 GROUP 이어야 합니다.")
@@ -28,6 +30,10 @@ public class CommandRequestDto {
 
     @Size(max = 500, message = "scriptUrl은 500자를 초과할 수 없습니다.")
     private String scriptUrl;
+
+    @Size(max = 2000, message = "targetMacs는 최대 2000개까지 지정할 수 있습니다.")
+    private List<@Pattern(regexp = "^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$",
+            message = "targetMacs 항목의 MAC 형식이 올바르지 않습니다.") String> targetMacs;
 
     public String getScope() {
         return scope;
@@ -85,6 +91,14 @@ public class CommandRequestDto {
         this.scriptUrl = scriptUrl;
     }
 
+    public List<String> getTargetMacs() {
+        return targetMacs;
+    }
+
+    public void setTargetMacs(List<String> targetMacs) {
+        this.targetMacs = targetMacs;
+    }
+
     /** WOL 릴레이 대상 서브넷 브로드캐스트 IP (예: 192.168.10.255). null이면 255.255.255.255 사용 */
     @Pattern(regexp = "^$|^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$",
              message = "broadcastIp 형식이 올바르지 않습니다.")
@@ -109,4 +123,3 @@ public class CommandRequestDto {
         isAdminOperation = adminOperation;
     }
 }
-

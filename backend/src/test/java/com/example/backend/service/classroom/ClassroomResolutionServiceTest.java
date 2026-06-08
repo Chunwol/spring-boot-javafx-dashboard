@@ -48,6 +48,19 @@ class ClassroomResolutionServiceTest {
     }
 
     @Test
+    void resolveGroupIdByIp_teacherDeviceIpTakesPrecedence() {
+        ClassroomTeacherDevice teacherDevice = new ClassroomTeacherDevice();
+        teacherDevice.setGroupId(30L);
+        when(teacherDeviceRepository.findFirstByIpAddress("10.0.0.10"))
+                .thenReturn(teacherDevice);
+
+        Long groupId = service.resolveGroupIdByIp("10.0.0.10");
+
+        assertThat(groupId).isEqualTo(30L);
+        verify(rangeRepository, never()).findAll();
+    }
+
+    @Test
     void resolveGroupIdByIp_noMatch_returnsNull() {
         ClassroomIpRange range = new ClassroomIpRange();
         range.setGroupId(10L);
@@ -69,6 +82,16 @@ class ClassroomResolutionServiceTest {
     void resolveRole_nullGroupId_returnsUnknown() {
         assertThat(service.resolveRole(null, "192.168.1.1", "AA:BB:CC:DD:EE:FF"))
                 .isEqualTo(ClassroomResolutionService.PcRole.UNKNOWN);
+    }
+
+    @Test
+    void resolveRole_teacherByIpWithoutGroupId() {
+        ClassroomTeacherDevice device = new ClassroomTeacherDevice();
+        when(teacherDeviceRepository.findFirstByIpAddress("192.168.1.10"))
+                .thenReturn(device);
+
+        assertThat(service.resolveRole(null, "192.168.1.10", "AA:BB:CC:DD:EE:FF"))
+                .isEqualTo(ClassroomResolutionService.PcRole.TEACHER);
     }
 
     @Test

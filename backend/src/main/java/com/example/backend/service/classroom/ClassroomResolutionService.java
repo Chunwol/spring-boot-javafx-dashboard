@@ -1,6 +1,7 @@
 package com.example.backend.service.classroom;
 
 import com.example.backend.model.classroom.ClassroomIpRange;
+import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
 import com.example.backend.util.IpRangeUtil;
@@ -53,6 +54,10 @@ public class ClassroomResolutionService {
     @Transactional(readOnly = true)
     public Long resolveGroupIdByIp(String ip) {
         if (!IpRangeUtil.isIpv4(ip)) return null;
+        ClassroomTeacherDevice explicitTeacherDevice = teacherDeviceRepository.findFirstByIpAddress(ip);
+        if (explicitTeacherDevice != null && explicitTeacherDevice.getGroupId() != null) {
+            return explicitTeacherDevice.getGroupId();
+        }
         List<ClassroomIpRange> all = rangeRepository.findAll();
         for (ClassroomIpRange r : all) {
             if (IpRangeUtil.containsIp(ip, r.getCidr(), r.getStartIp(), r.getEndIp())) {
@@ -81,6 +86,12 @@ public class ClassroomResolutionService {
      */
     @Transactional(readOnly = true)
     public PcRole resolveRole(Long groupId, String ip, String mac) {
+        if (ip != null && teacherDeviceRepository.findFirstByIpAddress(ip) != null) {
+            return PcRole.TEACHER;
+        }
+        if (mac != null && teacherDeviceRepository.findFirstByMacAddress(mac) != null) {
+            return PcRole.TEACHER;
+        }
         if (groupId == null) return PcRole.UNKNOWN;
         if (ip != null && teacherDeviceRepository.findFirstByGroupIdAndIpAddress(groupId, ip) != null) {
             return PcRole.TEACHER;
@@ -91,4 +102,3 @@ public class ClassroomResolutionService {
         return PcRole.STUDENT;
     }
 }
-

@@ -31,8 +31,11 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.Validator;
@@ -90,6 +93,8 @@ public class DashboardWidgetModule {
     private final Map<Long, TextArea> textEditors = new java.util.HashMap<>();
     private final Map<Long, Label> textViews = new java.util.HashMap<>();
     private final Map<Long, VBox> imageResizeHandles = new java.util.HashMap<>();
+    private BiConsumer<javafx.scene.Node, Boolean> onSelectCallback;
+    private Supplier<Set<javafx.scene.Node>> selectedNodesSupplier;
 
     private List<Map<String, Object>> cachedTexts = new ArrayList<>();
     private List<Map<String, Object>> cachedImages = new ArrayList<>();
@@ -118,6 +123,45 @@ public class DashboardWidgetModule {
         this.dashboardIdSupplier = supplier != null ? supplier : () -> -1L;
     }
 
+    public void setOnSelectCallback(BiConsumer<javafx.scene.Node, Boolean> callback) {
+        this.onSelectCallback = callback;
+    }
+
+    public void setSelectedNodesSupplier(Supplier<Set<javafx.scene.Node>> supplier) {
+        this.selectedNodesSupplier = supplier;
+    }
+
+    public void setSmartGuides(DashboardSmartGuides guides) {
+        this.dashboardInteractionService.setSmartGuides(guides);
+    }
+
+    /** 텍스트 스타일을 외부(우측 패널)에서 변경 */
+    public void updateTextStyle(Long id, boolean bold, boolean italic, int fontSize, String fontColor) {
+        TextArea textArea = textEditors.get(id);
+        Label textView = textViews.get(id);
+        if (textArea == null) return;
+        textArea.getProperties().put("bold", bold);
+        textArea.getProperties().put("italic", italic);
+        textArea.getProperties().put("fontSize", fontSize);
+        textArea.getProperties().put("fontColor", fontColor);
+        applyTextStyle(textArea, fontColor, true);
+        if (textView != null) applyTextViewStyle(textView, fontSize, bold, italic, fontColor);
+        VBox box = textItemMap.get(id);
+        if (box != null) updateTextItem(id, textArea.getText(), box.getLayoutX(), box.getLayoutY(), box.getPrefWidth(), box.getPrefHeight());
+    }
+
+    /** 현재 텍스트 스타일 읽기 (우측 패널 초기화용) */
+    public Map<String, Object> getTextStyle(Long id) {
+        TextArea textArea = textEditors.get(id);
+        if (textArea == null) return Map.of();
+        Map<String, Object> style = new java.util.LinkedHashMap<>();
+        style.put("bold", Boolean.TRUE.equals(textArea.getProperties().get("bold")));
+        style.put("italic", Boolean.TRUE.equals(textArea.getProperties().get("italic")));
+        style.put("fontSize", textArea.getProperties().getOrDefault("fontSize", 14));
+        style.put("fontColor", textArea.getProperties().getOrDefault("fontColor", "#111111").toString());
+        return style;
+    }
+
     private boolean ensureWritePermission(String actionName) {
         if (!apiClient.isViewerRole()) {
             return true;
@@ -134,20 +178,8 @@ public class DashboardWidgetModule {
     public List<Map<String, Object>> getCachedTexts() { return cachedTexts; }
     public List<Map<String, Object>> getCachedImages() { return cachedImages; }
 
-    /** editMode 연동: 삭제 버튼 visibility 토글 */
+    /** editMode 연동: 텍스트 에디터/뷰 전환만 처리. 헤더/핸들은 선택 시에만 표시 */
     public void applyEditMode(boolean editMode) {
-        textDeleteBtns.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        textHeaders.values().forEach(header -> {
-            header.setVisible(editMode);
-            header.setManaged(editMode);
-        });
-        textResizeHandles.values().forEach(handle -> {
-            handle.setVisible(editMode);
-            handle.setManaged(editMode);
-        });
         textEditors.values().forEach(editor -> {
             editor.setEditable(editMode);
             editor.setMouseTransparent(!editMode);
@@ -166,22 +198,17 @@ public class DashboardWidgetModule {
             box.getStyleClass().removeAll("widget-item-text-edit", "widget-item-view");
             box.getStyleClass().add(editMode ? "widget-item-text-edit" : "widget-item-view");
         });
-        imageDeleteBtns.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        imageResizeHandles.values().forEach(handle -> {
-            handle.setVisible(editMode);
-            handle.setManaged(editMode);
-        });
-        imageItemMap.values().forEach(box -> {
-            ImageView iv = findImageView(box);
-            if (iv != null) {
-                box.setPrefSize(iv.getFitWidth(), iv.getFitHeight() + (editMode ? IMAGE_CONTROL_HEIGHT : 0));
-            }
-                box.getStyleClass().removeAll("widget-item-image-edit", "widget-item-view");
-                box.getStyleClass().add(editMode ? "widget-item-image-edit" : "widget-item-view");
-        });
+        if (!editMode) {
+            // 편집 모드 종료 시 리사이즈 핸들 숨김
+            textResizeHandles.values().forEach(handle -> {
+                handle.setVisible(false);
+                handle.setManaged(false);
+            });
+            imageResizeHandles.values().forEach(handle -> {
+                handle.setVisible(false);
+                handle.setManaged(false);
+            });
+        }
     }
 
     public void applySnapshot(List<Map<String, Object>> texts, List<Map<String, Object>> images) {
@@ -372,12 +399,13 @@ public class DashboardWidgetModule {
                 } catch (Exception headerEx) {
                     throw new IllegalStateException("Failed to load widget-text-header.fxml", headerEx);
                 }
-                deleteBtn.setVisible(editModeSupplier.getAsBoolean());
-                deleteBtn.setManaged(editModeSupplier.getAsBoolean());
+                // Header permanently hidden; actions wired for right-panel use
+                deleteBtn.setVisible(false);
+                deleteBtn.setManaged(false);
                 deleteBtn.setOnAction(e -> handleDeleteTextItem(id));
                 textDeleteBtns.put(id, deleteBtn);
-                header.setVisible(editModeSupplier.getAsBoolean());
-                header.setManaged(editModeSupplier.getAsBoolean());
+                header.setVisible(false);
+                header.setManaged(false);
                 textHeaders.put(id, header);
 
                 TextArea textArea = new TextArea(text);
@@ -469,9 +497,12 @@ public class DashboardWidgetModule {
                 box.getChildren().addAll(header, textArea, textView);
                 box.setPrefSize(w, h);
                 box.getStyleClass().add(editModeSupplier.getAsBoolean() ? "widget-item-text-edit" : "widget-item-view");
+                box.getProperties().put("panelType", "text");
+                box.getProperties().put("dashboardItemId", id);
                 makeTextItemInteractive(box, textArea, id);
                 VBox resizeHandleWrap = addTextResizeHandle(box, textArea, id);
                 textResizeHandles.put(id, resizeHandleWrap);
+                box.getProperties().put("resizeHandleNode", resizeHandleWrap);
                 textItemMap.put(id, box);
                 classroomContainer.getChildren().add(box);
                 box.toFront();
@@ -502,6 +533,7 @@ public class DashboardWidgetModule {
                 box,
                 editModeSupplier,
                 this::applySnap,
+                selectedNodesSupplier,
                 () -> updateTextItem(
                         id,
                         textArea.getText(),
@@ -510,6 +542,14 @@ public class DashboardWidgetModule {
                         box.getPrefWidth(),
                         box.getPrefHeight())
         );
+        box.setOnMouseClicked(e -> {
+            if (!editModeSupplier.getAsBoolean()) return;
+            boolean dragged = Boolean.TRUE.equals(box.getProperties().get("__dragging__"));
+            if (!dragged && onSelectCallback != null) {
+                onSelectCallback.accept(box, e.isControlDown());
+                e.consume();
+            }
+        });
 
         textArea.focusedProperty().addListener((obs, oldVal, newVal) -> {
             if (!newVal && editModeSupplier.getAsBoolean()) {
@@ -739,22 +779,26 @@ public class DashboardWidgetModule {
                 } catch (Exception ex) {
                     throw new IllegalStateException("Failed to load widget-image-item.fxml", ex);
                 }
-                deleteBtn.setVisible(editModeSupplier.getAsBoolean());
-                deleteBtn.setManaged(editModeSupplier.getAsBoolean());
+                // delete button permanently hidden; action wired for right-panel use
+                deleteBtn.setVisible(false);
+                deleteBtn.setManaged(false);
                 deleteBtn.setOnAction(e -> handleDeleteImageItem(id));
                 imageDeleteBtns.put(id, deleteBtn);
                 ImageView imageView = new ImageView(new Image(imageUrlFinal, widthFinal, heightFinal, true, true, true));
                 imageView.setFitWidth(widthFinal);
                 imageView.setFitHeight(heightFinal);
                 newBox.getChildren().add(imageView);
-                newBox.setPrefSize(widthFinal, heightFinal + (editModeSupplier.getAsBoolean() ? IMAGE_CONTROL_HEIGHT : 0));
+                newBox.setPrefSize(widthFinal, heightFinal);
                 newBox.getStyleClass().removeAll("widget-item-image-edit", "widget-item-view");
-                newBox.getStyleClass().add(editModeSupplier.getAsBoolean() ? "widget-item-image-edit" : "widget-item-view");
+                newBox.getStyleClass().add("widget-item-view");
+                newBox.getProperties().put("panelType", "image");
+                newBox.getProperties().put("dashboardItemId", id);
                 final VBox newBoxFinal = newBox;
                 dashboardInteractionService.attachDragHandlers(
                         newBoxFinal,
                         editModeSupplier,
                         this::applySnap,
+                        selectedNodesSupplier,
                         () -> apiClient.putJson("/dashboard/images/" + id, Map.of(
                                 "x", newBoxFinal.getLayoutX(),
                                 "y", newBoxFinal.getLayoutY(),
@@ -767,10 +811,19 @@ public class DashboardWidgetModule {
                     return null;
                 })
                 );
+                newBoxFinal.setOnMouseClicked(e -> {
+                    if (!editModeSupplier.getAsBoolean()) return;
+                    boolean dragged = Boolean.TRUE.equals(newBoxFinal.getProperties().get("__dragging__"));
+                    if (!dragged && onSelectCallback != null) {
+                        onSelectCallback.accept(newBoxFinal, e.isControlDown());
+                        e.consume();
+                    }
+                });
                 imageItemMap.put(id, newBoxFinal);
                 classroomContainer.getChildren().add(newBoxFinal);
                 VBox resizeHandleWrap = addImageResizeHandle(newBoxFinal, id, imageUrlFinal);
                 imageResizeHandles.put(id, resizeHandleWrap);
+                newBoxFinal.getProperties().put("resizeHandleNode", resizeHandleWrap);
                 newBoxFinal.toFront();
                 box = newBoxFinal;
             } else {
@@ -779,7 +832,7 @@ public class DashboardWidgetModule {
                     iv.setFitWidth(w);
                     iv.setFitHeight(h);
                 }
-                box.setPrefSize(w, h + (editModeSupplier.getAsBoolean() ? IMAGE_CONTROL_HEIGHT : 0));
+                box.setPrefSize(w, h);
             }
             box.setLayoutX(x);
             box.setLayoutY(y);
@@ -895,8 +948,8 @@ public class DashboardWidgetModule {
     private VBox addTextResizeHandle(VBox box, TextArea textArea, Long id) {
         VBox handleWrap = loadResizeHandleWrap();
         Label handle = (Label) handleWrap.getProperties().get("resizeHandleLabel");
-        handleWrap.setVisible(editModeSupplier.getAsBoolean());
-        handleWrap.setManaged(editModeSupplier.getAsBoolean());
+        handleWrap.setVisible(false);
+        handleWrap.setManaged(false);
         box.getChildren().add(handleWrap);
 
         dashboardInteractionService.attachResizeHandlers(
@@ -924,8 +977,8 @@ public class DashboardWidgetModule {
     private VBox addImageResizeHandle(VBox box, Long id, String imageUrlFinal) {
         VBox handleWrap = loadResizeHandleWrap();
         Label handle = (Label) handleWrap.getProperties().get("resizeHandleLabel");
-        handleWrap.setVisible(editModeSupplier.getAsBoolean());
-        handleWrap.setManaged(editModeSupplier.getAsBoolean());
+        handleWrap.setVisible(false);
+        handleWrap.setManaged(false);
         box.getChildren().add(handleWrap);
 
         dashboardInteractionService.attachResizeHandlers(

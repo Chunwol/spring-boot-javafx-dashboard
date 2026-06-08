@@ -45,10 +45,10 @@ fi
 echo "[OK] gradlew is runnable"
 
 # 3) Validate required artifacts layout conventions
-if [[ -f "frontend/build/libs/frontend-0.0.1-SNAPSHOT-all.jar" ]]; then
-  echo "[OK] Frontend fat JAR exists"
+if [[ -f "dist/frontend/frontend-mac.jar" || -f "dist/frontend/frontend-mac-aarch64.jar" || -f "dist/frontend/frontend-linux.jar" ]]; then
+  echo "[OK] Frontend platform JAR exists"
 else
-  echo "[INFO] Frontend fat JAR not found yet (will be created by build)"
+  echo "[INFO] Frontend platform JARs not found yet (will be created by build)"
 fi
 
 echo

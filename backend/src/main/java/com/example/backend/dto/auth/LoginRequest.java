@@ -3,12 +3,14 @@ package com.example.backend.dto.auth;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * 로그인 요청 DTO
  */
-@Data
+@Getter
+@NoArgsConstructor
 @Schema(description = "사용자 로그인 요청")
 public class LoginRequest {
     @NotBlank(message = "username은 필수입니다.")

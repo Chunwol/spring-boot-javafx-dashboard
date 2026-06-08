@@ -2,7 +2,7 @@ package com.example.frontend.controller;
 
 import com.example.frontend.service.ApiClient;
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
+import com.example.frontend.controller.dashboard.FxTestHelper;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
@@ -20,7 +20,7 @@ class DashboardControllerRoleUiTest {
 
     @BeforeAll
     static void initToolkit() {
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test

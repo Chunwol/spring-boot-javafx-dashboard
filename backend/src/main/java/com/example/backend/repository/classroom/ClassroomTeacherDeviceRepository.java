@@ -22,6 +22,22 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
     List<ClassroomTeacherDevice> findByGroupId(Long groupId);
 
     /**
+     * IP 주소로 교사 디바이스를 조회한다.
+     *
+     * @param ipAddress IP 주소
+     * @return 교사 디바이스
+     */
+    ClassroomTeacherDevice findFirstByIpAddress(String ipAddress);
+
+    /**
+     * MAC 주소로 교사 디바이스를 조회한다.
+     *
+     * @param macAddress MAC 주소
+     * @return 교사 디바이스
+     */
+    ClassroomTeacherDevice findFirstByMacAddress(String macAddress);
+
+    /**
      * 특정 그룹에서 IP 주소로 교사 디바이스를 조회한다.
      *
      * @param groupId   강의실 그룹 ID

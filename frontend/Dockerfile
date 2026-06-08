@@ -12,16 +12,16 @@ COPY settings.gradle .
 COPY common common/
 COPY frontend frontend/
 
-# Frontend JAR 빌드 (shadowJar 사용)
-RUN chmod +x gradlew && ./gradlew :frontend:shadowJar -x test
+# Frontend Linux JAR 빌드
+RUN chmod +x gradlew && ./gradlew :frontend:publishCurrentPlatformJar -x test
 
 # 실행 스테이지
 FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 
-# 빌드 스테이지에서 생성된 shadowJar 복사
-COPY --from=builder /build/frontend/build/libs/dashboard-0.0.1.jar /app/dashboard.jar
+# 빌드 스테이지에서 생성된 Linux 전용 JAR 복사
+COPY --from=builder /build/dist/frontend/frontend-linux.jar /app/dashboard.jar
 
 # JavaFX를 위한 디스플레이 포트 설정 (호스트 머신의 X11 연결 필요)
 ENV DISPLAY=:0

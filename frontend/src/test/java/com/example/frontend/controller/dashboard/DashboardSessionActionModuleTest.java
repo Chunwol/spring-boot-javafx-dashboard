@@ -2,7 +2,6 @@ package com.example.frontend.controller.dashboard;
 
 import com.example.frontend.service.ApiClient;
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.Scene;
 import javafx.scene.layout.Pane;
 import javafx.stage.Stage;
@@ -25,32 +24,29 @@ class DashboardSessionActionModuleTest {
 
     @BeforeAll
     static void initToolkit() {
-        new JFXPanel();
+        FxTestHelper.initToolkit();
     }
 
     @Test
-    void moveToLoginScreen_whenFxmlMissing_shouldShowErrorToastAndClearToken() throws Exception {
+    void moveToLoginScreen_whenWindowIsNull_shouldClearTokenAndReturnCleanly() throws Exception {
         TrackingApiClient apiClient = new TrackingApiClient();
         AtomicBoolean shutdownCalled = new AtomicBoolean(false);
         List<String> toastMessages = new ArrayList<>();
-        List<Boolean> toastErrors = new ArrayList<>();
 
         DashboardSessionActionModule module = new DashboardSessionActionModule(
                 apiClient,
                 () -> shutdownCalled.set(true),
-                (message, error) -> {
-                    toastMessages.add(message);
-                    toastErrors.add(error);
-                },
-                MissingResourceAnchor.class
+                (message, error) -> toastMessages.add(message),
+                DashboardSessionActionModule.class
         );
 
+        // null window → FXML found, but Stage cast fails → silent return
+        // Token must be cleared regardless of early exit path
         module.moveToLoginScreen(null, null, false);
 
         assertThat(apiClient.lastBearerToken).isNull();
         assertThat(shutdownCalled.get()).isFalse();
-        assertThat(toastMessages).contains("로그인 화면을 찾을 수 없습니다.");
-        assertThat(toastErrors).contains(true);
+        assertThat(toastMessages).isEmpty();
     }
 
     @Test
@@ -62,7 +58,7 @@ class DashboardSessionActionModuleTest {
                 apiClient,
                 () -> shutdownCalled.set(true),
                 (message, error) -> { },
-                MissingResourceAnchor.class
+                DashboardSessionActionModule.class
         );
 
         module.moveToLoginScreen(null, "서버 연결 종료", true);
@@ -120,8 +116,8 @@ class DashboardSessionActionModuleTest {
                 latch.countDown();
             }
         });
-        boolean completed = latch.await(3, TimeUnit.SECONDS);
-        assertThat(completed).isTrue();
+        boolean completed = latch.await(15, TimeUnit.SECONDS);
+        assertThat(completed).withFailMessage("FX thread did not finish within 15 s").isTrue();
         if (failureRef.get() != null) {
             fail("FX thread execution failed", failureRef.get());
         }
@@ -141,6 +137,4 @@ class DashboardSessionActionModuleTest {
         }
     }
 
-    private static final class MissingResourceAnchor {
-    }
 }

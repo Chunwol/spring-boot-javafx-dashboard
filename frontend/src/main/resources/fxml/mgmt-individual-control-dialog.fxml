@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressIndicator?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
 <?import javafx.scene.layout.VBox?>
@@ -12,7 +13,14 @@
     <children>
         <Label fx:id="headerLabel" styleClass="mgmt-dialog-header" />
         <TableView fx:id="controlTable" prefHeight="440.0" VBox.vgrow="ALWAYS" styleClass="panel-card">
-            <placeholder><Label text="PC 정보를 불러오는 중..." /></placeholder>
+            <placeholder>
+                <VBox alignment="CENTER" spacing="10.0">
+                    <children>
+                        <ProgressIndicator prefWidth="44.0" prefHeight="44.0" />
+                        <Label text="PC 정보를 불러오는 중..." styleClass="mgmt-hint-label" />
+                    </children>
+                </VBox>
+            </placeholder>
             <columns>
                 <TableColumn fx:id="nameCol" text="PC명" prefWidth="160.0" />
                 <TableColumn fx:id="ipCol" text="IP 주소" prefWidth="130.0" />

@@ -11,12 +11,11 @@
         <VBox spacing="20.0" fillWidth="true" maxWidth="1.7976931348623157E308">
             <padding><Insets topRightBottomLeft="20.0" /></padding>
             <children>
-                <StackPane fx:id="metricsSlot" maxWidth="1.7976931348623157E308" />
+                <!-- 운영 매트릭/보고서는 별도 "보고서" 탭으로 이동 -->
                 <StackPane fx:id="agentSlot" maxWidth="1.7976931348623157E308" />
                 <StackPane fx:id="ipRangeSlot" maxWidth="1.7976931348623157E308" />
                 <StackPane fx:id="teacherSlot" maxWidth="1.7976931348623157E308" />
                 <StackPane fx:id="brokenPcSlot" maxWidth="1.7976931348623157E308" />
-                <StackPane fx:id="reportSlot" maxWidth="1.7976931348623157E308" />
             </children>
         </VBox>
     </content>

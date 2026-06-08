@@ -5,9 +5,9 @@
 <?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
-<?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 
@@ -24,12 +24,13 @@
             <VBox.margin><Insets top="2" bottom="0"/></VBox.margin>
         </Label>
 
-        <Separator styleClass="login-divider">
+        <Region styleClass="login-divider">
             <VBox.margin><Insets top="14" bottom="16"/></VBox.margin>
-        </Separator>
+        </Region>
 
         <Label fx:id="messageLabel" text="" styleClass="login-message-error"
-               visible="false" wrapText="true" maxWidth="256">
+               visible="false" wrapText="true" textOverrun="CLIP"
+               prefWidth="256" maxWidth="256">
             <VBox.margin><Insets bottom="8"/></VBox.margin>
         </Label>
 

@@ -40,7 +40,7 @@ public class DashboardOperationsMetricsPanelModule {
     private static final Logger log = LoggerFactory.getLogger(DashboardOperationsMetricsPanelModule.class);
     private static final double LAYOUT_EPSILON = 0.5;
     private static final long SNAPSHOT_REFRESH_INTERVAL_MS = 30_000L;
-    private static final DateTimeFormatter PERF_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter PERF_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final DashboardService dashboardService;
@@ -65,6 +65,23 @@ public class DashboardOperationsMetricsPanelModule {
     private final Map<Long, Button> deleteBtnMap = new HashMap<>();
     private final Map<Long, Label> resizeHandleMap = new HashMap<>();
     private final AtomicBoolean snapshotFetchInFlight = new AtomicBoolean(false);
+    private java.util.function.BiConsumer<javafx.scene.Node, Boolean> onSelectCallback;
+    private Supplier<java.util.Set<javafx.scene.Node>> selectedNodesSupplier;
+
+    public void setOnSelectCallback(java.util.function.BiConsumer<javafx.scene.Node, Boolean> callback) {
+        this.onSelectCallback = callback;
+    }
+
+    public void setSelectedNodesSupplier(Supplier<java.util.Set<javafx.scene.Node>> supplier) {
+        this.selectedNodesSupplier = supplier;
+    }
+
+    public void deletePanel(Long panelId) {
+        Long dashboardId = dashboardIdSupplier.get();
+        if (dashboardId == null || panelId == null) return;
+        runBeforePanelMutation();
+        dashboardService.deletePanelAsync(dashboardId, panelId, onPanelsChanged);
+    }
 
     private volatile long lastSnapshotFetchedAt = 0L;
     private volatile Map<String, Object> latestSnapshot = Map.of();
@@ -119,14 +136,12 @@ public class DashboardOperationsMetricsPanelModule {
     }
 
     public void applyEditMode(boolean editMode) {
-        deleteBtnMap.values().forEach(btn -> {
-            btn.setVisible(editMode);
-            btn.setManaged(editMode);
-        });
-        resizeHandleMap.values().forEach(handle -> {
-            handle.setVisible(editMode);
-            handle.setManaged(editMode);
-        });
+        if (!editMode) {
+            resizeHandleMap.values().forEach(handle -> {
+                handle.setVisible(false);
+                handle.setManaged(false);
+            });
+        }
     }
 
     private boolean isOperationsPanelType(DashboardPanelDto panel) {
@@ -213,20 +228,16 @@ public class DashboardOperationsMetricsPanelModule {
         );
         refsMap.put(panelDto.getId(), refs);
 
-        deleteBtn.setVisible(canInteract.getAsBoolean());
-        deleteBtn.setManaged(canInteract.getAsBoolean());
+        // Delete button permanently hidden; action wired for right-panel use
+        deleteBtn.setVisible(false);
+        deleteBtn.setManaged(false);
         deleteBtnMap.put(panelDto.getId(), deleteBtn);
-        deleteBtn.setOnAction(e -> {
-            Long dashboardId = dashboardIdSupplier.get();
-            if (dashboardId != null) {
-                runBeforePanelMutation();
-                dashboardService.deletePanelAsync(dashboardId, panelDto.getId(), onPanelsChanged);
-            }
-        });
+        deleteBtn.setOnAction(e -> deletePanel(panelDto.getId()));
 
         refreshBtn.setOnAction(e -> refreshSnapshot(true, true));
 
         wrapper.getProperties().put("dashboardPanelId", panelDto.getId());
+        wrapper.getProperties().put("panelType", "operations");
         wrapper.getProperties().put("resizeHandleHolder", resizeHandleHolder);
         wrapper.setLayoutX(panelDto.getX() != null ? panelDto.getX() : 100);
         wrapper.setLayoutY(panelDto.getY() != null ? panelDto.getY() : 100);
@@ -263,17 +274,19 @@ public class DashboardOperationsMetricsPanelModule {
                 panel,
                 () -> canInteract.getAsBoolean() && dashboardIdSupplier.get() != null,
                 snapFn,
+                selectedNodesSupplier,
                 () -> persistPosition(panel, panelId, "운영 메트릭 패널 위치 저장됨")
         );
 
         StackPane handleHolder = (StackPane) panel.getProperties().get("resizeHandleHolder");
         Label handle = new Label("◢");
         handle.getStyleClass().add("drag-handle");
-        handle.setVisible(canInteract.getAsBoolean());
-        handle.setManaged(canInteract.getAsBoolean());
+        handle.setVisible(false);
+        handle.setManaged(false);
         resizeHandleMap.put(panelId, handle);
         StackPane.setAlignment(handle, Pos.BOTTOM_RIGHT);
         handleHolder.getChildren().setAll(handle);
+        panel.getProperties().put("resizeHandleNode", handle);
 
         interactionService.attachResizeHandlers(
                 panel,
@@ -284,6 +297,15 @@ public class DashboardOperationsMetricsPanelModule {
                 snapFn,
                 () -> persistPosition(panel, panelId, "운영 메트릭 패널 크기 저장됨")
         );
+
+        panel.setOnMouseClicked(e -> {
+            if (!canInteract.getAsBoolean()) return;
+            boolean dragged = Boolean.TRUE.equals(panel.getProperties().get("__dragging__"));
+            if (!dragged && onSelectCallback != null) {
+                onSelectCallback.accept(panel, e.isControlDown());
+                e.consume();
+            }
+        });
     }
 
     private void persistPosition(VBox panel, Long panelId, String toastMessage) {

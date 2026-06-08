@@ -74,4 +74,43 @@ public class PcMaster {
     @Schema(description = "설치된 에이전트 버전")
     @Column(name = "agent_version", length = 40)
     private String agentVersion;
+
+    // ── 도메인 메서드 ──────────────────────────────────────────────────────────
+
+    /** 에이전트 등록 시 PC 기본 정보를 초기화한다. */
+    public void initFromRegistration(String mac, String hostname, String ip) {
+        this.macAddress = mac;
+        this.pcName = hostname;
+        this.ipAddress = ip;
+        if (this.status == null) this.status = "OFFLINE";
+        if (this.role == null) this.role = "UNKNOWN";
+    }
+
+    /** 하트비트 수신 시 상태를 온라인으로 갱신한다. */
+    public void goOnline(LocalDateTime now) {
+        this.status = "ONLINE";
+        this.lastSeen = now;
+    }
+
+    /** PC를 오프라인으로 표시한다. */
+    public void goOffline() {
+        this.status = "OFFLINE";
+    }
+
+    /** PC를 고장 상태로 표시하고 메모를 저장한다. */
+    public void markBroken(String note) {
+        this.status = "BROKEN";
+        this.brokenNote = note;
+    }
+
+    /** 고장 상태를 해제하고 오프라인으로 복구한다. */
+    public void clearBroken() {
+        this.status = "OFFLINE";
+        this.brokenNote = null;
+    }
+
+    /** 강의실에 배정한다. */
+    public void assignToGroup(Long groupId) {
+        this.groupId = groupId;
+    }
 }

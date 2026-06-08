@@ -39,6 +39,7 @@ db/mydatabase.db
 uploads/
 tmp/
 backups/
+.backups/
 
 # Maven
 target/
@@ -65,3 +66,20 @@ deploy/*.tar.gz
 deploy/*.tar
 deploy/.env
 deploy/data/
+
+# Local runtime / tool workspaces
+.runtime/
+.claude/
+.claude-plugin/
+.claude copy/
+AGENTS.md
+
+# Local archives / scratch outputs
+spring-boot-javafx-dashboard.zip
+frontend/*.zip
+deploy/*.sql
+scripts/certs/
+*.pfx
+*.plan.md
+tmp_*
+tmp-*

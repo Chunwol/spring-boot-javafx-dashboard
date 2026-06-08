@@ -3,7 +3,11 @@ package com.example.backend.dto.agent;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
+@Getter
+@NoArgsConstructor
 public class AgentRegisterRequest {
     @NotBlank(message = "macAddress는 필수입니다.")
     @Pattern(regexp = "^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$", message = "macAddress 형식이 올바르지 않습니다.")
@@ -22,44 +26,4 @@ public class AgentRegisterRequest {
 
     @Size(max = 40, message = "agentVersion은 40자를 초과할 수 없습니다.")
     private String agentVersion;
-
-    public String getMacAddress() {
-        return macAddress;
-    }
-
-    public void setMacAddress(String macAddress) {
-        this.macAddress = macAddress;
-    }
-
-    public String getHostname() {
-        return hostname;
-    }
-
-    public void setHostname(String hostname) {
-        this.hostname = hostname;
-    }
-
-    public String getIpAddress() {
-        return ipAddress;
-    }
-
-    public void setIpAddress(String ipAddress) {
-        this.ipAddress = ipAddress;
-    }
-
-    public String getOsInfo() {
-        return osInfo;
-    }
-
-    public void setOsInfo(String osInfo) {
-        this.osInfo = osInfo;
-    }
-
-    public String getAgentVersion() {
-        return agentVersion;
-    }
-
-    public void setAgentVersion(String agentVersion) {
-        this.agentVersion = agentVersion;
-    }
 }

@@ -87,10 +87,11 @@ while ($true) {
                 -NoNewWindow -PassThru -ErrorAction Stop
 
         } elseif (Test-Path $jarPath) {
-            # JAR 모드 - java.exe 탐색
-            $javaExe = Find-Java
+            # JAR 모드 - 번들 JRE → JAVA_HOME → PATH → 설치 경로 순으로 탐색
+            $bundledJava = Join-Path $InstallDir "jre\bin\java.exe"
+            $javaExe = if (Test-Path $bundledJava) { $bundledJava } else { Find-Java }
             if (-not $javaExe) {
-                Write-Log "오류: java.exe를 찾을 수 없습니다. JAVA_HOME 또는 JDK 17+ 설치 필요. 60초 후 재시도..."
+                Write-Log "오류: java.exe를 찾을 수 없습니다. 번들 JRE(jre\bin\java.exe) 또는 JDK 17+ 설치 필요. 60초 후 재시도..."
                 Start-Sleep -Seconds 60
                 continue
             }

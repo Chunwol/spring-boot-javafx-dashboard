@@ -9,15 +9,19 @@ import java.io.IOException;
 import java.nio.file.*;
 
 /**
- * config.json 로드 / 저장 유틸리티
- * 경로: %APPDATA%\PCAgent\config.json (Windows)
- *       ~/.pcagent/config.json       (Linux/macOS)
+ * config.json 로드 / 저장 유틸리티.
+ *
+ * Windows 설치형 에이전트는 C:\ProgramData\PCAgent\config.json 을 우선 사용하고,
+ * 포터블/레거시 실행은 실행 위치 또는 %APPDATA%\PCAgent\config.json 을 계속 지원한다.
+ * Linux/macOS 는 ~/.pcagent/config.json 을 사용한다.
  */
 public class AgentConfigLoader {
 
     private static final Logger log = LoggerFactory.getLogger(AgentConfigLoader.class);
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
+    private static final String CONFIG_FILE_NAME = "config.json";
+    private static final String WINDOWS_PROGRAM_DATA_DIR = "C:\\ProgramData\\PCAgent";
 
     private final Path configPath;
 
@@ -34,25 +38,25 @@ public class AgentConfigLoader {
             log.info("config 경로 재정의 사용: {}", baseDir);
         } else {
             Path workingDir = Path.of(System.getProperty("user.dir", "."));
-            if (Files.exists(workingDir.resolve("config.json"))) {
+            if (Files.exists(workingDir.resolve(CONFIG_FILE_NAME))) {
                 // 개발/휴대 실행 편의를 위해 실행 위치의 config.json을 우선 사용한다.
                 baseDir = workingDir;
-                log.info("실행 위치 config.json 감지: {}", workingDir.resolve("config.json"));
+                log.info("실행 위치 config.json 감지: {}", workingDir.resolve(CONFIG_FILE_NAME));
             } else {
                 Path launchDir = resolveLaunchDirectory();
-                if (launchDir != null && Files.exists(launchDir.resolve("config.json"))) {
+                if (launchDir != null && Files.exists(launchDir.resolve(CONFIG_FILE_NAME))) {
                     // jar/exe가 있는 설치 폴더에서 직접 실행된 경우를 지원한다.
                     baseDir = launchDir;
-                    log.info("실행 파일 위치 config.json 감지: {}", launchDir.resolve("config.json"));
+                    log.info("실행 파일 위치 config.json 감지: {}", launchDir.resolve(CONFIG_FILE_NAME));
                 } else {
-                    String appData = System.getenv("APPDATA");
-                    baseDir = appData != null
-                            ? Path.of(appData, "PCAgent")
-                            : Path.of(System.getProperty("user.home"), ".pcagent");
+                    Path programDataDir = resolveProgramDataDirectory();
+                    Path appDataDir = resolveAppDataDirectory();
+                    Path homeDir = Path.of(System.getProperty("user.home", "."));
+                    baseDir = resolveDefaultBaseDir(workingDir, launchDir, programDataDir, appDataDir, homeDir);
                 }
             }
         }
-        this.configPath = baseDir.resolve("config.json");
+        this.configPath = baseDir.resolve(CONFIG_FILE_NAME);
     }
 
     /** 개발/테스트용: 경로 직접 지정 */
@@ -104,6 +108,51 @@ public class AgentConfigLoader {
     }
 
     public Path getConfigPath() { return configPath; }
+
+    static Path resolveDefaultBaseDir(
+            Path workingDir,
+            Path launchDir,
+            Path programDataDir,
+            Path appDataDir,
+            Path homeDir) {
+
+        if (hasConfig(workingDir)) {
+            return workingDir;
+        }
+        if (hasConfig(launchDir)) {
+            return launchDir;
+        }
+        if (hasConfig(programDataDir)) {
+            return programDataDir;
+        }
+        if (hasConfig(appDataDir)) {
+            return appDataDir;
+        }
+        return homeDir != null ? homeDir.resolve(".pcagent") : Path.of(".pcagent");
+    }
+
+    private static boolean hasConfig(Path baseDir) {
+        return baseDir != null && Files.exists(baseDir.resolve(CONFIG_FILE_NAME));
+    }
+
+    private Path resolveProgramDataDirectory() {
+        String programData = System.getenv("ProgramData");
+        if (programData != null && !programData.isBlank()) {
+            return Path.of(programData, "PCAgent");
+        }
+        if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            return Path.of(WINDOWS_PROGRAM_DATA_DIR);
+        }
+        return null;
+    }
+
+    private Path resolveAppDataDirectory() {
+        String appData = System.getenv("APPDATA");
+        if (appData != null && !appData.isBlank()) {
+            return Path.of(appData, "PCAgent");
+        }
+        return null;
+    }
 
     private void applyEnvOverrides(AgentConfig config) {
         config.setServerUrl(readEnv("AGENT_SERVER_URL", readEnv("BACKEND_URL", config.getServerUrl())));

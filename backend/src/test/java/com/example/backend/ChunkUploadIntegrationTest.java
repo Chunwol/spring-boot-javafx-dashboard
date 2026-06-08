@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,7 @@ class ChunkUploadIntegrationTest {
     private static final String ADMIN_USERNAME = "chunk-admin";
     private static final String ADMIN_PASSWORD = "chunk-password-123!";
     private static final String INSTALL_KEY = "CHUNK-INSTALL-KEY-2026";
+    private static final String JWT_SECRET = "chunk-upload-integration-test-secret-2026";
     private static final String AGENT_MAC = "AA:BB:CC:DD:EE:88";
     private static final Path DB_PATH = Path.of("build", "tmp", "chunk-it-" + System.currentTimeMillis() + ".db")
             .toAbsolutePath()
@@ -55,6 +57,8 @@ class ChunkUploadIntegrationTest {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB_PATH.toString().replace('\\', '/'));
         registry.add("app.scripts.dir", () -> SCRIPTS_DIR.toString());
         registry.add("agent.install-key", () -> INSTALL_KEY);
+        registry.add("JWT_SECRET", () -> JWT_SECRET);
+        registry.add("app.jwt.secret", () -> JWT_SECRET);
         registry.add("DEFAULT_ADMIN_USERNAME", () -> ADMIN_USERNAME);
         registry.add("DEFAULT_ADMIN_PASSWORD", () -> ADMIN_PASSWORD);
         registry.add("DEFAULT_ADMIN_EMAIL", () -> "chunk-admin@example.com");
@@ -109,6 +113,10 @@ class ChunkUploadIntegrationTest {
         // 5) 최종 파일 다운로드 검증
         byte[] downloaded = downloadScriptWithAgentToken(agentToken, artifactId);
         Assertions.assertArrayEquals(payload, downloaded, "다운로드 파일과 원본 바이트가 다릅니다.");
+
+        byte[] ranged = downloadScriptRangeWithAgentToken(agentToken, artifactId, 17, 4096);
+        Assertions.assertArrayEquals(Arrays.copyOfRange(payload, 17, 4097), ranged,
+                "Range 다운로드 파일 조각과 원본 바이트가 다릅니다.");
     }
 
     @Test
@@ -292,6 +300,18 @@ class ChunkUploadIntegrationTest {
         headers.set("X-Agent-Token", agentToken);
         ResponseEntity<byte[]> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
         Assertions.assertEquals(200, resp.getStatusCode().value(), "스크립트 다운로드 실패");
+        return resp.getBody() == null ? new byte[0] : resp.getBody();
+    }
+
+    private byte[] downloadScriptRangeWithAgentToken(String agentToken, long id, long start, long end) {
+        String url = baseUrl() + "/scripts/" + id + "/download";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Agent-Token", agentToken);
+        headers.set(HttpHeaders.RANGE, "bytes=" + start + "-" + end);
+        ResponseEntity<byte[]> resp = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
+        Assertions.assertEquals(206, resp.getStatusCode().value(), "스크립트 Range 다운로드 실패");
+        Assertions.assertTrue(resp.getHeaders().getFirst(HttpHeaders.CONTENT_RANGE).startsWith("bytes " + start + "-" + end + "/"),
+                "Content-Range 헤더가 올바르지 않습니다.");
         return resp.getBody() == null ? new byte[0] : resp.getBody();
     }
 

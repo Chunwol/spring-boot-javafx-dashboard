@@ -70,30 +70,40 @@ public class DashboardPcManagementModule {
     private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
     private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
     private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";
+    private static final int AGENT_ROLLOUT_INITIAL_WAVE_SIZE = 5;
+    private static final double AGENT_ROLLOUT_RAMP_UP_FACTOR = 1.4;
 
     private final ApiClient apiClient = ApiClient.getInstance();
     private final ObjectMapper objectMapper;
 
     // 뷰 컨트롤
-    @FXML
-    private VBox rootContainer;
-    @FXML
-    private StackPane viewControlsSlot;
-    @FXML
-    private StackPane pcTableSlot;
-    @FXML
-    private StackPane commandSectionSlot;
+    @FXML private VBox     rootContainer;
+    @FXML private StackPane viewControlsSlot;
+    @FXML private StackPane pcTableSlot;
+    @FXML private StackPane commandSectionSlot;
+
+    // 전송 확인 슬라이드 패널
+    @FXML private VBox   sendPanel;
+    @FXML private VBox   sendSummaryBox;
+    @FXML private VBox   sendOptionsBox;
+    @FXML private Button sendConfirmBtn;
+    @FXML private Button sendCancelBtn;
+    @FXML private Button sendPanelCloseBtn;
 
     private ComboBox<String> viewTypeCombo;
     private ComboBox<String> viewClassroomCombo;   // 강의실별 보기 시 표시
+    private ComboBox<String> statusFilterCombo;    // 상태 필터 (전체/온라인/오프라인/고장)
+    private TextField searchField;                 // PC명/IP/MAC 검색
     private Label summaryLabel;
 
     // 테이블
     private TableView<PcStatusDto> pcTable;
 
+    // 체크박스 선택 (MAC 기준)
+    private final Set<String> checkedMacs = new LinkedHashSet<>();
+    private javafx.scene.control.CheckBox headerCheckBox;
+
     // 명령 전송
-    private ComboBox<String> targetCombo;
-    private ComboBox<String> targetClassroomCombo; // 선택 강의실 전송 시 표시
     private Label selectionHintLabel;
     private ComboBox<String> commandCombo;
     private Button rolloutBtn;
@@ -122,20 +132,18 @@ public class DashboardPcManagementModule {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pc-management-view.fxml"));
             loader.setController(this);
-            ScrollPane scrollPane = loader.load();
+            HBox rootHBox = loader.load(); // 루트가 HBox로 변경됨
 
-            if (viewControlsSlot != null) {
-                viewControlsSlot.getChildren().setAll(buildViewControls());
-            }
-            if (pcTableSlot != null) {
-                pcTableSlot.getChildren().setAll(buildPcTable());
-            }
-            if (commandSectionSlot != null) {
-                commandSectionSlot.getChildren().setAll(buildCommandSection());
-            }
+            if (viewControlsSlot != null) viewControlsSlot.getChildren().setAll(buildViewControls());
+            if (pcTableSlot != null)      pcTableSlot.getChildren().setAll(buildPcTable());
+            if (commandSectionSlot != null) commandSectionSlot.getChildren().setAll(buildCommandSection());
+
+            // 전송 패널 닫기 버튼 연결
+            if (sendPanelCloseBtn != null) sendPanelCloseBtn.setOnAction(e -> closeSendPanel());
+            if (sendCancelBtn != null)     sendCancelBtn.setOnAction(e -> closeSendPanel());
 
             loadAllData();
-            return scrollPane;
+            return rootHBox;
         } catch (Exception e) {
             throw new IllegalStateException("PC 관리 뷰 FXML 로딩 실패", e);
         }
@@ -154,6 +162,8 @@ public class DashboardPcManagementModule {
             row               = loader.load();
             viewTypeCombo      = (ComboBox<String>) loader.getNamespace().get("viewTypeCombo");
             viewClassroomCombo = (ComboBox<String>) loader.getNamespace().get("viewClassroomCombo");
+            statusFilterCombo  = (ComboBox<String>) loader.getNamespace().get("statusFilterCombo");
+            searchField        = (TextField)        loader.getNamespace().get("searchField");
             refreshBtn         = (Button)           loader.getNamespace().get("refreshBtn");
             summaryLabel       = (Label)            loader.getNamespace().get("summaryLabel");
         } catch (Exception e) {
@@ -162,6 +172,12 @@ public class DashboardPcManagementModule {
 
         viewTypeCombo.setItems(FXCollections.observableArrayList("전체 PC", "강의실별", "교사 PC만"));
         viewTypeCombo.setValue("전체 PC");
+
+        statusFilterCombo.setItems(FXCollections.observableArrayList("전체", "온라인", "오프라인", "고장"));
+        statusFilterCombo.setValue("전체");
+        statusFilterCombo.setOnAction(e -> applyViewFilter());
+
+        searchField.textProperty().addListener((obs, ov, nv) -> applyViewFilter());
 
         viewClassroomCombo.setOnAction(e -> applyViewFilter());
 
@@ -188,6 +204,7 @@ public class DashboardPcManagementModule {
             var ns = loader.getNamespace();
             pcTable = (TableView<PcStatusDto>) ns.get("pcTable");
 
+            TableColumn<PcStatusDto, Void> checkCol = (TableColumn<PcStatusDto, Void>) ns.get("checkCol");
             TableColumn<PcStatusDto, String> classroomCol = (TableColumn<PcStatusDto, String>) ns.get("classroomCol");
             TableColumn<PcStatusDto, String> ipCol = (TableColumn<PcStatusDto, String>) ns.get("ipCol");
             TableColumn<PcStatusDto, String> hostnameCol = (TableColumn<PcStatusDto, String>) ns.get("hostnameCol");
@@ -195,6 +212,44 @@ public class DashboardPcManagementModule {
             TableColumn<PcStatusDto, Void> statusCol = (TableColumn<PcStatusDto, Void>) ns.get("statusCol");
             TableColumn<PcStatusDto, String> agentVersionCol = (TableColumn<PcStatusDto, String>) ns.get("agentVersionCol");
             TableColumn<PcStatusDto, String> beatCol = (TableColumn<PcStatusDto, String>) ns.get("beatCol");
+
+            // 체크박스 컬럼 — 헤더는 전체선택, 셀은 개별 체크
+            headerCheckBox = new javafx.scene.control.CheckBox();
+            headerCheckBox.setOnAction(e -> {
+                if (headerCheckBox.isSelected()) {
+                    pcTable.getItems().forEach(pc -> {
+                        if (pc.getMacAddress() != null) checkedMacs.add(pc.getMacAddress());
+                    });
+                } else {
+                    checkedMacs.clear();
+                }
+                pcTable.refresh();
+                updateSelectionHint();
+            });
+            checkCol.setGraphic(headerCheckBox);
+            checkCol.setSortable(false);
+            checkCol.setCellFactory(col -> new TableCell<>() {
+                private final javafx.scene.control.CheckBox cb = new javafx.scene.control.CheckBox();
+                {
+                    cb.setOnAction(e -> {
+                        PcStatusDto pc = getTableRow() == null ? null : getTableRow().getItem();
+                        if (pc == null || pc.getMacAddress() == null) return;
+                        if (cb.isSelected()) checkedMacs.add(pc.getMacAddress());
+                        else checkedMacs.remove(pc.getMacAddress());
+                        updateHeaderCheckState();
+                        updateSelectionHint();
+                    });
+                }
+                @Override protected void updateItem(Void v, boolean empty) {
+                    super.updateItem(v, empty);
+                    if (empty || getTableRow() == null || getTableRow().getItem() == null) {
+                        setGraphic(null); return;
+                    }
+                    String mac = getTableRow().getItem().getMacAddress();
+                    cb.setSelected(mac != null && checkedMacs.contains(mac));
+                    setGraphic(cb);
+                }
+            });
 
             pcTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 
@@ -246,9 +301,8 @@ public class DashboardPcManagementModule {
                 }
             });
 
-            pcTable.getSelectionModel().getSelectedItems().addListener(
-                (javafx.collections.ListChangeListener<PcStatusDto>) change -> updateSelectionHint()
-            );
+            // 체크박스 기반으로 변경됐으므로 selectionModel 리스너 불필요
+
 
             VBox.setVgrow(box, Priority.ALWAYS);
             return box;
@@ -269,9 +323,7 @@ public class DashboardPcManagementModule {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pcmgmt-command-section.fxml"));
             vbox                 = loader.load();
-            targetCombo          = (ComboBox<String>) loader.getNamespace().get("targetCombo");
-            targetClassroomCombo = (ComboBox<String>) loader.getNamespace().get("targetClassroomCombo");
-            commandCombo         = (ComboBox<String>) loader.getNamespace().get("commandCombo");
+                commandCombo         = (ComboBox<String>) loader.getNamespace().get("commandCombo");
             sendBtn              = (Button)           loader.getNamespace().get("sendBtn");
             rolloutBtn           = (Button)           loader.getNamespace().get("rolloutBtn");
             selectionHintLabel   = (Label)            loader.getNamespace().get("selectionHintLabel");
@@ -279,16 +331,6 @@ public class DashboardPcManagementModule {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load pcmgmt-command-section.fxml", e);
         }
-
-        targetCombo.setItems(FXCollections.observableArrayList("전체 PC", "선택 강의실", "교사 PC만", "선택 PC"));
-        targetCombo.setValue("전체 PC");
-
-        targetCombo.setOnAction(e -> {
-            boolean isClassroom = "선택 강의실".equals(targetCombo.getValue());
-            targetClassroomCombo.setVisible(isClassroom);
-            targetClassroomCombo.setManaged(isClassroom);
-            updateSelectionHint();
-        });
 
         commandCombo.setItems(FXCollections.observableArrayList(
                 "PC 켜기(PCON)", "재시작", "종료", "스크립트 실행", "파일/폴더 전송", "파일/폴더 수집(에이전트→클라이언트)"));
@@ -309,439 +351,217 @@ public class DashboardPcManagementModule {
             vbox.widthProperty().addListener((obs, oldW, newW) -> updateWrap.run());
             Platform.runLater(updateWrap);
         }
+        updateSelectionHint();
         return vbox;
     }
 
+    /**
+     * 에이전트 업데이트 배포 — 간소화된 3단계 UI.
+     *
+     * ① MSI 업로드 → ② 시점해제 경고 확인 → ③ 배포 시작
+     *
+     * 대상: 체크된 PC (없으면 전체). 내부는 기존 file-distribution 백엔드를 그대로 사용.
+     * 시점(SCMATE) 해제 없이 재부팅하면 작업이 날아가므로 배포 전 관리자에게 반드시 고지.
+     */
     private void openAgentRolloutDialog() {
         if (apiClient.isViewerRole()) {
             showAlert("권한 없음", ApiClient.viewerWriteDeniedMessage("에이전트 업데이트 배포"), Alert.AlertType.INFORMATION);
             return;
         }
 
+        // ── 대상 PC 결정 ──
+        List<PcStatusDto> targetPcs = checkedMacs.isEmpty() ? resolveAllPcs() : resolveCheckedPcs();
+        int totalCount = targetPcs.size();
+        long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
+
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("에이전트 업데이트 배포");
         dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
-        dialog.getDialogPane().setPrefWidth(860);
-        dialog.getDialogPane().setPrefHeight(700);
-        dialog.getDialogPane().setMinWidth(700);
-        dialog.getDialogPane().setMinHeight(560);
+        dialog.getDialogPane().setPrefWidth(560);
+        dialog.getDialogPane().setMinWidth(440);
 
-        VBox root = new VBox(10);
-        root.setPadding(new Insets(8));
-        root.setFillWidth(true);
-        root.setMaxWidth(Double.MAX_VALUE);
+        VBox root = new VBox(16);
+        root.setPadding(new Insets(16));
 
-        GridPane form = new GridPane();
-        form.setHgap(10);
-        form.setVgap(8);
-        form.setMaxWidth(Double.MAX_VALUE);
+        // ── 대상 요약 ──
+        String targetDesc = checkedMacs.isEmpty()
+                ? String.format("전체 PC %d대 (온라인 %d대)", totalCount, onlineCount)
+                : String.format("선택 PC %d대 (온라인 %d대)", totalCount, onlineCount);
+        Label targetLabel = new Label("배포 대상: " + targetDesc);
+        targetLabel.getStyleClass().add("pcmgmt-label-title");
 
-        ColumnConstraints labelCol1 = new ColumnConstraints();
-        labelCol1.setMinWidth(96);
-        ColumnConstraints inputCol1 = new ColumnConstraints();
-        inputCol1.setHgrow(Priority.ALWAYS);
-        inputCol1.setFillWidth(true);
-        inputCol1.setMinWidth(220);
-        ColumnConstraints labelCol2 = new ColumnConstraints();
-        labelCol2.setMinWidth(96);
-        ColumnConstraints inputCol2 = new ColumnConstraints();
-        inputCol2.setHgrow(Priority.ALWAYS);
-        inputCol2.setFillWidth(true);
-        inputCol2.setMinWidth(220);
-        form.getColumnConstraints().setAll(labelCol1, inputCol1, labelCol2, inputCol2);
+        // ── ① MSI 업로드 ──
+        Label step1Label = new Label("① MSI 파일 업로드");
+        step1Label.getStyleClass().add("pcmgmt-command-title");
 
-        TextField artifactIdField = new TextField();
-        artifactIdField.setPromptText("예: 42");
-        artifactIdField.setMaxWidth(Double.MAX_VALUE);
-        Button uploadArtifactButton = new Button("파일 업로드");
-        uploadArtifactButton.getStyleClass().add("pcmgmt-refresh-btn");
-        uploadArtifactButton.setMinWidth(104);
-        HBox artifactInputBox = new HBox(6, artifactIdField, uploadArtifactButton);
-        HBox.setHgrow(artifactIdField, Priority.ALWAYS);
-        artifactInputBox.setMaxWidth(Double.MAX_VALUE);
+        Label uploadStatusLabel = new Label("MSI 파일을 선택해 업로드하세요.");
+        uploadStatusLabel.setWrapText(true);
+        uploadStatusLabel.getStyleClass().add("pcmgmt-selection-hint");
 
-        TextField targetVersionField = new TextField();
-        targetVersionField.setPromptText("예: 1.2.0");
-        targetVersionField.setMaxWidth(Double.MAX_VALUE);
+        final long[] uploadedArtifactId = {0};
+        final String[] uploadedFilename = {""};
+        final String[] uploadedVersion = {""};
 
-        Spinner<Integer> waveSizeSpinner = new Spinner<>(1, 400, 20, 1);
-        waveSizeSpinner.setEditable(true);
-        waveSizeSpinner.setMaxWidth(Double.MAX_VALUE);
+        Button uploadBtn = new Button("📁 MSI 파일 선택 및 업로드");
+        uploadBtn.getStyleClass().addAll("btn-primary");
+        uploadBtn.setMaxWidth(Double.MAX_VALUE);
 
-        TextField rampUpField = new TextField("1.8");
-        rampUpField.setMaxWidth(Double.MAX_VALUE);
+        // ── ⚠ 시점해제 경고 ──
+        Label step2Label = new Label("② 배포 전 필수 확인");
+        step2Label.getStyleClass().add("pcmgmt-command-title");
 
-        ComboBox<String> sourceModeCombo = new ComboBox<>(
-                FXCollections.observableArrayList(SOURCE_MODE_SERVER_LABEL, SOURCE_MODE_HYBRID_LABEL));
-        sourceModeCombo.setValue(SOURCE_MODE_HYBRID_LABEL);
-        sourceModeCombo.setPrefWidth(220);
-        sourceModeCombo.setMaxWidth(Double.MAX_VALUE);
+        javafx.scene.control.CheckBox scmateCheckBox = new javafx.scene.control.CheckBox(
+                "학생들이 시점을 해제(저장)했음을 확인했습니다.\n" +
+                "시점 미해제 상태에서 재부팅하면 작업 내용이 사라집니다.");
+        scmateCheckBox.setWrapText(true);
+        scmateCheckBox.getStyleClass().add("pcmgmt-hint-label");
 
-        CheckBox canaryOnlyCheck = new CheckBox("검증 배포(1개 웨이브)");
-        canaryOnlyCheck.setSelected(false);
+        // ── ③ 배포 시작 ──
+        Label step3Label = new Label("③ 배포 시작");
+        step3Label.getStyleClass().add("pcmgmt-command-title");
 
-        List<String> classChoices = new ArrayList<>();
-        classChoices.add("전체");
-        synchronized (classroomMap) {
-            classChoices.addAll(classroomMap.keySet());
-        }
-        ComboBox<String> targetClassroomCombo = new ComboBox<>(FXCollections.observableArrayList(classChoices));
-        targetClassroomCombo.setValue("전체");
-        targetClassroomCombo.setMaxWidth(Double.MAX_VALUE);
+        TextArea logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setWrapText(true);
+        logArea.setPrefRowCount(6);
+        logArea.setPromptText("배포 결과가 여기에 표시됩니다.");
 
-        TextField uploadIdField = new TextField();
-        uploadIdField.setPromptText("비워두면 자동 생성");
-        uploadIdField.setMaxWidth(Double.MAX_VALUE);
+        Button deployBtn = new Button("⬆ 지금 배포 시작");
+        deployBtn.getStyleClass().addAll("btn-warning");
+        deployBtn.setMaxWidth(Double.MAX_VALUE);
+        deployBtn.setDisable(true); // 업로드 + 시점 확인 후 활성화
 
-        TextField fileNameField = new TextField("agent-update-package");
-        fileNameField.setMaxWidth(Double.MAX_VALUE);
+        Runnable checkReady = () -> {
+            boolean ready = uploadedArtifactId[0] > 0 && scmateCheckBox.isSelected();
+            deployBtn.setDisable(!ready);
+        };
+        scmateCheckBox.selectedProperty().addListener((obs, ov, nv) -> checkReady.run());
 
-        TextField rollbackStableJobIdField = new TextField();
-        rollbackStableJobIdField.setPromptText("안정 버전 Job ID");
-        rollbackStableJobIdField.setMaxWidth(Double.MAX_VALUE);
-
-        int row = 0;
-        form.add(new Label("아티팩트 ID"), 0, row);
-        form.add(artifactInputBox, 1, row);
-        form.add(new Label("타깃 버전"), 2, row);
-        form.add(targetVersionField, 3, row);
-        row++;
-        form.add(new Label("초기 웨이브 크기"), 0, row);
-        form.add(waveSizeSpinner, 1, row);
-        form.add(new Label("증가 계수"), 2, row);
-        form.add(rampUpField, 3, row);
-        row++;
-        form.add(new Label("소스 모드"), 0, row);
-        form.add(sourceModeCombo, 1, row);
-        form.add(new Label("대상 강의실"), 2, row);
-        form.add(targetClassroomCombo, 3, row);
-        row++;
-        form.add(new Label("업로드 식별자"), 0, row);
-        form.add(uploadIdField, 1, row);
-        form.add(new Label("원본 파일명"), 2, row);
-        form.add(fileNameField, 3, row);
-        row++;
-        form.add(canaryOnlyCheck, 1, row);
-        form.add(new Label("롤백 기준 Job ID"), 2, row);
-        form.add(rollbackStableJobIdField, 3, row);
-
-        GridPane.setHgrow(artifactInputBox, Priority.ALWAYS);
-        GridPane.setHgrow(targetVersionField, Priority.ALWAYS);
-        GridPane.setHgrow(waveSizeSpinner, Priority.ALWAYS);
-        GridPane.setHgrow(rampUpField, Priority.ALWAYS);
-        GridPane.setHgrow(sourceModeCombo, Priority.ALWAYS);
-        GridPane.setHgrow(targetClassroomCombo, Priority.ALWAYS);
-        GridPane.setHgrow(uploadIdField, Priority.ALWAYS);
-        GridPane.setHgrow(fileNameField, Priority.ALWAYS);
-        GridPane.setHgrow(rollbackStableJobIdField, Priority.ALWAYS);
-
-        Button createJobButton = new Button("배포 시작");
-        createJobButton.getStyleClass().add("pcmgmt-send-btn");
-        Button verifyCanaryButton = new Button("검증 배포 시작");
-        verifyCanaryButton.getStyleClass().add("pcmgmt-refresh-btn");
-        Button refreshJobsButton = new Button("작업 목록 새로고침");
-        refreshJobsButton.getStyleClass().add("pcmgmt-refresh-btn");
-        Button loadDetailButton = new Button("선택 작업 상세");
-        loadDetailButton.getStyleClass().add("pcmgmt-refresh-btn");
-        Button rollbackButton = new Button("선택 작업 롤백");
-        rollbackButton.getStyleClass().add("pcmgmt-refresh-btn");
-        createJobButton.setMinWidth(108);
-        verifyCanaryButton.setMinWidth(120);
-        refreshJobsButton.setMinWidth(134);
-        loadDetailButton.setMinWidth(122);
-        rollbackButton.setMinWidth(118);
-
-        FlowPane actions = new FlowPane(8, 8, createJobButton, verifyCanaryButton, refreshJobsButton, loadDetailButton, rollbackButton);
-        actions.setAlignment(Pos.CENTER_LEFT);
-        actions.setPrefWrapLength(780);
-        actions.setMaxWidth(Double.MAX_VALUE);
-
-        ListView<Map<String, Object>> jobsListView = new ListView<>();
-        jobsListView.setPrefHeight(220);
-        jobsListView.setFixedCellSize(-1);
-        jobsListView.setCellFactory(list -> new ListCell<>() {
-            private final Label summaryLabel = new Label();
-            private final Tooltip summaryTooltip = new Tooltip();
-
-            {
-                summaryLabel.setWrapText(true);
-                summaryLabel.setTextOverrun(OverrunStyle.CLIP);
-                summaryLabel.setMaxWidth(Double.MAX_VALUE);
-                summaryLabel.maxWidthProperty().bind(widthProperty().subtract(24));
-                setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-                setGraphic(summaryLabel);
-            }
-
-            @Override
-            protected void updateItem(Map<String, Object> item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    summaryLabel.setText(null);
-                    setTooltip(null);
-                    return;
-                }
-                long jobId = toLong(item.get("jobId"));
-                String status = String.valueOf(item.getOrDefault("status", "-"));
-                String version = String.valueOf(item.getOrDefault("targetVersion", "-"));
-                String createdAt = formatCreatedAtDisplay(item.get("createdAt"));
-                String sourceModeLabel = sourceModeLabel(item.get("sourceMode"));
-                String summary = "#" + jobId + " | " + status + " | v" + version + " | " + sourceModeLabel + " | " + createdAt;
-                summaryLabel.setText(summary);
-                summaryTooltip.setText(summary);
-                setTooltip(summaryTooltip);
-            }
-        });
-
-        TextArea detailArea = new TextArea();
-        detailArea.setEditable(false);
-        detailArea.setWrapText(true);
-        detailArea.setPrefHeight(280);
-        detailArea.setPromptText("작업 상세/이벤트가 여기에 표시됩니다.");
-
-        uploadArtifactButton.setOnAction(e -> {
+        // ── 업로드 액션 ──
+        uploadBtn.setOnAction(e -> {
             FileChooser chooser = new FileChooser();
-            chooser.setTitle("에이전트 업데이트 파일 선택");
+            chooser.setTitle("에이전트 MSI 선택");
             chooser.getExtensionFilters().addAll(
-                    new FileChooser.ExtensionFilter("Agent Binary", "*.jar", "*.exe", "*.zip"),
-                    new FileChooser.ExtensionFilter("All Files", "*.*")
-            );
-            File selected = chooser.showOpenDialog(dialog.getDialogPane().getScene() == null
-                    ? null
-                    : dialog.getDialogPane().getScene().getWindow());
-            if (selected == null) {
-                return;
-            }
+                    new FileChooser.ExtensionFilter("에이전트 설치 파일 (MSI 권장)", "*.msi"),
+                    new FileChooser.ExtensionFilter("레거시 바이너리", "*.jar", "*.exe", "*.zip"),
+                    new FileChooser.ExtensionFilter("All Files", "*.*"));
+            File selected = chooser.showOpenDialog(
+                    dialog.getDialogPane().getScene() == null ? null : dialog.getDialogPane().getScene().getWindow());
+            if (selected == null) return;
 
-            uploadArtifactButton.setDisable(true);
-            detailArea.setText("아티팩트 업로드 중...\n파일: " + selected.getName());
-
-            apiClient.uploadFile("/scripts", selected)
+            uploadBtn.setDisable(true);
+            uploadStatusLabel.setText("업로드 중: " + selected.getName() + " ...");
+            apiClient.uploadScriptFile(selected, (uploadedBytes, totalBytes) -> Platform.runLater(() -> {
+                        uploadStatusLabel.setText("업로드 중: " + selected.getName()
+                                + " - " + formatSize(uploadedBytes) + " / " + formatSize(totalBytes)
+                                + " (" + formatProgressPercent(uploadedBytes, totalBytes) + ")");
+                    }))
                     .thenAccept(resp -> {
                         try {
-                            Map<String, Object> uploadBody = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
-                            long artifactId = toLong(uploadBody.get("id"));
-                            String guessedVersion = guessVersionFromFilename(selected.getName());
+                            Map<String, Object> body = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+                            long artId = toLong(body.get("id"));
+                            String ver = guessVersionFromFilename(selected.getName());
                             Platform.runLater(() -> {
-                                if (artifactId > 0) {
-                                    artifactIdField.setText(String.valueOf(artifactId));
-                                }
-                                fileNameField.setText(selected.getName());
-                                if ((targetVersionField.getText() == null || targetVersionField.getText().isBlank())
-                                        && guessedVersion != null && !guessedVersion.isBlank()) {
-                                    targetVersionField.setText(guessedVersion);
-                                }
-                                detailArea.setText("아티팩트 업로드 완료\nartifactId: " + artifactId
-                                        + "\n파일: " + selected.getName());
-                                uploadArtifactButton.setDisable(false);
+                                uploadedArtifactId[0] = artId;
+                                uploadedFilename[0] = selected.getName();
+                                uploadedVersion[0] = ver != null ? ver : "";
+                                uploadStatusLabel.setText("✓ 업로드 완료 — " + selected.getName()
+                                        + (ver != null && !ver.isBlank() ? " (v" + ver + ")" : "")
+                                        + " [ID: " + artId + "]");
+                                uploadBtn.setDisable(false);
+                                checkReady.run();
                             });
                         } catch (Exception ex) {
                             Platform.runLater(() -> {
-                                detailArea.setText("업로드 응답 파싱 실패: " + ex.getMessage());
-                                uploadArtifactButton.setDisable(false);
+                                uploadStatusLabel.setText("✗ 업로드 실패: " + ex.getMessage());
+                                uploadBtn.setDisable(false);
                             });
                         }
                     })
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
-                            String msg = ApiClient.userFacingErrorMessage(ex, "아티팩트 업로드 실패");
-                            detailArea.setText(msg);
-                            showAlert("실패", msg, Alert.AlertType.ERROR);
-                            uploadArtifactButton.setDisable(false);
+                            String msg = ApiClient.userFacingErrorMessage(ex, "업로드 실패");
+                            uploadStatusLabel.setText("✗ " + msg);
+                            uploadBtn.setDisable(false);
                         });
                         return null;
                     });
         });
 
-        createJobButton.setOnAction(e -> {
-            Long artifactId = parsePositiveLong(artifactIdField.getText());
-            if (artifactId == null) {
-                showAlert("입력 오류", "아티팩트 ID를 숫자로 입력하세요.", Alert.AlertType.WARNING);
-                return;
-            }
-            int waveSize = waveSizeSpinner.getValue() == null ? 20 : waveSizeSpinner.getValue();
-            double rampUp = parseDoubleOrDefault(rampUpField.getText(), 1.8d);
-            String sourceMode = sourceModeCode(sourceModeCombo.getValue());
-            String selectedClassroom = targetClassroomCombo.getValue();
-            Long groupId = null;
-            if (selectedClassroom != null && !"전체".equals(selectedClassroom)) {
-                groupId = classroomMap.get(selectedClassroom);
-            }
+        // ── 배포 액션 ──
+        deployBtn.setOnAction(e -> {
+            if (uploadedArtifactId[0] <= 0) { return; }
+            deployBtn.setDisable(true);
+            logArea.setText("배포 잡 생성 중...");
 
-            String version = targetVersionField.getText() == null ? "" : targetVersionField.getText().trim();
-            String uploadId = uploadIdField.getText() == null ? "" : uploadIdField.getText().trim();
-            if (uploadId.isBlank()) {
-                uploadId = "agent-update-" + artifactId + "-" + System.currentTimeMillis();
-            }
-            String originalFilename = fileNameField.getText() == null ? "" : fileNameField.getText().trim();
-            if (originalFilename.isBlank()) {
-                originalFilename = "agent-update-package";
-            }
+            String uploadId = "agent-update-" + uploadedArtifactId[0] + "-" + System.currentTimeMillis();
+            String filename = uploadedFilename[0].isBlank() ? "agent-update-package" : uploadedFilename[0];
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("uploadId", uploadId);
-            body.put("originalFilename", originalFilename);
+            body.put("originalFilename", filename);
             body.put("totalChunks", 1);
-            body.put("artifactId", artifactId);
-            body.put("targetVersion", version);
-            body.put("waveSize", waveSize);
-            body.put("canaryOnly", canaryOnlyCheck.isSelected());
-            body.put("sourceMode", sourceMode);
-            body.put("rampUpFactor", rampUp);
-            if (groupId != null) {
-                body.put("groupId", groupId);
+            body.put("artifactId", uploadedArtifactId[0]);
+            body.put("targetVersion", uploadedVersion[0]);
+            body.put("waveSize", Math.max(1, Math.min(AGENT_ROLLOUT_INITIAL_WAVE_SIZE, totalCount)));
+            body.put("canaryOnly", false);
+            body.put("sourceMode", "HYBRID_PEER");
+            body.put("rampUpFactor", AGENT_ROLLOUT_RAMP_UP_FACTOR);
+            // 체크된 강의실이 단일이면 groupId 추가
+            if (!checkedMacs.isEmpty()) {
+                targetPcs.stream()
+                        .map(PcStatusDto::getGroupId)
+                        .filter(java.util.Objects::nonNull)
+                        .findFirst()
+                        .ifPresent(gid -> body.put("groupId", gid));
             }
 
-            createJobButton.setDisable(true);
             apiClient.postJson("/file-distribution/jobs", body)
                     .thenAccept(resp -> {
                         try {
                             Map<String, Object> created = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
                             Platform.runLater(() -> {
-                                long createdJobId = toLong(created.get("jobId"));
-                                detailArea.setText("배포 작업 생성 완료\nJob ID: " + createdJobId + "\n상태: "
-                                        + created.getOrDefault("status", "-"));
-                                loadRolloutJobsIntoList(jobsListView, detailArea);
-                                if (createdJobId > 0) {
-                                    loadRolloutDetail(createdJobId, detailArea);
-                                }
-                                createJobButton.setDisable(false);
+                                long jobId = toLong(created.get("jobId"));
+                                logArea.setText("✓ 배포 잡 생성 완료\n"
+                                        + "Job ID: " + jobId + "\n"
+                                        + "상태: " + created.getOrDefault("status", "-") + "\n"
+                                        + "방식: 하이브리드 피어 배포\n"
+                                        + "초기 웨이브: " + body.get("waveSize") + "대 / 확장률: " + AGENT_ROLLOUT_RAMP_UP_FACTOR + "\n"
+                                        + "대상: " + targetDesc + "\n\n"
+                                        + "에이전트가 명령을 수신하면 MSI를 설치하고 재부팅합니다.\n"
+                                        + "명령 탭에서 진행 상태를 확인하세요.");
+                                deployBtn.setDisable(false);
                             });
                         } catch (Exception ex) {
                             Platform.runLater(() -> {
-                                detailArea.setText("배포 작업 생성 응답 파싱 실패: " + ex.getMessage());
-                                createJobButton.setDisable(false);
+                                logArea.setText("✗ 응답 파싱 실패: " + ex.getMessage());
+                                deployBtn.setDisable(false);
                             });
                         }
                     })
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
-                            String msg = ApiClient.userFacingErrorMessage(ex, "배포 작업 생성 실패");
-                            detailArea.setText(msg);
+                            String msg = ApiClient.userFacingErrorMessage(ex, "배포 잡 생성 실패");
+                            logArea.setText("✗ " + msg);
                             showAlert("실패", msg, Alert.AlertType.ERROR);
-                            createJobButton.setDisable(false);
+                            deployBtn.setDisable(false);
                         });
                         return null;
                     });
-        });
-
-        verifyCanaryButton.setOnAction(e -> {
-            Integer previousWaveSize = waveSizeSpinner.getValue();
-            boolean previousCanary = canaryOnlyCheck.isSelected();
-            waveSizeSpinner.getValueFactory().setValue(1);
-            canaryOnlyCheck.setSelected(true);
-            createJobButton.fire();
-            Platform.runLater(() -> {
-                if (previousWaveSize != null && previousWaveSize > 0) {
-                    waveSizeSpinner.getValueFactory().setValue(previousWaveSize);
-                }
-                canaryOnlyCheck.setSelected(previousCanary);
-            });
-        });
-
-        refreshJobsButton.setOnAction(e -> loadRolloutJobsIntoList(jobsListView, detailArea));
-
-        loadDetailButton.setOnAction(e -> {
-            Map<String, Object> selected = jobsListView.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                showAlert("선택 필요", "상세를 볼 작업을 선택하세요.", Alert.AlertType.INFORMATION);
-                return;
-            }
-            long jobId = toLong(selected.get("jobId"));
-            if (jobId <= 0) {
-                showAlert("선택 오류", "유효한 Job ID가 아닙니다.", Alert.AlertType.WARNING);
-                return;
-            }
-            loadRolloutDetail(jobId, detailArea);
-        });
-
-        rollbackButton.setOnAction(e -> {
-            Map<String, Object> selected = jobsListView.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                showAlert("선택 필요", "롤백할 작업을 선택하세요.", Alert.AlertType.INFORMATION);
-                return;
-            }
-            long sourceJobId = toLong(selected.get("jobId"));
-            Long stableJobId = parsePositiveLong(rollbackStableJobIdField.getText());
-            if (sourceJobId <= 0 || stableJobId == null) {
-                showAlert("입력 오류", "선택 작업 + 롤백 기준 Job ID를 확인하세요.", Alert.AlertType.WARNING);
-                return;
-            }
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("rollbackFromJobId", stableJobId);
-            body.put("waveSize", waveSizeSpinner.getValue() == null ? 20 : waveSizeSpinner.getValue());
-            body.put("canaryOnly", canaryOnlyCheck.isSelected());
-            String selectedClassroom = targetClassroomCombo.getValue();
-            if (selectedClassroom != null && !"전체".equals(selectedClassroom)) {
-                Long groupId = classroomMap.get(selectedClassroom);
-                if (groupId != null) {
-                    body.put("groupId", groupId);
-                }
-            }
-
-            rollbackButton.setDisable(true);
-            apiClient.postJson("/file-distribution/jobs/" + sourceJobId + "/rollback", body)
-                    .thenAccept(resp -> {
-                        Platform.runLater(() -> {
-                            detailArea.setText("롤백 작업 생성 완료\n" + resp);
-                            loadRolloutJobsIntoList(jobsListView, detailArea);
-                            rollbackButton.setDisable(false);
-                        });
-                    })
-                    .exceptionally(ex -> {
-                        Platform.runLater(() -> {
-                            String msg = ApiClient.userFacingErrorMessage(ex, "롤백 작업 생성 실패");
-                            detailArea.setText(msg);
-                            showAlert("실패", msg, Alert.AlertType.ERROR);
-                            rollbackButton.setDisable(false);
-                        });
-                        return null;
-                    });
-        });
-
-        jobsListView.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> {
-            if (newValue == null) {
-                return;
-            }
-            long jobId = toLong(newValue.get("jobId"));
-            if (jobId > 0) {
-                loadRolloutDetail(jobId, detailArea);
-            }
         });
 
         root.getChildren().addAll(
-                new Label("에이전트 업데이트 배포"),
-                form,
-                actions,
-                new Label("최근 작업"),
-                jobsListView,
-                new Label("상세 / 이벤트"),
-                detailArea
-        );
-        for (Node node : root.getChildren()) {
-            if (node != null) {
-                node.setManaged(true);
-            }
-        }
-        VBox.setVgrow(jobsListView, Priority.ALWAYS);
-        VBox.setVgrow(detailArea, Priority.ALWAYS);
+                targetLabel,
+                new javafx.scene.control.Separator(),
+                step1Label, uploadBtn, uploadStatusLabel,
+                new javafx.scene.control.Separator(),
+                step2Label, scmateCheckBox,
+                new javafx.scene.control.Separator(),
+                step3Label, deployBtn, logArea);
+        VBox.setVgrow(logArea, Priority.ALWAYS);
 
-        ScrollPane scrollPane = new ScrollPane(root);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scrollPane.setPrefViewportHeight(640);
-        dialog.getDialogPane().widthProperty().addListener((obs, oldW, newW) -> {
-            double wrap = Math.max(360.0, newW.doubleValue() - 56.0);
-            actions.setPrefWrapLength(wrap);
-        });
-        Platform.runLater(() -> {
-            double paneWidth = dialog.getDialogPane().getWidth();
-            actions.setPrefWrapLength(Math.max(360.0, paneWidth - 56.0));
-        });
-
-        dialog.getDialogPane().setContent(scrollPane);
-        loadRolloutJobsIntoList(jobsListView, detailArea);
+        dialog.getDialogPane().setContent(root);
         dialog.showAndWait();
     }
 
@@ -908,6 +728,7 @@ public class DashboardPcManagementModule {
                 Platform.runLater(() -> {
                     refreshClassroomCombos();
                     applyViewFilter();
+                    updateSelectionHint();
                 });
             } catch (Exception ex) {
                 log.error("loadAllData parse failed", ex);
@@ -924,11 +745,6 @@ public class DashboardPcManagementModule {
         viewClassroomCombo.setItems(FXCollections.observableArrayList(names));
         if (!names.isEmpty() && viewClassroomCombo.getValue() == null) {
             viewClassroomCombo.setValue(names.get(0));
-        }
-
-        targetClassroomCombo.setItems(FXCollections.observableArrayList(names));
-        if (!names.isEmpty() && targetClassroomCombo.getValue() == null) {
-            targetClassroomCombo.setValue(names.get(0));
         }
     }
 
@@ -958,6 +774,23 @@ public class DashboardPcManagementModule {
             display = new ArrayList<>(snapshot);
         }
 
+        // 상태 필터 (온라인/오프라인/고장)
+        String statusSel = statusFilterCombo != null ? statusFilterCombo.getValue() : "전체";
+        if (statusSel != null && !"전체".equals(statusSel)) {
+            display = display.stream()
+                    .filter(p -> statusSel.equals(statusLabel(p)))
+                    .collect(Collectors.toList());
+        }
+
+        // 검색 (PC명/IP/MAC, 대소문자 무시)
+        String q = searchField != null && searchField.getText() != null
+                ? searchField.getText().trim().toLowerCase() : "";
+        if (!q.isEmpty()) {
+            display = display.stream().filter(p -> contains(p.getPcName(), q)
+                    || contains(p.getIpAddress(), q)
+                    || contains(p.getMacAddress(), q)).collect(Collectors.toList());
+        }
+
         // 온라인 먼저 정렬
         display.sort((a, b) -> {
             if (a.isOnline() != b.isOnline()) return a.isOnline() ? -1 : 1;
@@ -967,9 +800,25 @@ public class DashboardPcManagementModule {
         });
 
         pcTable.setItems(FXCollections.observableArrayList(display));
+        updateHeaderCheckState();
+        updateSelectionHint();
 
         long online = display.stream().filter(PcStatusDto::isOnline).count();
         summaryLabel.setText(String.format("총 %d대 — 온라인 %d / 오프라인 %d", display.size(), online, display.size() - online));
+    }
+
+    /** PC 상태 → 필터 라벨 (온라인/오프라인/고장). */
+    private static String statusLabel(PcStatusDto pc) {
+        String s = pc.getStatus() == null ? "" : pc.getStatus().toUpperCase();
+        return switch (s) {
+            case "BROKEN", "FAILED" -> "고장";
+            case "ONLINE", "IDLE" -> "온라인";
+            default -> pc.isOnline() ? "온라인" : "오프라인";
+        };
+    }
+
+    private static boolean contains(String value, String lowerQuery) {
+        return value != null && value.toLowerCase().contains(lowerQuery);
     }
 
     // ─────────────────────────────────────────
@@ -978,14 +827,57 @@ public class DashboardPcManagementModule {
 
     private void updateSelectionHint() {
         if (selectionHintLabel == null) return;
-        String target = targetCombo != null ? targetCombo.getValue() : "";
-        if ("선택 PC".equals(target)) {
-            int cnt = pcTable.getSelectionModel().getSelectedItems().size();
-            selectionHintLabel.setText(cnt > 0
-                ? String.format("✓ %d대 선택됨 (Ctrl+클릭 또는 Shift+클릭으로 여러 PC 선택)", cnt)
-                : "← 위 테이블에서 PC를 선택하세요 (Ctrl+클릭 또는 Shift+클릭)");
+        int checked = checkedMacs.size();
+        if (checked > 0) {
+            // 체크된 PC만
+            List<PcStatusDto> targets = resolveCheckedPcs();
+            long online = targets.stream().filter(PcStatusDto::isOnline).count();
+            selectionHintLabel.setText(String.format(
+                "✓ %d대 체크됨 (온라인 %d · 오프라인 %d) — 체크된 PC에만 전송",
+                checked, online, checked - online));
         } else {
-            selectionHintLabel.setText("");
+            // 체크 없으면 전체
+            List<PcStatusDto> snapshot;
+            synchronized (allPcs) { snapshot = new ArrayList<>(allPcs); }
+            long online = snapshot.stream().filter(PcStatusDto::isOnline).count();
+            selectionHintLabel.setText(snapshot.isEmpty()
+                ? "PC 없음"
+                : String.format("전체 %d대 (온라인 %d) — 체크 없으면 전체 전송",
+                    snapshot.size(), online));
+        }
+    }
+
+    /** 헤더 체크박스의 tristate 갱신 (전체 체크/일부 체크/미체크). */
+    private void updateHeaderCheckState() {
+        if (headerCheckBox == null || pcTable == null) return;
+        List<PcStatusDto> items = pcTable.getItems();
+        if (items == null || items.isEmpty()) {
+            headerCheckBox.setSelected(false);
+            headerCheckBox.setIndeterminate(false);
+            return;
+        }
+        long total = items.size();
+        long checked = items.stream()
+                .filter(pc -> pc.getMacAddress() != null && checkedMacs.contains(pc.getMacAddress()))
+                .count();
+        if (checked == 0) {
+            headerCheckBox.setIndeterminate(false);
+            headerCheckBox.setSelected(false);
+        } else if (checked == total) {
+            headerCheckBox.setIndeterminate(false);
+            headerCheckBox.setSelected(true);
+        } else {
+            headerCheckBox.setSelected(false);
+            headerCheckBox.setIndeterminate(true);
+        }
+    }
+
+    /** checkedMacs에 해당하는 PcStatusDto 목록 반환. */
+    private List<PcStatusDto> resolveCheckedPcs() {
+        synchronized (allPcs) {
+            return allPcs.stream()
+                    .filter(pc -> pc.getMacAddress() != null && checkedMacs.contains(pc.getMacAddress()))
+                    .collect(Collectors.toList());
         }
     }
 
@@ -994,303 +886,333 @@ public class DashboardPcManagementModule {
     // ─────────────────────────────────────────
 
     private void handleSendCommand() {
-        String target = targetCombo.getValue();
         String commandLabel = commandCombo.getValue();
-
-        if (target == null || commandLabel == null) {
-            showAlert("선택 오류", "대상과 명령을 선택해주세요.", Alert.AlertType.WARNING);
+        if (commandLabel == null) {
+            showAlert("선택 오류", "명령을 선택해주세요.", Alert.AlertType.WARNING);
             return;
         }
-
         String command = toCommandCode(commandLabel);
-
-        List<PcStatusDto> targetPcs = resolveTargetPcs(target);
+        List<PcStatusDto> targetPcs = checkedMacs.isEmpty() ? resolveAllPcs() : resolveCheckedPcs();
         if (targetPcs.isEmpty()) {
-            if ("선택 PC".equals(target)) {
-                showAlert("선택 오류", "테이블에서 전송할 PC를 선택해주세요.", Alert.AlertType.WARNING);
-            } else {
-                showAlert("대상 없음", "조건에 해당하는 PC가 없습니다.", Alert.AlertType.INFORMATION);
-            }
+            showAlert("대상 없음", "조건에 해당하는 PC가 없습니다.", Alert.AlertType.INFORMATION);
             return;
         }
-
-        TransferSource transferSource = null;
-        String collectPayloadJson = null;
-        String commandTypeForQueue = command;
-
-        if ("RUN_PS1".equals(command)) {
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("PowerShell 스크립트 선택");
-            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PowerShell 파일", "*.ps1"));
-            File selected = fileChooser.showOpenDialog(null);
-            if (selected == null) {
-                return;
-            }
-            transferSource = TransferSource.simple(selected.toPath(), "file", selected.getName(), false, false);
-        } else if ("RUN_FILE_TRANSFER".equals(command)) {
-            transferSource = chooseTransferSource();
-            if (transferSource == null) {
-                return;
-            }
-            commandTypeForQueue = "RUN_PS1";
-        } else if ("COLLECT_FILES".equals(command)) {
-            collectPayloadJson = chooseCollectPayloadJson(targetPcs);
-            if (collectPayloadJson == null || collectPayloadJson.isBlank()) {
-                return;
-            }
+        // 파일 수집은 원격 파일 탐색기(에이전트 파일 시스템 브라우저) 다이얼로그 필수
+        if ("COLLECT_FILES".equals(command)) {
+            String collectPayloadJson = chooseCollectPayloadJson(targetPcs);
+            if (collectPayloadJson == null || collectPayloadJson.isBlank()) return;
+            showSendPanel(command, commandLabel, targetPcs, null, collectPayloadJson);
+            return;
         }
-
-        showConfirmationDialog(commandTypeForQueue, commandLabel, targetPcs, transferSource, collectPayloadJson);
+        // 나머지 모든 명령 → 슬라이드 패널 직접 오픈 (팝업 없음)
+        showSendPanel(command, commandLabel, targetPcs, null, null);
     }
 
-    private List<PcStatusDto> resolveTargetPcs(String target) {
-        List<PcStatusDto> snapshot;
-        synchronized (allPcs) {
-            snapshot = new ArrayList<>(allPcs);
-        }
-        return switch (target) {
-            case "전체 PC" -> new ArrayList<>(snapshot);
-            case "교사 PC만" -> snapshot.stream()
-                .filter(p -> "TEACHER".equals(p.getRole()))
-                .collect(Collectors.toList());
-            case "선택 강의실" -> {
-                Long gid = classroomMap.get(targetClassroomCombo.getValue());
-                yield gid == null ? List.of() : snapshot.stream()
-                    .filter(p -> gid.equals(p.getGroupId()))
-                    .collect(Collectors.toList());
-            }
-            case "선택 PC" -> new ArrayList<>(pcTable.getSelectionModel().getSelectedItems());
-            default -> List.of();
-        };
+    /** 전체 PC 목록 (현재 allPcs 스냅샷). */
+    private List<PcStatusDto> resolveAllPcs() {
+        synchronized (allPcs) { return new ArrayList<>(allPcs); }
     }
 
     // ─────────────────────────────────────────
-    // 전송 전 확인 다이얼로그
-    // ─────────────────────────────────────────
-    // 전송 전 확인 다이얼로그
+    // 전송 확인 슬라이드 패널
     // ─────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
-    private void showConfirmationDialog(String commandType, String commandLabel, List<PcStatusDto> targetPcs,
-                                        TransferSource transferSource, String collectPayloadJson) {
+    private void showSendPanel(String commandType, String commandLabel, List<PcStatusDto> targetPcs,
+                               TransferSource transferSource, String collectPayloadJson) {
+        if (sendPanel == null) return;
         long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
         long offlineCount = targetPcs.size() - onlineCount;
-        boolean scriptCommand = "RUN_PS1".equals(commandType)
-                && transferSource != null
+        boolean isFileTransfer  = "RUN_FILE_TRANSFER".equals(commandType);
+        boolean isScriptNoFile  = "RUN_PS1".equals(commandType) && transferSource == null;
+        // 레거시: transferSource가 미리 선택된 경우 (현재는 COLLECT_FILES 후 슬라이드만 해당)
+        boolean scriptCommand   = "RUN_PS1".equals(commandType) && transferSource != null
                 && "file".equals(transferSource.sourceType())
-                && transferSource.displayName().toLowerCase(Locale.ROOT).endsWith(".ps1")
-                && !"파일/폴더 전송".equals(commandLabel);
-        boolean transferCommand = "파일/폴더 전송".equals(commandLabel) && transferSource != null;
+                && transferSource.displayName().toLowerCase(Locale.ROOT).endsWith(".ps1");
+        boolean transferCommand = transferSource != null && !isScriptNoFile && !isFileTransfer;
 
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("명령 전송 확인");
-        dialog.setHeaderText(null);
-
-        VBox content;
-        VBox summaryBox;
-        VBox shellOptionsBox;
-        Label listTitle;
-        Label note;
-        TableView<PcStatusDto> confirmTable;
-        TableColumn<PcStatusDto, String> cRoom;
-        TableColumn<PcStatusDto, String> cIp;
-        TableColumn<PcStatusDto, String> cHost;
-        TableColumn<PcStatusDto, Void> cStatus;
-        try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/pc-command-confirm-dialog.fxml"));
-            content = loader.load();
-            summaryBox = (VBox) loader.getNamespace().get("summaryBox");
-            shellOptionsBox = (VBox) loader.getNamespace().get("optionsBox");
-            listTitle = (Label) loader.getNamespace().get("listTitleLabel");
-            note = (Label) loader.getNamespace().get("noteLabel");
-            @SuppressWarnings("unchecked")
-            TableView<PcStatusDto> ct = (TableView<PcStatusDto>) loader.getNamespace().get("confirmTable");
-            confirmTable = ct;
-            @SuppressWarnings("unchecked")
-            TableColumn<PcStatusDto, String> cr = (TableColumn<PcStatusDto, String>) loader.getNamespace().get("confirmRoomCol");
-            cRoom = cr;
-            @SuppressWarnings("unchecked")
-            TableColumn<PcStatusDto, String> ci = (TableColumn<PcStatusDto, String>) loader.getNamespace().get("confirmIpCol");
-            cIp = ci;
-            @SuppressWarnings("unchecked")
-            TableColumn<PcStatusDto, String> ch = (TableColumn<PcStatusDto, String>) loader.getNamespace().get("confirmHostCol");
-            cHost = ch;
-            @SuppressWarnings("unchecked")
-            TableColumn<PcStatusDto, Void> cs = (TableColumn<PcStatusDto, Void>) loader.getNamespace().get("confirmStatusCol");
-            cStatus = cs;
-        } catch (Exception e) {
-            throw new IllegalStateException("명령 전송 확인 다이얼로그 FXML 로딩 실패", e);
-        }
-
-        summaryBox.getStyleClass().add("pcmgmt-dialog-card");
-        summaryBox.getChildren().addAll(
-            styledLabel("명령: " + commandLabel, "pcmgmt-dialog-title-strong"),
-            styledLabel("총 대상: " + targetPcs.size() + "대", "pcmgmt-dialog-text"),
-            styledLabel("미전송: " + offlineCount + "대 (오프라인)", "pcmgmt-dialog-text-muted"),
-            styledLabel("전송 예정: " + onlineCount + "대 (온라인)", "pcmgmt-dialog-text-success")
+        // ── 요약 카드 ──────────────────────────────────────────────────────
+        sendSummaryBox.getChildren().setAll(
+            styledLabel(commandLabel, "detail-section-title"),
+            styledLabel("전송 예정: " + onlineCount + "대 (온라인만)", "pcmgmt-dialog-text-success"),
+            offlineCount > 0
+                ? styledLabel("미전송 " + offlineCount + "대 (오프라인)", "pcmgmt-dialog-text-muted")
+                : styledLabel("전체 온라인 — 미전송 없음", "pcmgmt-dialog-text-muted")
         );
         if (transferSource != null) {
-            String sourceLabel = transferCommand ? "전송원본" : "스크립트";
-            summaryBox.getChildren().add(styledLabel(sourceLabel + ": " + transferSource.displayName(), "pcmgmt-dialog-caption"));
+            sendSummaryBox.getChildren().add(
+                styledLabel((transferCommand ? "파일: " : "스크립트: ") + transferSource.displayName(),
+                    "meta-key"));
         }
 
-        ComboBox<String> runModeCombo = null;
-        ComboBox<String> windowModeCombo = null;
-        TextField argsField = null;
-        ComboBox<String> destinationCombo = null;
-        TextField destinationPathField = null;
-        CheckBox runAfterTransferCheck = null;
-        if (scriptCommand || transferCommand) {
-            VBox optionsBox = new VBox(8);
-            optionsBox.getStyleClass().add("pcmgmt-dialog-card");
+        // ── 옵션 ─────────────────────────────────────────────────────────
+        sendOptionsBox.getChildren().clear();
+        sendOptionsBox.getStyleClass().clear();
 
-            Label optionTitle = styledLabel(
-                transferCommand ? "파일 전송 옵션" : "스크립트 실행 옵션",
-                "pcmgmt-dialog-section-title"
-            );
-            HBox modeRow = new HBox(8);
-            modeRow.setAlignment(Pos.CENTER_LEFT);
-            Label modeLabel = styledLabel("결과 처리", "pcmgmt-dialog-field-label");
-            ComboBox<String> modeComboLocal = new ComboBox<>(FXCollections.observableArrayList(
-                "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"
-            ));
-            modeComboLocal.setValue(transferCommand ? "대기 실행 (완료까지 수집)" : "대기 실행 (완료까지 수집)");
-            modeComboLocal.setPrefWidth(220);
-            modeRow.getChildren().addAll(modeLabel, modeComboLocal);
+        // 람다 캡처용 배열
+        ComboBox<String>[] runModeRef  = new ComboBox[]{null};
+        ComboBox<String>[] destModeRef = new ComboBox[]{null};
+        TextField[]        destPathRef = new TextField[]{null};
+        TextField[]        argsRef     = new TextField[]{null};
+        CheckBox[]         runAfterRef = new CheckBox[]{null};
+        List<SelectableTransferItem>[] itemsRef = new List[]{new ArrayList<>()};
+        File[]             ps1Ref      = new File[]{null};
 
-            HBox windowRow = new HBox(8);
-            windowRow.setAlignment(Pos.CENTER_LEFT);
-            Label windowLabel = styledLabel("콘솔 창", "pcmgmt-dialog-field-label");
-            ComboBox<String> windowComboLocal = new ComboBox<>(FXCollections.observableArrayList(
-                "창 숨김", "창 표시"
-            ));
-            windowComboLocal.setValue("창 숨김");
-            windowComboLocal.setPrefWidth(220);
-            windowRow.getChildren().addAll(windowLabel, windowComboLocal);
+        if (isFileTransfer) {
+            VBox fileListBox = new VBox(4);
+            Label emptyHint = styledLabel("파일 추가 버튼으로 전송할 파일을 선택하세요", "pcmgmt-dialog-text-muted");
+            fileListBox.getChildren().add(emptyHint);
+            fileListBox.setMinHeight(40);
 
-            VBox argsBox = new VBox(4);
-            Label argsLabel = styledLabel("추가 인자", "pcmgmt-dialog-field-label");
-            TextField argsFieldLocal = new TextField();
-            argsFieldLocal.setPromptText("예: -Mode Test");
+            Button addFileBtn   = new Button("파일 추가");
+            Button addFolderBtn = new Button("폴더 추가");
+            Button clearBtn     = new Button("초기화");
+            for (Button b : new Button[]{addFileBtn, addFolderBtn, clearBtn}) {
+                b.getStyleClass().addAll("btn-sm", "btn-neutral");
+            }
+            HBox addBtns = new HBox(6, addFileBtn, addFolderBtn, clearBtn);
 
-            VBox transferDestBox = new VBox(6);
-            Label destinationLabel = styledLabel("대상 PC 저장 위치", "pcmgmt-dialog-field-label");
-            ComboBox<String> destinationComboLocal = new ComboBox<>(FXCollections.observableArrayList(
-                "다운로드 폴더", "바탕화면", "경로 직접 입력"
-            ));
-            // TransferSource에서 미리 선택한 값이 있으면 기본값으로 사용
-            String preselectedDestMode = transferSource != null ? transferSource.preDestMode() : "DOWNLOADS";
-            String preselectedValue = "DOWNLOADS".equals(preselectedDestMode) ? "다운로드 폴더" 
-                : "DESKTOP".equals(preselectedDestMode) ? "바탕화면" : "경로 직접 입력";
-            destinationComboLocal.setValue(preselectedValue);
-            destinationComboLocal.setPrefWidth(220);
-            TextField destinationPathLocal = new TextField();
-            destinationPathLocal.setPromptText("예: D:/Deploy/packages");
-            String preselectedPath = transferSource != null ? (transferSource.preDestPath() != null ? transferSource.preDestPath() : "") : "";
-            destinationPathLocal.setText(preselectedPath);
-            boolean showPathField = "경로 직접 입력".equals(preselectedValue);
-            destinationPathLocal.setVisible(showPathField);
-            destinationPathLocal.setManaged(showPathField);
-            destinationComboLocal.valueProperty().addListener((obs, oldV, newV) -> {
-                boolean custom = "경로 직접 입력".equals(newV);
-                destinationPathLocal.setVisible(custom);
-                destinationPathLocal.setManaged(custom);
+            Runnable refreshFileList = () -> {
+                fileListBox.getChildren().clear();
+                if (itemsRef[0].isEmpty()) {
+                    fileListBox.getChildren().add(emptyHint);
+                } else {
+                    for (SelectableTransferItem it : itemsRef[0]) {
+                        Label lbl = styledLabel("• " + it.displayName()
+                                + " (" + formatSize(it.fileSize()) + ")", "pcmgmt-dialog-caption");
+                        fileListBox.getChildren().add(lbl);
+                    }
+                }
+            };
+
+            addFileBtn.setOnAction(e -> {
+                FileChooser fc = new FileChooser();
+                fc.setTitle("파일 선택");
+                List<File> chosen = fc.showOpenMultipleDialog(
+                    sendPanel.getScene() != null ? sendPanel.getScene().getWindow() : null);
+                if (chosen != null) {
+                    for (File f : chosen) {
+                        itemsRef[0].add(new SelectableTransferItem(
+                            "file", f.getName(), f.getAbsolutePath(), true, "", f.length(), false));
+                    }
+                    refreshFileList.run();
+                }
             });
-            CheckBox runAfterTransferLocal = new CheckBox("전송 후 실행");
-            boolean preselectedRunAfter = transferSource != null && transferSource.preRunAfter();
-            runAfterTransferLocal.setSelected(preselectedRunAfter);
-            runAfterTransferLocal.setDisable(!transferCommand);
+            addFolderBtn.setOnAction(e -> {
+                DirectoryChooser dc = new DirectoryChooser();
+                dc.setTitle("폴더 선택");
+                File d = dc.showDialog(sendPanel.getScene() != null ? sendPanel.getScene().getWindow() : null);
+                if (d != null) {
+                    long sz = calculateFolderSize(d.toPath());
+                    itemsRef[0].add(new SelectableTransferItem(
+                        "folder", d.getName(), d.getAbsolutePath(), true, "", sz, false));
+                    refreshFileList.run();
+                }
+            });
+            clearBtn.setOnAction(e -> { itemsRef[0].clear(); refreshFileList.run(); });
 
-            Label hintLabel = styledLabel(
-                transferCommand
-                    ? "전송은 RUN_PS1 명령 체계로 처리되며 상태는 명령 탭에서 확인합니다. 폴더 전송은 zip으로 압축 후 대상 경로에 해제됩니다."
-                    : "즉시 실행은 프로세스 시작 성공만 확인합니다. 대기 실행은 종료까지 기다리며 stdout/stderr를 수집합니다. 창 표시는 에이전트 실행 계정/세션 정책에 따라 보이지 않을 수 있습니다.",
-                "pcmgmt-dialog-hint"
-            );
+            ComboBox<String> destCombo = new ComboBox<>(FXCollections.observableArrayList(
+                "다운로드 폴더", "바탕화면", "경로 직접 입력"));
+            destCombo.setValue("다운로드 폴더");
+            destCombo.setMaxWidth(Double.MAX_VALUE);
+            TextField pathField = new TextField();
+            pathField.setPromptText("예: D:/Deploy/files");
+            pathField.setVisible(false); pathField.setManaged(false);
+            destCombo.valueProperty().addListener((obs, o, n) -> {
+                boolean c = "경로 직접 입력".equals(n);
+                pathField.setVisible(c); pathField.setManaged(c);
+            });
+            CheckBox runCb = new CheckBox("전송 후 실행");
+            destModeRef[0] = destCombo; destPathRef[0] = pathField; runAfterRef[0] = runCb;
 
-            argsBox.getChildren().addAll(argsLabel, argsFieldLocal);
-            transferDestBox.getChildren().addAll(destinationLabel, destinationComboLocal, destinationPathLocal, runAfterTransferLocal);
+            ComboBox<String> modeCombo = new ComboBox<>(FXCollections.observableArrayList(
+                "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"));
+            modeCombo.setValue("대기 실행 (완료까지 수집)");
+            modeCombo.setMaxWidth(Double.MAX_VALUE);
+            runModeRef[0] = modeCombo;
 
+            sendOptionsBox.getChildren().addAll(
+                styledLabel("전송 파일", "meta-key"),
+                addBtns, fileListBox,
+                new Separator(),
+                styledLabel("저장 위치", "meta-key"),
+                destCombo, pathField, runCb,
+                new Separator(),
+                styledLabel("결과 처리", "meta-key"),
+                modeCombo);
+
+        } else if (isScriptNoFile) {
+            Label ps1Label = styledLabel("선택된 파일 없음", "pcmgmt-dialog-text-muted");
+            Button chooseBtn = new Button("스크립트 파일 선택 (.ps1)");
+            chooseBtn.getStyleClass().add("btn-neutral");
+            chooseBtn.setMaxWidth(Double.MAX_VALUE);
+            chooseBtn.setOnAction(e -> {
+                FileChooser fc = new FileChooser();
+                fc.setTitle("PowerShell 스크립트");
+                fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("PowerShell", "*.ps1"));
+                File f = fc.showOpenDialog(sendPanel.getScene() != null ? sendPanel.getScene().getWindow() : null);
+                if (f != null) {
+                    ps1Ref[0] = f;
+                    ps1Label.setText("✓ " + f.getName());
+                    ps1Label.getStyleClass().setAll("pcmgmt-dialog-text-success");
+                }
+            });
+            TextField argsField = new TextField();
+            argsField.setPromptText("추가 인자 (예: -Mode Test)");
+            argsRef[0] = argsField;
+
+            ComboBox<String> modeCombo = new ComboBox<>(FXCollections.observableArrayList(
+                "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"));
+            modeCombo.setValue("대기 실행 (완료까지 수집)");
+            modeCombo.setMaxWidth(Double.MAX_VALUE);
+            runModeRef[0] = modeCombo;
+
+            sendOptionsBox.getChildren().addAll(
+                styledLabel("스크립트 파일", "meta-key"),
+                chooseBtn, ps1Label,
+                new Separator(),
+                styledLabel("추가 인자", "meta-key"),
+                argsField,
+                new Separator(),
+                styledLabel("결과 처리", "meta-key"),
+                modeCombo);
+
+        } else if (scriptCommand || transferCommand) {
             if (transferCommand) {
-                optionsBox.getChildren().addAll(optionTitle, transferDestBox, modeRow, windowRow, argsBox, hintLabel);
-            } else {
-                optionsBox.getChildren().addAll(optionTitle, modeRow, windowRow, argsBox, hintLabel);
+                String preDest = transferSource.preDestMode();
+                String preVal  = "DESKTOP".equals(preDest) ? "바탕화면"
+                               : "CUSTOM".equals(preDest)  ? "경로 직접 입력"
+                               : "다운로드 폴더";
+                ComboBox<String> destCombo = new ComboBox<>(FXCollections.observableArrayList(
+                    "다운로드 폴더", "바탕화면", "경로 직접 입력"));
+                destCombo.setValue(preVal);
+                destCombo.setMaxWidth(Double.MAX_VALUE);
+                TextField pathField = new TextField(
+                    transferSource.preDestPath() != null ? transferSource.preDestPath() : "");
+                pathField.setPromptText("예: D:/Deploy/files");
+                boolean custom0 = "경로 직접 입력".equals(preVal);
+                pathField.setVisible(custom0); pathField.setManaged(custom0);
+                destCombo.valueProperty().addListener((obs, o, n) -> {
+                    boolean c = "경로 직접 입력".equals(n);
+                    pathField.setVisible(c); pathField.setManaged(c);
+                });
+                CheckBox runCb = new CheckBox("전송 후 실행");
+                runCb.setSelected(transferSource.preRunAfter());
+                destModeRef[0] = destCombo; destPathRef[0] = pathField; runAfterRef[0] = runCb;
+                sendOptionsBox.getChildren().addAll(
+                    styledLabel("저장 위치", "meta-key"),
+                    destCombo, pathField, runCb);
             }
-            shellOptionsBox.getChildren().setAll(optionsBox);
-            runModeCombo = modeComboLocal;
-            windowModeCombo = windowComboLocal;
-            argsField = argsFieldLocal;
-            destinationCombo = destinationComboLocal;
-            destinationPathField = destinationPathLocal;
-            runAfterTransferCheck = runAfterTransferLocal;
-        } else {
-            shellOptionsBox.getChildren().clear();
-            shellOptionsBox.setManaged(false);
-            shellOptionsBox.setVisible(false);
+            if (scriptCommand) {
+                TextField argsField = new TextField();
+                argsField.setPromptText("추가 인자 (예: -Mode Test)");
+                argsRef[0] = argsField;
+                sendOptionsBox.getChildren().addAll(
+                    styledLabel("추가 인자", "meta-key"), argsField);
+            }
+            ComboBox<String> modeCombo = new ComboBox<>(FXCollections.observableArrayList(
+                "대기 실행 (완료까지 수집)", "즉시 실행 (시작만 확인)"));
+            modeCombo.setValue("대기 실행 (완료까지 수집)");
+            modeCombo.setMaxWidth(Double.MAX_VALUE);
+            runModeRef[0] = modeCombo;
+            if (!sendOptionsBox.getChildren().isEmpty()) {
+                sendOptionsBox.getChildren().add(new Separator());
+            }
+            sendOptionsBox.getChildren().addAll(
+                styledLabel("결과 처리", "meta-key"), modeCombo);
         }
 
-        listTitle.getStyleClass().add("pcmgmt-dialog-list-title");
-
-        cRoom.setCellValueFactory(c -> Bindings.createStringBinding(
-            () -> c.getValue().getGroupName() != null ? c.getValue().getGroupName() : "-"
-        ));
-        cIp.setCellValueFactory(c -> Bindings.createStringBinding(
-            () -> c.getValue().getIpAddress() != null ? c.getValue().getIpAddress() : "-"
-        ));
-        cHost.setCellValueFactory(c -> Bindings.createStringBinding(
-            () -> c.getValue().getPcName() != null ? c.getValue().getPcName() : "-"
-        ));
-        cStatus.setCellFactory(col -> new TableCell<>() {
-            @Override protected void updateItem(Void item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || getTableRow() == null || getTableRow().getItem() == null) { setGraphic(null); return; }
-                PcStatusDto pc = getTableRow().getItem();
-                Label lbl = new Label(pc.isOnline() ? "✓ 전송" : "✗ 미전송");
-                lbl.getStyleClass().add(pc.isOnline() ? "pcmgmt-status-online" : "pcmgmt-status-failed");
-                setGraphic(lbl);
+        // ── 전송 버튼 동작 ────────────────────────────────────────────────
+        sendConfirmBtn.setOnAction(ev -> {
+            if (isFileTransfer) {
+                if (itemsRef[0].isEmpty()) {
+                    showAlert("선택 오류", "전송할 파일이나 폴더를 1개 이상 추가하세요.", Alert.AlertType.WARNING);
+                    return;
+                }
+                final List<SelectableTransferItem> items = new ArrayList<>(itemsRef[0]);
+                final String destMode = mapDestinationMode(
+                    destModeRef[0] != null ? destModeRef[0].getValue() : "다운로드 폴더");
+                final String destPath  = destPathRef[0]  != null ? destPathRef[0].getText()  : "";
+                final boolean runAfter = runAfterRef[0]  != null && runAfterRef[0].isSelected();
+                final boolean bgMode   = runModeRef[0]   != null && runModeRef[0].getValue().startsWith("즉시");
+                closeSendPanel();
+                Thread t = new Thread(() -> {
+                    try {
+                        Path zipPath = createMultiTransferZip(items);
+                        TransferSource ts = new TransferSource(zipPath, "multi-transfer", "MultiTransfer.zip",
+                            true, true, destMode, destPath, runAfter, null);
+                        ScriptExecutionOptions opts = new ScriptExecutionOptions(
+                            ts.path().toString(), ts.scriptUrl(),
+                            bgMode ? "BACKGROUND" : "FOREGROUND", "HIDDEN", "",
+                            true, ts.sourceType(), ts.displayName(),
+                            destMode, destPath, runAfter, ts.zipped(), ts.temporaryArtifact());
+                        executeCommand("RUN_PS1", targetPcs, opts, null);
+                    } catch (Exception ex) {
+                        Platform.runLater(() -> showAlert("전송 준비 실패", ex.getMessage(), Alert.AlertType.ERROR));
+                    }
+                }, "pcmgmt-transfer-prep");
+                t.setDaemon(true);
+                t.start();
+                return;
             }
-        });
-
-        List<PcStatusDto> sorted = targetPcs.stream()
-            .sorted((a, b) -> Boolean.compare(b.isOnline(), a.isOnline()))
-            .collect(Collectors.toList());
-        confirmTable.setItems(FXCollections.observableArrayList(sorted));
-
-        note.getStyleClass().add("pcmgmt-dialog-note");
-        note.setText("※ 오프라인 PC는 명령을 전송하지 않으며, 미전송 상태로 기록됩니다.");
-
-        dialog.getDialogPane().setContent(content);
-        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-
-        Button okBtn = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
-        if (okBtn != null) {
-            okBtn.setText("전송");
-            okBtn.getStyleClass().add("pcmgmt-dialog-primary-btn");
-        }
-
-        Optional<ButtonType> result = dialog.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+            if (isScriptNoFile) {
+                if (ps1Ref[0] == null) {
+                    showAlert("선택 오류", "실행할 .ps1 파일을 선택하세요.", Alert.AlertType.WARNING);
+                    return;
+                }
+                File ps1 = ps1Ref[0];
+                TransferSource ts = TransferSource.simple(ps1.toPath(), "file", ps1.getName(), false, false);
+                boolean bgMode = runModeRef[0] != null && runModeRef[0].getValue().startsWith("즉시");
+                ScriptExecutionOptions opts = new ScriptExecutionOptions(
+                    ts.path().toString(), ts.scriptUrl(),
+                    bgMode ? "BACKGROUND" : "FOREGROUND", "HIDDEN",
+                    argsRef[0] != null ? argsRef[0].getText() : "",
+                    false, ts.sourceType(), ts.displayName(),
+                    "DOWNLOADS", "", false, ts.zipped(), ts.temporaryArtifact());
+                closeSendPanel();
+                executeCommand("RUN_PS1", targetPcs, opts, null);
+                return;
+            }
+            // 단순 명령(재시작/종료/PCON) 및 레거시 transferSource 케이스
             ScriptExecutionOptions scriptOptions = (scriptCommand || transferCommand)
                 ? new ScriptExecutionOptions(
                     transferSource == null || transferSource.path() == null ? null : transferSource.path().toString(),
                     transferSource == null ? null : transferSource.scriptUrl(),
-                    runModeCombo != null && runModeCombo.getValue() != null && runModeCombo.getValue().startsWith("즉시 실행")
-                        ? "BACKGROUND" : "FOREGROUND",
-                    windowModeCombo != null && windowModeCombo.getValue() != null && windowModeCombo.getValue().startsWith("창 표시")
-                        ? "VISIBLE" : "HIDDEN",
-                    argsField != null ? argsField.getText() : "",
+                    runModeRef[0] != null && runModeRef[0].getValue().startsWith("즉시") ? "BACKGROUND" : "FOREGROUND",
+                    "HIDDEN",
+                    argsRef[0] != null ? argsRef[0].getText() : "",
                     transferCommand,
                     transferSource == null ? "file" : transferSource.sourceType(),
                     transferSource == null ? "" : transferSource.displayName(),
-                    destinationCombo != null && destinationCombo.getValue() != null ? mapDestinationMode(destinationCombo.getValue()) : "DOWNLOADS",
-                    destinationPathField != null ? destinationPathField.getText() : "",
-                    runAfterTransferCheck != null && runAfterTransferCheck.isSelected(),
+                    destModeRef[0] != null ? mapDestinationMode(destModeRef[0].getValue()) : "DOWNLOADS",
+                    destPathRef[0] != null ? destPathRef[0].getText() : "",
+                    runAfterRef[0] != null && runAfterRef[0].isSelected(),
                     transferSource != null && transferSource.zipped(),
-                    transferSource != null && transferSource.temporaryArtifact()
-                )
+                    transferSource != null && transferSource.temporaryArtifact())
                 : ScriptExecutionOptions.none();
+            closeSendPanel();
             executeCommand(commandType, targetPcs, scriptOptions, collectPayloadJson);
-        }
+        });
+
+        // ── 슬라이드 인 애니메이션 ────────────────────────────────────────
+        sendPanel.setManaged(true);
+        sendPanel.setVisible(true);
+        sendPanel.setPrefWidth(0);
+        javafx.animation.Timeline tl = new javafx.animation.Timeline(
+            new javafx.animation.KeyFrame(javafx.util.Duration.millis(220),
+                new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), 330,
+                    javafx.animation.Interpolator.EASE_BOTH)));
+        tl.play();
+    }
+
+    private void closeSendPanel() {
+        if (sendPanel == null) return;
+        javafx.animation.Timeline tl = new javafx.animation.Timeline(
+            new javafx.animation.KeyFrame(javafx.util.Duration.millis(160),
+                new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), 0,
+                    javafx.animation.Interpolator.EASE_BOTH)));
+        tl.setOnFinished(e -> { sendPanel.setManaged(false); sendPanel.setVisible(false); });
+        tl.play();
     }
 
     // ─────────────────────────────────────────
@@ -1303,10 +1225,11 @@ public class DashboardPcManagementModule {
             executeCollectAndDownload(targetPcs, collectPayloadJson);
             return;
         }
-        // PC 켜기(PCON)는 오프라인 대상까지 포함해서 서버의 WOL 릴레이 로직으로 전달
-        List<PcStatusDto> onlinePcs = "PCON".equals(commandType)
-                ? new ArrayList<>(targetPcs)
-                : targetPcs.stream().filter(PcStatusDto::isOnline).collect(Collectors.toList());
+        if ("PCON".equals(commandType)) {
+            executePconCommand(targetPcs);
+            return;
+        }
+        List<PcStatusDto> onlinePcs = targetPcs.stream().filter(PcStatusDto::isOnline).collect(Collectors.toList());
         if (onlinePcs.isEmpty()) {
             showAlert("알림", "온라인 상태인 PC가 없어 전송을 취소합니다.", Alert.AlertType.INFORMATION);
             return;
@@ -1320,12 +1243,27 @@ public class DashboardPcManagementModule {
             if ("RUN_PS1".equals(commandType) && scriptOptions.hasScript()) {
                 try {
                     if (scriptOptions.hasLocalScriptPath()) {
-                        String uploadResp = apiClient.uploadFile("/scripts", new File(scriptOptions.scriptPath())).join();
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> uploadBody = objectMapper.readValue(uploadResp, Map.class);
-                        uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
-                        if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
-                            throw new RuntimeException("업로드 응답에 downloadUrl이 없습니다.");
+                        File localScriptFile = new File(scriptOptions.scriptPath());
+                        UploadProgress uploadProgress = openUploadProgressStage("파일 업로드 중", localScriptFile);
+                        try {
+                            updateUploadProgress(uploadProgress, 0L, localScriptFile.length(), "서버 업로드 준비 중...");
+                            String uploadResp = apiClient.uploadScriptFile(localScriptFile,
+                                    (uploadedBytes, totalBytes) -> updateUploadProgress(
+                                            uploadProgress,
+                                            uploadedBytes,
+                                            totalBytes,
+                                            "서버로 업로드 중..."
+                                    )).join();
+                            updateUploadProgress(uploadProgress, localScriptFile.length(), localScriptFile.length(),
+                                    "업로드 완료, 명령 생성 중...");
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> uploadBody = objectMapper.readValue(uploadResp, Map.class);
+                            uploadedScriptUrl = String.valueOf(uploadBody.getOrDefault("downloadUrl", ""));
+                            if (uploadedScriptUrl == null || uploadedScriptUrl.isBlank()) {
+                                throw new RuntimeException("업로드 응답에 downloadUrl이 없습니다.");
+                            }
+                        } finally {
+                            closeUploadProgressStage(uploadProgress);
                         }
                     } else if (scriptOptions.hasRemoteScriptUrl()) {
                         uploadedScriptUrl = scriptOptions.scriptUrl();
@@ -1333,10 +1271,11 @@ public class DashboardPcManagementModule {
                         throw new RuntimeException("스크립트/전송 소스가 없습니다.");
                     }
                 } catch (Exception ex) {
-                    log.warn("업로드 실패: {}", ex.getMessage());
+                    String errorMessage = ApiClient.userFacingErrorMessage(ex, "업로드 실패");
+                    log.warn("업로드 실패: {}", errorMessage);
                     int skipped = targetPcs.size() - onlinePcs.size();
                     Platform.runLater(() -> showAlert("전송 실패",
-                        "업로드 실패로 명령 전송을 중단했습니다.\n" + ex.getMessage() +
+                        "업로드 실패로 명령 전송을 중단했습니다.\n" + errorMessage +
                             "\n오프라인 미전송: " + skipped + "대",
                         Alert.AlertType.ERROR));
                     return;
@@ -1384,6 +1323,164 @@ public class DashboardPcManagementModule {
         }, "pcmgmt-cmd-exec");
         t.setDaemon(true);
         t.start();
+    }
+
+    private void executePconCommand(List<PcStatusDto> targetPcs) {
+        List<PcStatusDto> wolTargets = targetPcs.stream()
+                .filter(pc -> pc.getMacAddress() != null && !pc.getMacAddress().isBlank())
+                .collect(Collectors.toList());
+        if (wolTargets.isEmpty()) {
+            showAlert("대상 없음", "PC ON을 보낼 MAC 주소가 없습니다.", Alert.AlertType.INFORMATION);
+            return;
+        }
+
+        Thread t = new Thread(() -> {
+            int queuedTargets = 0;
+            int failedTargets = 0;
+            int relayRequests = 0;
+
+            Map<Long, List<PcStatusDto>> byGroup = wolTargets.stream()
+                    .filter(pc -> pc.getGroupId() != null)
+                    .collect(Collectors.groupingBy(PcStatusDto::getGroupId, LinkedHashMap::new, Collectors.toList()));
+
+            for (Map.Entry<Long, List<PcStatusDto>> entry : byGroup.entrySet()) {
+                List<String> targetMacs = entry.getValue().stream()
+                        .map(PcStatusDto::getMacAddress)
+                        .filter(mac -> mac != null && !mac.isBlank())
+                        .distinct()
+                        .collect(Collectors.toList());
+                try {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("scope", "GROUP");
+                    body.put("groupId", entry.getKey());
+                    body.put("type", "PCON");
+                    body.put("role", "ALL");
+                    body.put("targetMacs", targetMacs);
+                    int queued = extractQueuedCount(apiClient.postJson("/commands", body).join());
+                    if (queued > 0) {
+                        queuedTargets += entry.getValue().size();
+                        relayRequests += queued;
+                    } else {
+                        failedTargets += entry.getValue().size();
+                    }
+                } catch (Exception ex) {
+                    failedTargets += entry.getValue().size();
+                    log.warn("PC ON 그룹 전송 실패: groupId={}, message={}", entry.getKey(), ex.getMessage());
+                }
+            }
+
+            for (PcStatusDto pc : wolTargets.stream().filter(pc -> pc.getGroupId() == null).toList()) {
+                try {
+                    Map<String, Object> body = new HashMap<>();
+                    body.put("scope", "SINGLE");
+                    body.put("macAddress", pc.getMacAddress());
+                    body.put("type", "PCON");
+                    int queued = extractQueuedCount(apiClient.postJson("/commands", body).join());
+                    if (queued > 0) {
+                        queuedTargets++;
+                        relayRequests += queued;
+                    } else {
+                        failedTargets++;
+                    }
+                } catch (Exception ex) {
+                    failedTargets++;
+                    log.warn("PC ON 개별 전송 실패: mac={}, message={}", pc.getMacAddress(), ex.getMessage());
+                }
+            }
+
+            int finalQueuedTargets = queuedTargets;
+            int finalFailedTargets = failedTargets;
+            int finalRelayRequests = relayRequests;
+            Platform.runLater(() -> showAlert("PC ON 요청 완료",
+                    String.format("대상: %d대\n릴레이 요청: %d건\n큐잉 성공 대상: %d대%s",
+                            wolTargets.size(),
+                            finalRelayRequests,
+                            finalQueuedTargets,
+                            finalFailedTargets > 0 ? "\n큐잉 실패/릴레이 없음: " + finalFailedTargets + "대" : ""),
+                    finalFailedTargets > 0 ? Alert.AlertType.WARNING : Alert.AlertType.INFORMATION));
+        }, "pcmgmt-pcon-exec");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    @SuppressWarnings("unchecked")
+    private int extractQueuedCount(String response) {
+        if (response == null || response.isBlank()) return 0;
+        try {
+            Map<String, Object> body = objectMapper.readValue(response, Map.class);
+            Object queued = body.get("queued");
+            if (queued instanceof Number number) {
+                return number.intValue();
+            }
+            return queued == null ? 0 : Integer.parseInt(String.valueOf(queued));
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private record UploadProgress(
+            Stage stage,
+            ProgressBar progressBar,
+            Label statusLabel,
+            Label detailLabel
+    ) {}
+
+    private UploadProgress openUploadProgressStage(String title, File file) {
+        if (file == null) return null;
+        CountDownLatch uiReady = new CountDownLatch(1);
+        AtomicReference<UploadProgress> holder = new AtomicReference<>();
+        Platform.runLater(() -> {
+            holder.set(buildUploadProgressStage(title, file));
+            uiReady.countDown();
+        });
+        try {
+            uiReady.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        return holder.get();
+    }
+
+    private UploadProgress buildUploadProgressStage(String title, File file) {
+        ProgressBar progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(420);
+        Label statusLabel = new Label("업로드 준비 중...");
+        Label detailLabel = new Label(file.getName() + " (" + formatSize(file.length()) + ")");
+
+        VBox box = new VBox(10,
+                new Label("백엔드 업로드 진행 상태"),
+                progressBar,
+                statusLabel,
+                detailLabel
+        );
+        box.setPadding(new Insets(16));
+        box.setPrefWidth(460);
+
+        Stage stage = new Stage();
+        stage.initModality(Modality.NONE);
+        stage.setTitle(title);
+        stage.setScene(new Scene(box));
+        stage.setResizable(false);
+        stage.show();
+        return new UploadProgress(stage, progressBar, statusLabel, detailLabel);
+    }
+
+    private void updateUploadProgress(UploadProgress progress,
+                                      long uploadedBytes,
+                                      long totalBytes,
+                                      String statusText) {
+        if (progress == null) return;
+        Platform.runLater(() -> {
+            progress.progressBar().setProgress(totalBytes > 0 ? Math.min(1.0, (double) uploadedBytes / totalBytes) : -1);
+            progress.statusLabel().setText(statusText);
+            progress.detailLabel().setText(formatSize(uploadedBytes) + " / " + formatSize(totalBytes)
+                    + " (" + formatProgressPercent(uploadedBytes, totalBytes) + ")");
+        });
+    }
+
+    private void closeUploadProgressStage(UploadProgress progress) {
+        if (progress == null || progress.stage() == null) return;
+        Platform.runLater(progress.stage()::close);
     }
 
     // ─────────────────────────────────────────
@@ -1646,6 +1743,11 @@ public class DashboardPcManagementModule {
         double mb = kb / 1024.0;
         if (mb < 1024) return String.format("%.1f MB", mb);
         return String.format("%.2f GB", mb / 1024.0);
+    }
+
+    private String formatProgressPercent(long transferredBytes, long totalBytes) {
+        if (totalBytes <= 0) return "계산 중";
+        return String.format("%.0f%%", Math.min(100.0, (100.0 * transferredBytes) / totalBytes));
     }
 
     private String extractDownloadUrl(String stdout) {

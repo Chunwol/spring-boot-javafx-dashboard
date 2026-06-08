@@ -81,7 +81,7 @@ public class CommandStatusPanelController {
     private final ApiClient apiClient = ApiClient.getInstance();
     private final ObjectMapper objectMapper = ApiClient.getInstance().getObjectMapper();
 
-    private VBox rootPanel;
+    private Region rootPanel;
     private TableView<Map<String, Object>> commandTable;
     @FXML
     private Label summaryLabel;
@@ -92,7 +92,11 @@ public class CommandStatusPanelController {
     @FXML
     private ComboBox<String> statusFilterCombo;
     @FXML
-    private ComboBox<String> typeFilterCombo;
+    private Button typeFilterBtn;           // 체크박스 팝업 트리거
+    /** 체크 해제 = 숨김. 없으면 전체 표시. */
+    private final Set<String> hiddenTypes = new LinkedHashSet<>();
+    /** 데이터에서 수집한 전체 종류 목록. */
+    private final Set<String> knownTypes  = new LinkedHashSet<>();
     @FXML
     private ComboBox<String> roomFilterCombo;
     @FXML
@@ -103,14 +107,35 @@ public class CommandStatusPanelController {
     private Button clearButton;
     @FXML
     private StackPane commandTableSlot;
+
+    // 우측 슬라이드 상세 패널
+    @FXML private VBox detailPanel;
+    @FXML private Label detailTitleLabel;
+    @FXML private Button detailCloseBtn;
+    @FXML private HBox progressStepsBox;
+    @FXML private Label detailStatusLine;
+    @FXML private VBox detailMetaBox;
+    @FXML private TextArea detailStdout;
+    @FXML private TextArea detailStderr;
+    @FXML private Button detailDownloadBtn;
+
+    /** 진행 단계 라벨 (대기중 → 전송됨 → 실행중 → 완료). */
+    private static final String[] STEP_LABELS = {"대기중", "전송됨", "실행중", "완료"};
+    private static final double DETAIL_PANEL_WIDTH = 420.0;
+    /** 상세 패널에 표시 중인 명령 키 (폴링 갱신 시 추적용). */
+    private String selectedKey;
+    /** 메타 행의 값 라벨 — 선택/폴링마다 값만 갱신 (재생성 안 함). */
+    private final Map<String, Label> metaValueLabels = new LinkedHashMap<>();
+    private javafx.animation.Timeline panelAnim;
+
     private List<Map<String, Object>> latestCommands = List.of();
     private ScheduledExecutorService scheduler;
 
     public CommandStatusPanelController() {
     }
 
-    /** 패널 VBox 반환 */
-    public VBox getPanel() {
+    /** 패널 루트 반환 (좌측 테이블 + 우측 상세 패널 HBox) */
+    public Region getPanel() {
         if (rootPanel == null) {
             try {
                 FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/command-status-panel.fxml"));
@@ -148,10 +173,8 @@ public class CommandStatusPanelController {
             statusFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
         }
 
-        if (typeFilterCombo != null) {
-            typeFilterCombo.setItems(FXCollections.observableArrayList(ALL_FILTER));
-            typeFilterCombo.setValue(ALL_FILTER);
-            typeFilterCombo.valueProperty().addListener((obs, oldValue, newValue) -> applyTableView());
+        if (typeFilterBtn != null) {
+            typeFilterBtn.setOnAction(e -> showTypeFilterPopup());
         }
 
         if (roomFilterCombo != null) {
@@ -178,9 +201,11 @@ public class CommandStatusPanelController {
             clearButton.setOnAction(e -> {
                 if (searchField != null) searchField.clear();
                 if (statusFilterCombo != null) statusFilterCombo.setValue(ALL_FILTER);
-                if (typeFilterCombo != null) typeFilterCombo.setValue(ALL_FILTER);
+                hiddenTypes.clear();
+                updateTypeFilterBtnLabel();
                 if (roomFilterCombo != null) roomFilterCombo.setValue(ALL_FILTER);
                 if (sortCombo != null) sortCombo.setValue("최신순");
+                applyTableView();
             });
         }
 
@@ -188,6 +213,10 @@ public class CommandStatusPanelController {
         if (commandTableSlot != null) {
             commandTableSlot.getChildren().setAll(commandTable);
         }
+
+        // 우측 상세 패널 초기화
+        if (detailCloseBtn != null) detailCloseBtn.setOnAction(e -> hideDetail());
+        buildDetailMeta();
 
         // 자동 폴링 (10초)
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -205,7 +234,7 @@ public class CommandStatusPanelController {
 
     /** 서버에서 최근 명령 목록을 가져와 UI를 갱신한다. */
     public void refresh() {
-        apiClient.getPagedList("/commands?status=" + FETCH_STATUS_QUERY + "&size=200",
+        apiClient.getPagedList("/commands?status=" + FETCH_STATUS_QUERY + "&size=500",
                 new TypeReference<List<Map<String, Object>>>() {})
                 .thenAccept(commands -> Platform.runLater(() -> updateUI(commands)))
                 .exceptionally(ex -> {
@@ -235,7 +264,6 @@ public class CommandStatusPanelController {
             TableColumn<Map<String, Object>, String> modeCol = (TableColumn<Map<String, Object>, String>) ns.get("modeCol");
             TableColumn<Map<String, Object>, String> statusCol = (TableColumn<Map<String, Object>, String>) ns.get("statusCol");
             TableColumn<Map<String, Object>, String> exitCol = (TableColumn<Map<String, Object>, String>) ns.get("exitCol");
-            TableColumn<Map<String, Object>, Void> detailCol = (TableColumn<Map<String, Object>, Void>) ns.get("detailCol");
 
             timeCol.setCellValueFactory(data -> new SimpleStringProperty(extractTime(data.getValue())));
             roomCol.setCellValueFactory(data -> new SimpleStringProperty(extractGroupName(data.getValue())));
@@ -247,6 +275,14 @@ public class CommandStatusPanelController {
             destinationCol.setCellValueFactory(data -> new SimpleStringProperty(extractDestinationDisplay(data.getValue())));
             modeCol.setCellValueFactory(data -> new SimpleStringProperty(extractRunMode(data.getValue())));
             exitCol.setCellValueFactory(data -> new SimpleStringProperty(asText(data.getValue(), "exitCode")));
+
+            // 잘릴 수 있는 동적 컬럼은 셀에 마우스를 올리면 전체 값을 툴팁으로 보여준다
+            applyTooltipCellFactory(pcNameCol);
+            applyTooltipCellFactory(ipCol);
+            applyTooltipCellFactory(macCol);
+            applyTooltipCellFactory(transferCol);
+            applyTooltipCellFactory(destinationCol);
+            applyTooltipCellFactory(modeCol);
 
             statusCol.setCellValueFactory(data -> new SimpleStringProperty(extractDetailedStatus(data.getValue())));
             statusCol.setCellFactory(col -> new TableCell<>() {
@@ -275,37 +311,26 @@ public class CommandStatusPanelController {
                 }
             });
 
-            detailCol.setCellFactory(col -> new TableCell<>() {
-                private final Button button = new Button("상세 보기");
-                {
-                    button.getStyleClass().addAll("btn-neutral", "btn-sm");
-                }
-                @Override protected void updateItem(Void item, boolean empty) {
-                    super.updateItem(item, empty);
-                    Map<String, Object> row = getTableRow() == null ? null : getTableRow().getItem();
-                    if (empty || row == null) {
-                        setGraphic(null);
-                        return;
-                    }
-                    String downloadUrl = resolveCollectDownloadUrl(row);
-                    if (downloadUrl != null && !downloadUrl.isBlank()) {
-                        button.setText("결과 다운로드");
-                        button.setTooltip(new Tooltip("수집 결과 파일을 다운로드합니다."));
-                        button.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
-                    } else {
-                        button.setText("상세 보기");
-                        button.setTooltip(new Tooltip("명령 실행 상세 정보를 확인합니다."));
-                        button.setOnAction(e -> showCommandDetail(row));
-                    }
-                    setGraphic(button);
-                }
-            });
+            // 핵심 컬럼(시간/강의실/PC/종류/상태)만 기본 표시.
+            // 나머지(IP/MAC/전송대상/대상경로/실행옵션/종료코드)는 … 메뉴로 켤 수 있음.
+            // 상세보기 버튼 컬럼 제거 — 행 클릭으로 우측 패널에서 상세 표시됨.
+            for (TableColumn<Map<String, Object>, ?> hidden :
+                    List.of(ipCol, macCol, transferCol, destinationCol, modeCol, exitCol)) {
+                hidden.setVisible(false);
+                // 컬럼 가시성 변경 시 → 나머지 컬럼이 공간을 자동으로 나눠 갖도록 리사이즈
+                hidden.visibleProperty().addListener((obs, ov, nv) ->
+                        Platform.runLater(() -> {
+                            table.refresh();
+                            table.layout();
+                        }));
+            }
+            table.setTableMenuButtonVisible(true);
 
             table.setRowFactory(tv -> {
                 TableRow<Map<String, Object>> row = new TableRow<>();
                 row.setOnMouseClicked(event -> {
-                    if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
-                        showCommandDetail(row.getItem());
+                    if (!row.isEmpty() && event.getButton() == MouseButton.PRIMARY) {
+                        showDetailInPanel(row.getItem());
                     }
                 });
                 return row;
@@ -317,7 +342,7 @@ public class CommandStatusPanelController {
     }
 
     private void updateUI(List<Map<String, Object>> commands) {
-        List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(120).toList();
+        List<Map<String, Object>> recent = commands == null ? List.of() : commands.stream().limit(500).toList();
         latestCommands = recent;
         refreshFilterCombos(recent);
 
@@ -348,6 +373,12 @@ public class CommandStatusPanelController {
             activeTotal, queued, delivered, acked, verifying, scmateReset, completed, failed));
         applyTableView();
         lastUpdatedLabel.setText("마지막 갱신: " + LocalTime.now().format(TIME_FORMAT));
+
+        // 선택된 명령이 있으면 최신 상태로 패널 갱신 → 진행 단계가 자동으로 진행
+        if (selectedKey != null) {
+            recent.stream().filter(r -> selectedKey.equals(keyOf(r))).findFirst()
+                    .ifPresent(this::renderDetail);
+        }
     }
 
     private void applyTableView() {
@@ -399,11 +430,8 @@ public class CommandStatusPanelController {
     }
 
     private boolean matchesTypeFilter(Map<String, Object> row) {
-        String filter = selectedFilterValue(typeFilterCombo);
-        if (ALL_FILTER.equals(filter)) {
-            return true;
-        }
-        return filter.equalsIgnoreCase(extractCommandDisplayType(row));
+        if (hiddenTypes.isEmpty()) return true;
+        return !hiddenTypes.contains(extractCommandDisplayType(row));
     }
 
     private boolean matchesRoomFilter(Map<String, Object> row) {
@@ -422,9 +450,16 @@ public class CommandStatusPanelController {
     }
 
     private void refreshFilterCombos(List<Map<String, Object>> recent) {
-        refreshFilterCombo(typeFilterCombo, recent.stream()
-                .map(this::extractCommandDisplayType)
-                .toList());
+        // 종류 목록 갱신 (체크박스 팝업용)
+        Set<String> fresh = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        recent.forEach(r -> {
+            String t = extractCommandDisplayType(r);
+            if (t != null && !t.isBlank() && !"-".equals(t)) fresh.add(t);
+        });
+        knownTypes.clear();
+        knownTypes.addAll(fresh);
+        updateTypeFilterBtnLabel();
+
         refreshFilterCombo(roomFilterCombo, recent.stream()
                 .map(this::extractGroupName)
                 .toList());
@@ -454,6 +489,61 @@ public class CommandStatusPanelController {
         combo.setItems(FXCollections.observableArrayList(items));
         combo.setValue(items.contains(current) ? current : ALL_FILTER);
     }
+
+    /** 종류 필터 버튼 레이블 갱신 (숨긴 개수 표시). */
+    private void updateTypeFilterBtnLabel() {
+        if (typeFilterBtn == null) return;
+        if (hiddenTypes.isEmpty()) {
+            typeFilterBtn.setText("종류 ▾");
+        } else {
+            typeFilterBtn.setText("종류 (-" + hiddenTypes.size() + ") ▾");
+        }
+    }
+
+    /**
+     * 종류 체크박스 팝업.
+     * 체크 = 표시, 해제 = 숨김. LIST_FILES 같이 잡음이 많은 항목을 쉽게 끌 수 있다.
+     */
+    private void showTypeFilterPopup() {
+        if (typeFilterBtn == null) return;
+
+        javafx.stage.Popup popup = new javafx.stage.Popup();
+        popup.setAutoHide(true);
+
+        VBox box = new VBox(4);
+        // 인라인 스타일로 AtlantaFX 테마 덮어쓰기 — 흰 배경 강제
+        box.setStyle(
+            "-fx-background-color: #ffffff !important; " +
+            "-fx-background: #ffffff; " +
+            "-fx-border-color: #e2e8f0; " +
+            "-fx-border-radius: 8; -fx-background-radius: 8; " +
+            "-fx-padding: 10; " +
+            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.14), 10, 0, 0, 4);");
+        box.setMinWidth(180);
+
+        // 데이터가 아직 없으면 안내
+        if (knownTypes.isEmpty()) {
+            box.getChildren().add(new javafx.scene.control.Label("데이터 조회 후 표시됩니다."));
+        } else {
+            for (String type : knownTypes) {
+                javafx.scene.control.CheckBox cb = new javafx.scene.control.CheckBox(type);
+                cb.setSelected(!hiddenTypes.contains(type));
+                cb.setStyle("-fx-font-size: 13px; -fx-padding: 2 4;");
+                cb.selectedProperty().addListener((obs, ov, nv) -> {
+                    if (nv) hiddenTypes.remove(type);
+                    else    hiddenTypes.add(type);
+                    updateTypeFilterBtnLabel();
+                    applyTableView();
+                });
+                box.getChildren().add(cb);
+            }
+        }
+
+        popup.getContent().add(box);
+        javafx.geometry.Bounds b = typeFilterBtn.localToScreen(typeFilterBtn.getBoundsInLocal());
+        popup.show(typeFilterBtn, b.getMinX(), b.getMaxY() + 2);
+    }
+
 
     private Comparator<Map<String, Object>> commandComparator() {
         String sort = sortCombo == null || sortCombo.getValue() == null ? "최신순" : sortCombo.getValue();
@@ -589,6 +679,22 @@ public class CommandStatusPanelController {
         return "-";
     }
 
+    /** 좁은 컬럼에서 잘리는 텍스트를 마우스 호버 시 전체 값 툴팁으로 노출한다. */
+    private void applyTooltipCellFactory(TableColumn<Map<String, Object>, String> column) {
+        column.setCellFactory(col -> new TableCell<>() {
+            @Override protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null || item.isBlank()) {
+                    setText(null);
+                    setTooltip(null);
+                } else {
+                    setText(item);
+                    setTooltip(new Tooltip(item));
+                }
+            }
+        });
+    }
+
     private String extractRunMode(Map<String, Object> row) {
         String type = asText(row, "commandType", "type");
         if (!"RUN_PS1".equalsIgnoreCase(type)) {
@@ -689,47 +795,128 @@ public class CommandStatusPanelController {
         return "다운로드 폴더";
     }
 
-    private void showCommandDetail(Map<String, Object> row) {
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("명령 결과 상세");
-        dialog.setHeaderText(asText(row, "commandType", "type") + " - " + asText(row, "pcName", "macAddress"));
-        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+    // ─────────────────────────────────────────────────────────────────────
+    // 우측 상세 패널 (팝업 대체)
+    // ─────────────────────────────────────────────────────────────────────
 
-        try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/command-detail-dialog-content.fxml"));
-            Node content = loader.load();
-            var ns = loader.getNamespace();
+    /** 명령 고유 키 — 폴링 갱신 후에도 같은 명령을 추적. id 우선, 없으면 mac+생성시각. */
+    private String keyOf(Map<String, Object> row) {
+        String id = asText(row, "id", "commandId");
+        if (!id.isBlank()) return id;
+        return asText(row, "macAddress") + "|" + asText(row, "createdAt");
+    }
 
-            setLabelText(ns, "statusValue", extractDetailedStatus(row));
-            setLabelText(ns, "runModeValue", extractRunMode(row));
-            setLabelText(ns, "transferTargetValue", extractTransferDisplay(row));
-            setLabelText(ns, "destinationValue", extractDestinationDisplay(row));
-            setLabelText(ns, "exitCodeValue", asText(row, "exitCode"));
-            setLabelText(ns, "verificationValue", verificationLabel(row));
-            setLabelText(ns, "groupNameValue", extractGroupName(row));
-            setLabelText(ns, "pcNameValue", asText(row, "pcName"));
-            setLabelText(ns, "ipAddressValue", asText(row, "ipAddress"));
-            String detailUrl = resolveDetailUrl(row);
-            setLabelText(ns, "scriptUrlValue", detailUrl);
-            setLabelText(ns, "payloadValue", prettyPayload(asText(row, "payloadJson")));
-
-            setAreaText(ns, "stdoutArea", asText(row, "stdout"));
-            setAreaText(ns, "stderrArea", asText(row, "stderr"));
-
-            Object dlNode = ns.get("downloadButton");
-            if (dlNode instanceof Button downloadButton) {
-                String downloadUrl = resolveCollectDownloadUrl(row);
-                boolean enabled = downloadUrl != null && !downloadUrl.isBlank();
-                downloadButton.setDisable(!enabled);
-                downloadButton.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
-            }
-
-            dialog.getDialogPane().setContent(content);
-        } catch (Exception e) {
-            log.warn("Failed to load command detail dialog", e);
-            dialog.getDialogPane().setContent(new Label("다이얼로그 로드 실패: " + e.getMessage()));
+    /** 메타 행(키-값)을 1회 생성하고 값 라벨을 metaValueLabels에 보관. */
+    private void buildDetailMeta() {
+        if (detailMetaBox == null) return;
+        String[] keys = {"강의실", "PC", "IP", "실행방식", "전송대상", "대상경로", "종료코드", "검증상태", "스크립트"};
+        for (String key : keys) {
+            Label k = new Label(key);
+            k.getStyleClass().add("meta-key");
+            Label v = new Label("-");
+            v.getStyleClass().add("meta-value");
+            v.setWrapText(true);
+            metaValueLabels.put(key, v);
+            VBox row = new VBox(2, k, v);
+            detailMetaBox.getChildren().add(row);
         }
-        dialog.showAndWait();
+    }
+
+    /** 행 클릭/버튼 → 우측 패널에 표시하고 슬라이드 인. */
+    private void showDetailInPanel(Map<String, Object> row) {
+        if (row == null) return;
+        selectedKey = keyOf(row);
+        renderDetail(row);
+        slideIn();
+    }
+
+    /** 패널 내용 갱신 (선택 시 + 폴링 시 호출). */
+    private void renderDetail(Map<String, Object> row) {
+        detailTitleLabel.setText(asText(row, "commandType", "type") + " · " + asText(row, "pcName", "macAddress"));
+        detailStatusLine.setText(extractDetailedStatus(row));
+        renderProgressSteps(row);
+
+        metaValueLabels.get("강의실").setText(orDash(extractGroupName(row)));
+        metaValueLabels.get("PC").setText(orDash(asText(row, "pcName")));
+        metaValueLabels.get("IP").setText(orDash(asText(row, "ipAddress")));
+        metaValueLabels.get("실행방식").setText(orDash(extractRunMode(row)));
+        metaValueLabels.get("전송대상").setText(orDash(extractTransferDisplay(row)));
+        metaValueLabels.get("대상경로").setText(orDash(extractDestinationDisplay(row)));
+        metaValueLabels.get("종료코드").setText(orDash(asText(row, "exitCode")));
+        metaValueLabels.get("검증상태").setText(orDash(verificationLabel(row)));
+        metaValueLabels.get("스크립트").setText(orDash(resolveDetailUrl(row)));
+
+        detailStdout.setText(orDash(asText(row, "stdout")));
+        detailStderr.setText(orDash(asText(row, "stderr")));
+
+        String downloadUrl = resolveCollectDownloadUrl(row);
+        boolean canDownload = downloadUrl != null && !downloadUrl.isBlank();
+        detailDownloadBtn.setVisible(canDownload);
+        detailDownloadBtn.setManaged(canDownload);
+        if (canDownload) {
+            detailDownloadBtn.setOnAction(e -> handleDownloadFromDetail(downloadUrl, suggestDownloadFilename(row)));
+        }
+    }
+
+    /** 진행 단계 스텝퍼 렌더: 대기중 → 전송됨 → 실행중 → 완료. */
+    private void renderProgressSteps(Map<String, Object> row) {
+        progressStepsBox.getChildren().clear();
+        CommandStatus status = resolveCommandStatus(row);
+        boolean failed = status == CommandStatus.FAILED;
+        int current = switch (status) {
+            case QUEUED -> 0;
+            case DELIVERED -> 1;
+            case ACKED -> 2;
+            case COMPLETED -> 3;
+            case FAILED -> 3;   // 실패는 마지막 단계에 빨강으로 표시
+            default -> 0;
+        };
+        for (int i = 0; i < STEP_LABELS.length; i++) {
+            Label step = new Label(STEP_LABELS[i]);
+            step.getStyleClass().add("cmd-step");
+            if (failed && i == current) step.getStyleClass().add("cmd-step-failed");
+            else if (i < current) step.getStyleClass().add("cmd-step-done");
+            else if (i == current) step.getStyleClass().add("cmd-step-active");
+            else step.getStyleClass().add("cmd-step-pending");
+            progressStepsBox.getChildren().add(step);
+
+            if (i < STEP_LABELS.length - 1) {
+                Region connector = new Region();
+                connector.getStyleClass().add("cmd-step-connector");
+                if (i < current) connector.getStyleClass().add("cmd-step-connector-done");
+                HBox.setHgrow(connector, Priority.ALWAYS);
+                progressStepsBox.getChildren().add(connector);
+            }
+        }
+    }
+
+    private static String orDash(String s) {
+        return (s == null || s.isBlank()) ? "-" : s;
+    }
+
+    private void slideIn() {
+        if (panelAnim != null) panelAnim.stop();
+        detailPanel.setVisible(true);
+        detailPanel.setManaged(true);
+        panelAnim = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
+                javafx.util.Duration.millis(220),
+                new javafx.animation.KeyValue(detailPanel.prefWidthProperty(), DETAIL_PANEL_WIDTH),
+                new javafx.animation.KeyValue(detailPanel.minWidthProperty(), DETAIL_PANEL_WIDTH)));
+        panelAnim.play();
+    }
+
+    private void hideDetail() {
+        if (panelAnim != null) panelAnim.stop();
+        selectedKey = null;
+        panelAnim = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
+                javafx.util.Duration.millis(180),
+                new javafx.animation.KeyValue(detailPanel.prefWidthProperty(), 0),
+                new javafx.animation.KeyValue(detailPanel.minWidthProperty(), 0)));
+        panelAnim.setOnFinished(e -> {
+            detailPanel.setVisible(false);
+            detailPanel.setManaged(false);
+        });
+        panelAnim.play();
     }
 
     private String resolveDetailUrl(Map<String, Object> row) {
@@ -838,31 +1025,6 @@ public class CommandStatusPanelController {
 
     private String normalizeDownloadRequestPath(String downloadUrl) {
         return ApiUrlUtil.normalizeDownloadPath(downloadUrl);
-    }
-
-    private void setLabelText(Map<String, Object> ns, String fxId, String value) {
-        Object node = ns.get(fxId);
-        if (node instanceof Label label) {
-            label.setText((value == null || value.isBlank()) ? "-" : value);
-        }
-    }
-
-    private void setAreaText(Map<String, Object> ns, String fxId, String value) {
-        Object node = ns.get(fxId);
-        if (node instanceof TextArea area) {
-            area.setText((value == null || value.isBlank()) ? "-" : value);
-        }
-    }
-
-    private String prettyPayload(String payloadJson) {
-        if (payloadJson == null || payloadJson.isBlank()) {
-            return "-";
-        }
-        try {
-            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectMapper.readTree(payloadJson));
-        } catch (Exception e) {
-            return payloadJson;
-        }
     }
 
     private String verificationLabel(Map<String, Object> row) {

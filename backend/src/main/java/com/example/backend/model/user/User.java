@@ -48,11 +48,28 @@ public class User {
     private String email;
 
     /**
-     * 모든 필드를 포함하는 생성자.
+     * 신규 사용자 생성자.
      */
     public User(String username, String password, String email) {
         this.username = username;
         this.password = password;
         this.email = email;
+    }
+
+    // ── 도메인 메서드 ──────────────────────────────────────────────────────────
+
+    /** 비밀번호를 변경한다. (이미 인코딩된 값을 전달해야 한다) */
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
+    /** 이메일을 변경한다. */
+    public void changeEmail(String email) {
+        this.email = email;
+    }
+
+    /** 사용자명을 변경한다. */
+    public void changeUsername(String username) {
+        this.username = username;
     }
 }

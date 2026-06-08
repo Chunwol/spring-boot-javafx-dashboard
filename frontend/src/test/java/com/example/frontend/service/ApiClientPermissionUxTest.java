@@ -37,6 +37,14 @@ class ApiClientPermissionUxTest {
     }
 
     @Test
+    void loginUnauthorizedMessageCanUseServerMessage() {
+        Throwable failure = new CompletionException(new ApiClientException(401,
+                "아이디 또는 비밀번호가 올바르지 않습니다.", true));
+        assertEquals("아이디 또는 비밀번호가 올바르지 않습니다.",
+                ApiClient.userFacingErrorMessage(failure, "fallback"));
+    }
+
+    @Test
     void viewerWriteDeniedMessageContainsAction() {
         String message = ApiClient.viewerWriteDeniedMessage("원격 명령 실행");
         assertTrue(message.contains("조회 전용"));

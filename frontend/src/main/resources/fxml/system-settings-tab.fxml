@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<!-- 루트: tab-content (외부 배경 + 16px 여백) -->
+<VBox xmlns:fx="http://javafx.com/fxml"
+      styleClass="tab-content"
+      maxWidth="1.7976931348623157E308"
+      maxHeight="1.7976931348623157E308">
+    <children>
+
+        <ScrollPane fitToWidth="true" styleClass="scroll-transparent" VBox.vgrow="ALWAYS">
+            <content>
+                <VBox spacing="16" maxWidth="1.7976931348623157E308">
+
+                    <!-- ① 알림 표시 필터 -->
+                    <VBox styleClass="tab-main" spacing="12"
+                          maxWidth="1.7976931348623157E308">
+                        <padding><Insets top="20" right="24" bottom="20" left="24"/></padding>
+                        <children>
+                            <HBox alignment="CENTER_LEFT" spacing="10">
+                                <children>
+                                    <Label text="알림 표시 필터" styleClass="tab-title"/>
+                                    <Region HBox.hgrow="ALWAYS"/>
+                                    <Label fx:id="alertSavedLabel" text="" styleClass="mgmt-hint-label"/>
+                                    <Button fx:id="saveAlertBtn" text="저장" styleClass="btn-primary"/>
+                                </children>
+                            </HBox>
+                            <Label text="상단 알림 탭에 표시할 알림 종류를 선택합니다. 체크 해제하면 해당 유형 알림이 숨겨집니다."
+                                   styleClass="mgmt-hint-label" wrapText="true"/>
+
+                            <VBox spacing="10">
+                                <children>
+                                    <CheckBox fx:id="filterPcOffline"
+                                              text="PC 오프라인 — PC가 응답 없을 때 (매분 발생, 노이즈 많음)"/>
+                                    <CheckBox fx:id="filterTrafficHigh"
+                                              text="네트워크 과부하 — 트래픽 임계치 초과 시"/>
+                                    <CheckBox fx:id="filterScmate"
+                                              text="SCMATE 감지 — 에이전트 설치 직후 PC 연결 끊김 (스냅샷 복원 의심)"/>
+                                    <CheckBox fx:id="filterMetricsOnline"
+                                              text="온라인 비율 저하 CRITICAL — 전체 PC의 온라인 비율이 임계치 미만으로 떨어질 때"/>
+                                    <CheckBox fx:id="filterMetricsPerf"
+                                              text="성능 메트릭 — 명령 실패율·ACK 지연·API 에러율 급증 시"/>
+                                    <CheckBox fx:id="filterOtaUpdate"
+                                              text="에이전트 업데이트 — OTA 업데이트 결과 알림"/>
+                                </children>
+                            </VBox>
+                        </children>
+                    </VBox>
+
+                    <!-- ② 관리자 비밀번호 변경 -->
+                    <VBox styleClass="tab-main" spacing="12"
+                          maxWidth="1.7976931348623157E308">
+                        <padding><Insets top="20" right="24" bottom="20" left="24"/></padding>
+                        <children>
+                            <Label text="관리자 비밀번호 변경" styleClass="tab-title"/>
+                            <Label text="현재 비밀번호를 먼저 입력한 뒤 새 비밀번호를 설정하세요."
+                                   styleClass="mgmt-hint-label" wrapText="true"/>
+
+                            <VBox spacing="8" maxWidth="360">
+                                <children>
+                                    <Label text="현재 비밀번호" styleClass="meta-key"/>
+                                    <PasswordField fx:id="currentPwField" promptText="현재 비밀번호"/>
+                                    <Label text="새 비밀번호" styleClass="meta-key"/>
+                                    <PasswordField fx:id="newPwField" promptText="새 비밀번호 (8자 이상)"/>
+                                    <Label text="새 비밀번호 확인" styleClass="meta-key"/>
+                                    <PasswordField fx:id="confirmPwField" promptText="새 비밀번호 재입력"/>
+                                </children>
+                            </VBox>
+
+                            <HBox alignment="CENTER_LEFT" spacing="10">
+                                <children>
+                                    <Button fx:id="changePwBtn" text="비밀번호 변경" styleClass="btn-primary"/>
+                                    <Label fx:id="pwMessageLabel" text="" wrapText="true"/>
+                                </children>
+                            </HBox>
+                        </children>
+                    </VBox>
+
+                    <!-- ③ 사용자 계정 관리 -->
+                    <VBox styleClass="tab-main" spacing="12"
+                          maxWidth="1.7976931348623157E308" VBox.vgrow="ALWAYS">
+                        <padding><Insets top="20" right="24" bottom="20" left="24"/></padding>
+                        <children>
+                            <HBox alignment="CENTER_LEFT" spacing="10">
+                                <children>
+                                    <Label text="사용자 계정 관리" styleClass="tab-title"/>
+                                    <Region HBox.hgrow="ALWAYS"/>
+                                    <Label fx:id="userCountLabel" text="" styleClass="detail-updated-label"/>
+                                    <Button fx:id="refreshUserBtn" text="새로고침" styleClass="btn-neutral"/>
+                                </children>
+                            </HBox>
+                            <Label text="ADMIN은 모든 기능, VIEWER는 조회 전용입니다."
+                                   styleClass="mgmt-hint-label" wrapText="true"/>
+
+                            <!-- 신규 계정 추가 폼 -->
+                            <HBox spacing="8" alignment="CENTER_LEFT">
+                                <children>
+                                    <TextField fx:id="newUsernameField" promptText="사용자명" prefWidth="130"/>
+                                    <TextField fx:id="newEmailField"    promptText="이메일 (선택)" prefWidth="160"/>
+                                    <PasswordField fx:id="newUserPwField" promptText="초기 비밀번호" prefWidth="140"/>
+                                    <ComboBox fx:id="roleCombo" promptText="역할" prefWidth="100"/>
+                                    <Button fx:id="addUserBtn" text="추가" styleClass="btn-primary"/>
+                                    <Label fx:id="addUserMsgLabel" text="" styleClass="mgmt-hint-label"/>
+                                </children>
+                            </HBox>
+
+                            <Separator/>
+
+                            <!-- 계정 목록 -->
+                            <TableView fx:id="userTable" styleClass="app-table" VBox.vgrow="ALWAYS">
+                                <columnResizePolicy>
+                                    <TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN"/>
+                                </columnResizePolicy>
+                                <placeholder><Label text="등록된 사용자가 없습니다."/></placeholder>
+                                <columns>
+                                    <TableColumn fx:id="colUsername" text="사용자명" prefWidth="160"/>
+                                    <TableColumn fx:id="colEmail"    text="이메일"   prefWidth="200"/>
+                                    <TableColumn fx:id="colAction"   text="관리"     prefWidth="80"
+                                                 styleClass="table-col-center"/>
+                                </columns>
+                            </TableView>
+                        </children>
+                    </VBox>
+
+                </VBox>
+            </content>
+        </ScrollPane>
+
+    </children>
+</VBox>

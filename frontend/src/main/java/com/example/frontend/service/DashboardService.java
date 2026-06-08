@@ -200,4 +200,32 @@ public class DashboardService {
             log.warn("Invalid panel position payload", e);
         }
     }
+
+    /**
+     * 여러 패널의 위치/크기/Z-순서를 1번의 API 호출로 일괄 업데이트.
+     * 정렬·분배·맨앞/맨뒤 등 다중 작업 시 사용.
+     *
+     * @param items 각 항목은 panelId(필수), x/y/width/height/zIndex/visible(선택) 키를 포함
+     */
+    public void updatePanelsBatchAsync(Long dashboardId, java.util.List<Map<String, Object>> items, Runnable onDone) {
+        try {
+            if (items == null || items.isEmpty()) {
+                if (onDone != null) Platform.runLater(onDone);
+                return;
+            }
+            Map<String, Object> body = new HashMap<>();
+            body.put("items", items);
+            apiClient.putJson("/dashboards/" + dashboardId + "/panels/batch-position", body)
+                    .thenRun(() -> { if (onDone != null) Platform.runLater(onDone); })
+                    .exceptionally(ex -> {
+                        log.warn("Failed batch-update panels (dashboardId={}, count={})",
+                                dashboardId, items.size(), ex);
+                        if (onDone != null) Platform.runLater(onDone);
+                        return null;
+                    });
+        } catch (Exception e) {
+            log.warn("Invalid batch panel payload", e);
+            if (onDone != null) Platform.runLater(onDone);
+        }
+    }
 }

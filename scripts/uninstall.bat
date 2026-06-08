@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 :: ============================================================
 :: PC 관제 에이전트 제거 스크립트 (완전 원복)
 :: - 작업 스케줄러 작업 제거
@@ -53,7 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Start-Sleep -Seconds 2;" ^
     "try { Unregister-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
     "try { Unregister-ScheduledTask -TaskName 'PCAgent' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
-    "Write-Host '[OK] 작업 스케줄러 작업 제거 완료'"
+    "Write-Host '[OK] Scheduled task removed'"
 
 :: ══════════════════════════════════════════════════════════════
 :: 2. 구 버전 Windows 서비스 제거
@@ -75,32 +76,37 @@ if %errorLevel% equ 0 (
 echo [단계 3/7] 실행 중인 프로세스 종료 중...
 
 :: 3-a. 워치독(PowerShell) 프로세스 종료
+:: 정확한 PCAgent 설치 경로의 워치독 스크립트만 매치 (다른 .ps1 무관 보호)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*agent-watchdog*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };" ^
-    "Write-Host '[OK] 워치독 프로세스 종료 요청 완료'"
+    "Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe'\" | Where-Object { $_.CommandLine -like '*Program Files\PCAgent\agent-watchdog.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };" ^
+    "Write-Host '[OK] Watchdog process stop requested'"
 
 timeout /T 3 /NOBREAK >nul
 
 :: 3-b. 에이전트(java / agent.exe) 프로세스 종료
+:: java.exe는 정확한 agent.jar 경로 매치, agent.exe는 정확한 ExecutablePath 매치
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'java.exe' -or $_.Name -eq 'agent.exe') -and $_.CommandLine -like '*PCAgent*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };" ^
-    "Write-Host '[OK] 에이전트 프로세스 종료 요청 완료'"
+    "Get-CimInstance Win32_Process -Filter \"Name = 'java.exe'\" | Where-Object { $_.CommandLine -like '*Program Files\PCAgent\agent.jar*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };" ^
+    "Get-CimInstance Win32_Process -Filter \"Name = 'agent.exe'\" | Where-Object { $_.ExecutablePath -like '*Program Files\PCAgent\agent.exe*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };" ^
+    "Write-Host '[OK] Agent process stop requested'"
 
-:: 3-c. 최대 15초 대기 후 잔존 프로세스 확인
+:: 3-c. 최대 15초 대기 후 잔존 프로세스 확인 (PCAgent 설치 경로 기준)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$deadline = (Get-Date).AddSeconds(15);" ^
+    "$pat = '*Program Files\PCAgent*';" ^
     "while ((Get-Date) -lt $deadline) {" ^
-    "  $alive = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*PCAgent*' };" ^
+    "  $alive = Get-CimInstance Win32_Process -Filter \"Name = 'java.exe' OR Name = 'agent.exe' OR Name = 'powershell.exe'\" | Where-Object { $_.CommandLine -like $pat -or $_.ExecutablePath -like $pat };" ^
     "  if (-not $alive) { break }; Start-Sleep -Seconds 1" ^
     "};" ^
-    "$remain = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*PCAgent*' };" ^
-    "if ($remain) { Write-Host '[경고] 잔존 프로세스 있음 — 수동 종료 필요:'; $remain | Select-Object ProcessId, Name, CommandLine | Format-List } else { Write-Host '[OK] 모든 에이전트 프로세스 종료됨' }"
+    "$remain = Get-CimInstance Win32_Process -Filter \"Name = 'java.exe' OR Name = 'agent.exe' OR Name = 'powershell.exe'\" | Where-Object { $_.CommandLine -like $pat -or $_.ExecutablePath -like $pat };" ^
+    "if ($remain) { Write-Host '[WARN] Remaining processes found - manual kill required:'; $remain | Select-Object ProcessId, Name, CommandLine | Format-List } else { Write-Host '[OK] All agent processes terminated' }"
 
 :: ══════════════════════════════════════════════════════════════
 :: 4. 방화벽 규칙 제거
 :: ══════════════════════════════════════════════════════════════
 echo [단계 4/7] 방화벽 규칙 제거 중...
 netsh advfirewall firewall delete rule name="PCAgent Outbound" >nul 2>&1
+netsh advfirewall firewall delete rule name="PCAgent Update Cache" >nul 2>&1
 echo [OK] 방화벽 규칙 제거 완료 (없으면 무시)
 
 :: ══════════════════════════════════════════════════════════════
@@ -182,7 +188,7 @@ echo  제거된 항목:
 echo    - 작업 스케줄러: \PCAgent\Main
 echo    - 설치 폴더    : %INSTALL_DIR%
 echo    - AppData 폴더 : %APPDATA%\PCAgent
-echo    - 방화벽 규칙  : PCAgent Outbound
+echo    - 방화벽 규칙  : PCAgent Outbound, PCAgent Update Cache
 echo    - 전원 정책    : 절전/최대절전/버튼 동작 원복
 echo.
 echo  ※ 전원 정책을 설치 전 상태로 정확히 되돌리려면

@@ -43,6 +43,11 @@ public class UpdateCacheServer {
         this.port = port;
     }
 
+    /**
+     * OTA 업데이트 명령을 받았을 때 on-demand로 시작한다.
+     * 평소엔 서버를 띄우지 않아 jdk.httpserver Dispatcher 스레드의
+     * 1초 주기 wakeup으로 인한 CPU 스파이크가 발생하지 않는다.
+     */
     public synchronized void start() throws IOException {
         if (started) {
             return;
@@ -162,20 +167,88 @@ public class UpdateCacheServer {
 
                 long size = Files.size(entry.filePath);
                 exchange.getResponseHeaders().add("Content-Type", "application/octet-stream");
+                exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
                 exchange.getResponseHeaders().add("X-Script-SHA256", entry.sha256);
-                exchange.sendResponseHeaders(200, size);
-                try (InputStream in = Files.newInputStream(entry.filePath);
-                     OutputStream out = exchange.getResponseBody()) {
-                    byte[] buffer = new byte[64 * 1024];
-                    int read;
-                    while ((read = in.read(buffer)) > 0) {
-                        out.write(buffer, 0, read);
+
+                RangeSpec range = parseRange(exchange.getRequestHeaders().getFirst("Range"), size);
+                if (range == null) {
+                    exchange.sendResponseHeaders(200, size);
+                    try (InputStream in = Files.newInputStream(entry.filePath);
+                         OutputStream out = exchange.getResponseBody()) {
+                        copy(in, out, size);
+                    }
+                } else {
+                    exchange.getResponseHeaders().add("Content-Range",
+                            "bytes " + range.start + "-" + range.end + "/" + size);
+                    exchange.sendResponseHeaders(206, range.length());
+                    try (InputStream in = Files.newInputStream(entry.filePath);
+                         OutputStream out = exchange.getResponseBody()) {
+                        in.skipNBytes(range.start);
+                        copy(in, out, range.length());
                     }
                 }
+            } catch (InvalidRangeException ex) {
+                exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
+                exchange.getResponseHeaders().add("Content-Range", "bytes */" + Math.max(0L, ex.fileSize));
+                exchange.sendResponseHeaders(416, -1);
             } catch (Exception ex) {
                 writePlain(exchange, 500, "internal error");
             } finally {
                 exchange.close();
+            }
+        }
+
+        private RangeSpec parseRange(String rangeHeader, long fileSize) {
+            if (rangeHeader == null || rangeHeader.isBlank()) {
+                return null;
+            }
+            if (fileSize <= 0) {
+                throw new InvalidRangeException(fileSize);
+            }
+            String value = rangeHeader.trim();
+            if (!value.startsWith("bytes=") || value.contains(",")) {
+                throw new InvalidRangeException(fileSize);
+            }
+            String spec = value.substring("bytes=".length()).trim();
+            int dash = spec.indexOf('-');
+            if (dash < 0) {
+                throw new InvalidRangeException(fileSize);
+            }
+            try {
+                long start;
+                long end;
+                String startText = spec.substring(0, dash).trim();
+                String endText = spec.substring(dash + 1).trim();
+                if (startText.isEmpty()) {
+                    long suffixLength = Long.parseLong(endText);
+                    if (suffixLength <= 0) {
+                        throw new InvalidRangeException(fileSize);
+                    }
+                    start = Math.max(0L, fileSize - suffixLength);
+                    end = fileSize - 1;
+                } else {
+                    start = Long.parseLong(startText);
+                    end = endText.isEmpty() ? fileSize - 1 : Long.parseLong(endText);
+                }
+                if (start < 0 || start >= fileSize || end < start) {
+                    throw new InvalidRangeException(fileSize);
+                }
+                return new RangeSpec(start, Math.min(end, fileSize - 1));
+            } catch (NumberFormatException ex) {
+                throw new InvalidRangeException(fileSize);
+            }
+        }
+
+        private void copy(InputStream in, OutputStream out, long limit) throws IOException {
+            byte[] buffer = new byte[64 * 1024];
+            long remaining = limit;
+            while (remaining > 0) {
+                int read = in.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                if (read < 0) {
+                    break;
+                }
+                out.write(buffer, 0, read);
+                remaining -= read;
             }
         }
 
@@ -186,6 +259,28 @@ public class UpdateCacheServer {
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(body);
             }
+        }
+    }
+
+    private static final class RangeSpec {
+        private final long start;
+        private final long end;
+
+        private RangeSpec(long start, long end) {
+            this.start = start;
+            this.end = end;
+        }
+
+        private long length() {
+            return end - start + 1;
+        }
+    }
+
+    private static final class InvalidRangeException extends RuntimeException {
+        private final long fileSize;
+
+        private InvalidRangeException(long fileSize) {
+            this.fileSize = fileSize;
         }
     }
 

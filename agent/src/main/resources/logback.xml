@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- JVM 옵션 -Dpcagent.log.dir 으로 주입. 기본값: C:\ProgramData\PCAgent\logs -->
+    <property name="LOG_DIR" value="${pcagent.log.dir:-C:/ProgramData/PCAgent/logs}" />
+
+    <!-- ── 콘솔 (Task Scheduler 실행 시에는 출력 무시됨, 디버그 편의용) ── -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%-5level] %logger{20} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ── 파일 (일별 rolling, 최대 10MB, 30일 보관) ─────────────────── -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/agent.log</file>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- 날짜별 아카이브: agent.2026-06-05.0.log.gz -->
+            <fileNamePattern>${LOG_DIR}/agent.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <!-- 30일치 보관 -->
+            <maxHistory>30</maxHistory>
+            <!-- 전체 로그 용량 상한 (1GB) -->
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5level] %logger{30} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ── 루트 로거 ──────────────────────────────────────────────────── -->
+    <!-- INFO 이상 파일 기록. 콘솔은 WARN 이상만 (너무 시끄럽지 않게). -->
+    <root level="INFO">
+        <appender-ref ref="FILE" />
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+    <!-- 불필요하게 verbose한 라이브러리 레벨 억제 -->
+    <logger name="okhttp3" level="WARN" />
+    <logger name="okio" level="WARN" />
+    <logger name="com.sun" level="WARN" />
+    <logger name="oshi" level="WARN" />
+
+    <!-- 에이전트 핵심 패키지는 DEBUG 허용 (파일에만, 콘솔 제외) -->
+    <logger name="com.example.agent" level="DEBUG" additivity="false">
+        <appender-ref ref="FILE" />
+    </logger>
+
+</configuration>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.VBox?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<VBox alignment="CENTER" spacing="12" styleClass="placeholder-tab"
+      xmlns:fx="http://javafx.com/fxml">
+    <padding><Insets top="40" right="40" bottom="40" left="40" /></padding>
+    <children>
+        <FontIcon iconLiteral="mdi2c-clock-time-three-outline" iconSize="48" />
+        <Label text="화면 준비 중" styleClass="placeholder-title" />
+        <Label text="이 화면은 새 레이아웃에 맞게 마이그레이션 예정입니다." styleClass="placeholder-text" />
+    </children>
+</VBox>

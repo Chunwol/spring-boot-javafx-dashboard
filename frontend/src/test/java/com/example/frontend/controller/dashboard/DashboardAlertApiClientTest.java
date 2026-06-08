@@ -45,6 +45,32 @@ class DashboardAlertApiClientTest {
     }
 
     @Test
+    void fetchAlertSnapshot_shouldHideConfiguredTypesEvenWhenCritical() {
+        FakeApiClient fakeApiClient = new FakeApiClient();
+        DashboardAlertItem hiddenCritical = new DashboardAlertItem();
+        hiddenCritical.setId(1L);
+        hiddenCritical.setAlertType("METRICS_ONLINE_RATIO_DROP");
+        hiddenCritical.setSeverity("CRITICAL");
+
+        DashboardAlertItem visibleWarning = new DashboardAlertItem();
+        visibleWarning.setId(2L);
+        visibleWarning.setAlertType("PC_OFFLINE");
+        visibleWarning.setSeverity("WARNING");
+
+        fakeApiClient.getJsonPayload = List.of(hiddenCritical, visibleWarning);
+        try {
+            DashboardAlertApiClient.setHiddenTypes(java.util.Set.of("METRICS_ONLINE_RATIO_DROP"));
+
+            DashboardAlertApiClient client = new DashboardAlertApiClient(fakeApiClient);
+            List<DashboardAlertItem> result = client.fetchAlertSnapshot(10).join();
+
+            assertThat(result).extracting(DashboardAlertItem::getId).containsExactly(2L);
+        } finally {
+            DashboardAlertApiClient.setHiddenTypes(java.util.Set.of());
+        }
+    }
+
+    @Test
     void acknowledgeAlert_shouldCallAckEndpoint() {
         FakeApiClient fakeApiClient = new FakeApiClient();
         DashboardAlertApiClient client = new DashboardAlertApiClient(fakeApiClient);
