@@ -2,6 +2,8 @@ package com.example.backend.repository.classroom;
 
 import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -29,6 +31,15 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
      */
     ClassroomTeacherDevice findFirstByIpAddress(String ipAddress);
 
+    @Query(value = """
+            SELECT *
+            FROM classroom_teacher_devices
+            WHERE btrim(COALESCE(ip_address, '')) = :ipAddress
+            ORDER BY id DESC
+            LIMIT 1
+            """, nativeQuery = true)
+    ClassroomTeacherDevice findFirstByNormalizedIpAddress(@Param("ipAddress") String ipAddress);
+
     /**
      * MAC 주소로 교사 디바이스를 조회한다.
      *
@@ -36,6 +47,15 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
      * @return 교사 디바이스
      */
     ClassroomTeacherDevice findFirstByMacAddress(String macAddress);
+
+    @Query(value = """
+            SELECT *
+            FROM classroom_teacher_devices
+            WHERE upper(replace(replace(replace(btrim(COALESCE(mac_address, '')), ':', ''), '-', ''), ' ', '')) = :normalizedMacAddress
+            ORDER BY id DESC
+            LIMIT 1
+            """, nativeQuery = true)
+    ClassroomTeacherDevice findFirstByNormalizedMacAddress(@Param("normalizedMacAddress") String normalizedMacAddress);
 
     /**
      * 특정 그룹에서 IP 주소로 교사 디바이스를 조회한다.
@@ -46,6 +66,17 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
      */
     ClassroomTeacherDevice findFirstByGroupIdAndIpAddress(Long groupId, String ipAddress);
 
+    @Query(value = """
+            SELECT *
+            FROM classroom_teacher_devices
+            WHERE group_id = :groupId
+              AND btrim(COALESCE(ip_address, '')) = :ipAddress
+            ORDER BY id DESC
+            LIMIT 1
+            """, nativeQuery = true)
+    ClassroomTeacherDevice findFirstByGroupIdAndNormalizedIpAddress(@Param("groupId") Long groupId,
+                                                                    @Param("ipAddress") String ipAddress);
+
     /**
      * 특정 그룹에서 MAC 주소로 교사 디바이스를 조회한다.
      *
@@ -54,6 +85,17 @@ public interface ClassroomTeacherDeviceRepository extends JpaRepository<Classroo
      * @return 교사 디바이스
      */
     ClassroomTeacherDevice findFirstByGroupIdAndMacAddress(Long groupId, String macAddress);
+
+    @Query(value = """
+            SELECT *
+            FROM classroom_teacher_devices
+            WHERE group_id = :groupId
+              AND upper(replace(replace(replace(btrim(COALESCE(mac_address, '')), ':', ''), '-', ''), ' ', '')) = :normalizedMacAddress
+            ORDER BY id DESC
+            LIMIT 1
+            """, nativeQuery = true)
+    ClassroomTeacherDevice findFirstByGroupIdAndNormalizedMacAddress(@Param("groupId") Long groupId,
+                                                                     @Param("normalizedMacAddress") String normalizedMacAddress);
 
     /**
      * 특정 그룹의 모든 교사 디바이스를 삭제한다.

@@ -30,6 +30,6 @@ public final class DashboardStatusSummarySupport {
                 .filter(Objects::nonNull)
                 .mapToLong(ClassroomSummaryDto::getTotalPcs)
                 .sum();
-        return "강의실 " + classroomCount + ", 온라인 " + online + "/" + total;
+        return "강의실 " + classroomCount + ", 전체/온라인 " + total + "/" + online;
     }
 }

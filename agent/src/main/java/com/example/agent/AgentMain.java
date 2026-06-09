@@ -23,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -48,6 +50,7 @@ public class AgentMain {
     private static final long INTERNET_RETRY_MS = 30_000L;
     private static final String MAIN_AUTOSTART_TASK = "PCAgent";
     private static final String LEGACY_WATCHDOG_TASK = "\\PCAgent\\Main";
+    private static final String WATCHDOG_SCRIPT_NAME = "agent-watchdog.ps1";
     private static final String LEGACY_AUTORUN_REG_KEY = "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
     private static final String LEGACY_AUTORUN_REG_VALUE = "PCAgent";
     private static AgentConfig agentConfig; // OTA, 인터넷 체크에서 사용
@@ -458,7 +461,6 @@ public class AgentMain {
         if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
             return;
         }
-        cleanupLegacyAutostartEntries();
         // ProcessHandle이 SYSTEM/session-0에서 빈 값을 반환할 수 있으므로
         // 빈 값이면 하드코딩 경로로 fallback한다.
         String launcher = ProcessHandle.current().info().command().orElse("");
@@ -471,28 +473,79 @@ public class AgentMain {
         }
         try {
             String normalizedLauncher = Path.of(launcher).toAbsolutePath().normalize().toString();
-            boolean registered = registerAutostartWithPowerShell(normalizedLauncher)
+            String watchdogScript = resolveWatchdogScriptPath(normalizedLauncher);
+            boolean registered = registerAutostartWithPowerShell(normalizedLauncher, watchdogScript)
                     || registerAutostartWithSchtasks(normalizedLauncher);
             if (registered) {
-                log.info("자동 시작 작업({}) 확인/등록 완료: {}", MAIN_AUTOSTART_TASK, normalizedLauncher);
+                cleanupLegacyAutostartEntries();
+                if (watchdogScript != null) {
+                    log.info("자동 시작 작업({}) 확인/등록 완료 (watchdog): task={}, launcher={}",
+                            MAIN_AUTOSTART_TASK, watchdogScript, normalizedLauncher);
+                } else {
+                    log.info("자동 시작 작업({}) 확인/등록 완료 (direct): {}",
+                            MAIN_AUTOSTART_TASK, normalizedLauncher);
+                }
+                logAutostartTaskSummary();
                 return;
             }
-            log.warn("자동 시작 등록 실패 (관리자 권한 필요). 관리자 권한으로 1회 실행하면 등록됩니다.");
+            if (isSchtaskRegistered(MAIN_AUTOSTART_TASK)) {
+                log.warn("자동 시작 재등록 실패 - 기존 작업 유지: {}", MAIN_AUTOSTART_TASK);
+                logAutostartTaskSummary();
+                return;
+            }
+            log.warn("자동 시작 등록 실패 (관리자 권한 필요). 관리자 권한으로 1회 실행하면 등록됩니다. task={}", MAIN_AUTOSTART_TASK);
         } catch (Exception e) {
             log.warn("자동 시작 등록 중 오류 (무시): {}", e.getMessage());
         }
     }
 
-    private static boolean registerAutostartWithPowerShell(String launcher) {
+    private static String resolveWatchdogScriptPath(String launcher) {
+        try {
+            Path launcherPath = Path.of(launcher).toAbsolutePath().normalize();
+            Path installDir = launcherPath.getParent();
+            if (installDir == null) {
+                return null;
+            }
+            Path[] candidates = new Path[] {
+                    installDir.resolve(WATCHDOG_SCRIPT_NAME),
+                    installDir.resolve("app").resolve(WATCHDOG_SCRIPT_NAME)
+            };
+            for (Path candidate : candidates) {
+                if (Files.exists(candidate)) {
+                    return candidate.toAbsolutePath().normalize().toString();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("워치독 스크립트 경로 탐색 실패: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private static boolean registerAutostartWithPowerShell(String launcher, String watchdogScript) {
         Path workDir = Path.of(launcher).getParent();
         String workDirValue = workDir == null ? "" : workDir.toString();
-        String script = "$action = New-ScheduledTaskAction"
-                + " -Execute " + psSingleQuote(launcher)
-                + (workDirValue.isBlank() ? "" : " -WorkingDirectory " + psSingleQuote(workDirValue))
-                + "; $trigger = New-ScheduledTaskTrigger -AtStartup"
+        String script;
+        if (watchdogScript != null && !watchdogScript.isBlank()) {
+            String psArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass"
+                    + " -File \"" + watchdogScript + "\""
+                    + (workDirValue.isBlank() ? "" : " -InstallDir \"" + workDirValue + "\"")
+                    + " -LauncherPath \"" + launcher + "\"";
+            script = "$action = New-ScheduledTaskAction"
+                    + " -Execute 'powershell.exe'"
+                    + " -Argument " + psSingleQuote(psArgs)
+                    + (workDirValue.isBlank() ? "" : " -WorkingDirectory " + psSingleQuote(workDirValue));
+        } else {
+            script = "$action = New-ScheduledTaskAction"
+                    + " -Execute " + psSingleQuote(launcher)
+                    + (workDirValue.isBlank() ? "" : " -WorkingDirectory " + psSingleQuote(workDirValue));
+        }
+        script += "; $trigger = New-ScheduledTaskTrigger -AtStartup"
+                + "; $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)"
+                + " -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)"
+                + " -StartWhenAvailable"
                 + "; $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest"
                 + "; Register-ScheduledTask -TaskName " + psSingleQuote(MAIN_AUTOSTART_TASK)
-                + " -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null";
+                + " -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null";
         return runCommand("PowerShell 자동 시작 작업 등록",
                 new String[]{"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
                 15);
@@ -534,6 +587,53 @@ public class AgentMain {
         } catch (Exception e) {
             log.debug("{} 실패: {}", description, e.getMessage());
             return false;
+        }
+    }
+
+    private static void logAutostartTaskSummary() {
+        List<String> command = new ArrayList<>();
+        command.add("schtasks");
+        command.add("/Query");
+        command.add("/TN");
+        command.add(MAIN_AUTOSTART_TASK);
+        command.add("/FO");
+        command.add("LIST");
+        command.add("/V");
+
+        String output = runCommandAndCapture(command.toArray(new String[0]), 10);
+        if (output == null || output.isBlank()) {
+            return;
+        }
+        for (String line : output.split("\\R")) {
+            String trimmed = line.trim();
+            String lowered = trimmed.toLowerCase();
+            if (lowered.startsWith("task to run:")
+                    || lowered.startsWith("run as user:")
+                    || lowered.startsWith("last run time:")
+                    || lowered.startsWith("last result:")
+                    || lowered.startsWith("다음 실행 시간:")
+                    || lowered.startsWith("실행 사용자:")
+                    || lowered.startsWith("작업 실행:")
+                    || lowered.startsWith("마지막 실행 시간:")
+                    || lowered.startsWith("마지막 결과:")) {
+                log.info("자동 시작 작업 정보: {}", trimmed);
+            }
+        }
+    }
+
+    private static String runCommandAndCapture(String[] command, int timeoutSec) {
+        try {
+            Process proc = new ProcessBuilder(command).redirectErrorStream(true).start();
+            boolean finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS);
+            if (!finished) {
+                proc.destroyForcibly();
+                return null;
+            }
+            byte[] bytes = proc.getInputStream().readAllBytes();
+            return new String(bytes, java.nio.charset.Charset.defaultCharset());
+        } catch (Exception e) {
+            log.debug("명령 출력 캡처 실패: {}", e.getMessage());
+            return null;
         }
     }
 

@@ -11,6 +11,7 @@ import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.classroom.ClassroomResolutionService;
 import com.example.backend.service.classroom.ClassroomValidationService;
+import com.example.backend.util.DeviceAddressUtil;
 import com.example.backend.util.IpRangeUtil;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -156,6 +157,7 @@ public class IpRangeService {
      */
     @Transactional
     public ClassroomTeacherDevice saveTeacherDevice(ClassroomTeacherDevice device) {
+        normalizeTeacherDevice(device);
         ClassroomTeacherDevice saved = teacherDeviceRepository.save(device);
         classroomResolutionService.evictIpRangeCache();
         refreshPcClassificationForTeacherDevice(saved);
@@ -193,14 +195,15 @@ public class IpRangeService {
             return;
         }
         Optional<PcMaster> pc = Optional.empty();
-        if (device.getIpAddress() != null && !device.getIpAddress().isBlank()) {
-            pc = pcMasterRepository.findByIpAddress(device.getIpAddress().trim());
+        String normalizedIp = DeviceAddressUtil.normalizeIp(device.getIpAddress());
+        if (normalizedIp != null) {
+            pc = pcMasterRepository.findByIpAddress(normalizedIp);
         }
-        if (pc.isEmpty() && device.getMacAddress() != null && !device.getMacAddress().isBlank()) {
-            pc = pcMasterRepository.findById(device.getMacAddress().trim());
+        if (pc.isEmpty()) {
+            pc = findPcByNormalizedMac(device.getMacAddress());
         }
         pc.ifPresent(existing -> {
-            Long groupId = classroomResolutionService.resolveGroupIdByIp(existing.getIpAddress());
+            Long groupId = classroomResolutionService.resolveGroupId(existing.getIpAddress(), existing.getMacAddress());
             if (groupId == null) {
                 groupId = device.getGroupId();
             }
@@ -210,6 +213,36 @@ public class IpRangeService {
                     .name());
             pcMasterRepository.save(existing);
         });
+    }
+
+    private void normalizeTeacherDevice(ClassroomTeacherDevice device) {
+        if (device == null) {
+            return;
+        }
+        device.setIpAddress(DeviceAddressUtil.normalizeIp(device.getIpAddress()));
+        String normalizedMac = DeviceAddressUtil.normalizeMac(device.getMacAddress());
+        device.setMacAddress(formatMacForStorage(normalizedMac));
+        if (device.getDescription() != null) {
+            String trimmedDescription = device.getDescription().trim();
+            device.setDescription(trimmedDescription.isEmpty() ? null : trimmedDescription);
+        }
+    }
+
+    private String formatMacForStorage(String normalizedMac) {
+        if (normalizedMac == null || normalizedMac.length() != 12) {
+            return normalizedMac;
+        }
+        return normalizedMac.replaceAll("..(?!$)", "$0:");
+    }
+
+    private Optional<PcMaster> findPcByNormalizedMac(String macAddress) {
+        String normalizedMac = DeviceAddressUtil.normalizeMac(macAddress);
+        if (normalizedMac == null) {
+            return Optional.empty();
+        }
+        return pcMasterRepository.findAll().stream()
+                .filter(pc -> normalizedMac.equals(DeviceAddressUtil.normalizeMac(pc.getMacAddress())))
+                .findFirst();
     }
 
     private Map<Long, String> buildGroupNameMap() {

@@ -190,6 +190,7 @@ public class PcStatusService {
         dto.setIpAddress(pc.getIpAddress());
         dto.setGroupId(pc.getGroupId());
         dto.setStatus(pc.getStatus());
+        dto.setOnline("ONLINE".equalsIgnoreCase(pc.getStatus()) || "IDLE".equalsIgnoreCase(pc.getStatus()));
         dto.setRole(pc.getRole());
         dto.setAgentVersion(pc.getAgentVersion());
         dto.setBrokenNote(pc.getBrokenNote());

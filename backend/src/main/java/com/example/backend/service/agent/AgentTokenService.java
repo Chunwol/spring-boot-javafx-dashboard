@@ -5,6 +5,7 @@ import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,8 +36,14 @@ public class AgentTokenService {
 
     private final AgentAuthTokenRepository tokenRepository;
 
+    @Value("${app.agent.token-cache-ttl-seconds:300}")
+    private long tokenCacheTtlSeconds;
+
     /** lastUsedAt 지연 업데이트 버퍼 (mac → 마지막 사용 시각). */
     private final Map<String, LocalDateTime> lastUsedBuffer = new ConcurrentHashMap<>();
+
+    /** 유효한 agent token 검증 결과 캐시 (tokenHash → macAddress, expiresAt). */
+    private final Map<String, TokenValidationCacheEntry> tokenValidationCache = new ConcurrentHashMap<>();
 
     /**
      * flush 중복 실행 방지 플래그.
@@ -56,12 +63,27 @@ public class AgentTokenService {
         if (plainToken == null || plainToken.isBlank()) return Optional.empty();
         try {
             String hash = sha256(plainToken);
+            LocalDateTime now = LocalDateTime.now();
+
+            TokenValidationCacheEntry cached = tokenValidationCache.get(hash);
+            if (cached != null) {
+                if (cached.expiresAt().isAfter(now)) {
+                    lastUsedBuffer.put(cached.macAddress(), now);
+                    return Optional.of(cached.macAddress());
+                }
+                tokenValidationCache.remove(hash, cached);
+            }
+
             Optional<AgentAuthToken> opt = tokenRepository.findByTokenHash(hash);
             if (opt.isEmpty()) return Optional.empty();
             AgentAuthToken tok = opt.get();
             if (tok.isRevoked()) return Optional.empty();
             // lastUsedAt을 메모리 버퍼에만 기록 (DB 쓰기 생략)
-            lastUsedBuffer.put(tok.getMacAddress(), LocalDateTime.now());
+            lastUsedBuffer.put(tok.getMacAddress(), now);
+            if (tokenCacheTtlSeconds > 0) {
+                tokenValidationCache.put(hash,
+                        new TokenValidationCacheEntry(tok.getMacAddress(), now.plusSeconds(tokenCacheTtlSeconds)));
+            }
             return Optional.of(tok.getMacAddress());
         } catch (Exception e) {
             log.debug("토큰 검증 중 예외 발생 (무시): {}", e.getMessage());
@@ -106,10 +128,18 @@ public class AgentTokenService {
      */
     @Transactional
     public void revokeByMac(String macAddress) {
+        evictCachedTokensForMac(macAddress);
         tokenRepository.findAllByMacAddress(macAddress).forEach(tok -> {
             tok.setRevoked(true);
             tokenRepository.save(tok);
         });
+    }
+
+    public void evictCachedTokensForMac(String macAddress) {
+        if (macAddress == null || macAddress.isBlank()) {
+            return;
+        }
+        tokenValidationCache.entrySet().removeIf(entry -> macAddress.equalsIgnoreCase(entry.getValue().macAddress()));
     }
 
     /**
@@ -122,5 +152,8 @@ public class AgentTokenService {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
         return HexFormat.of().formatHex(hash);
+    }
+
+    private record TokenValidationCacheEntry(String macAddress, LocalDateTime expiresAt) {
     }
 }

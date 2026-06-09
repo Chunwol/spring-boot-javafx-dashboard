@@ -783,6 +783,21 @@
 }
 .main-tabpane .tab-label { -fx-text-fill: #475569; -fx-font-size: 12px; }
 .main-tabpane .tab:selected .tab-label { -fx-text-fill: #0f172a; -fx-font-weight: 700; }
+.main-tabpane-chrome-hidden > .tab-header-area {
+    -fx-padding: 0;
+    -fx-pref-height: 0;
+    -fx-min-height: 0;
+    -fx-max-height: 0;
+    -fx-opacity: 0;
+}
+.main-tabpane-chrome-hidden > .tab-header-area .headers-region,
+.main-tabpane-chrome-hidden > .tab-header-area .tab-header-background,
+.main-tabpane-chrome-hidden > .tab-header-area .control-buttons-tab {
+    -fx-pref-height: 0;
+    -fx-min-height: 0;
+    -fx-max-height: 0;
+    -fx-opacity: 0;
+}
 .tabbar-nav-btn {
     -fx-background-color: transparent;
     -fx-padding: 6;
@@ -942,6 +957,7 @@
     -fx-font-weight: 600;
 }
 .status-badge-ok      { -fx-background-color: #dcfce7; -fx-text-fill: #15803d; }
+.status-badge-running { -fx-background-color: #fef3c7; -fx-text-fill: #b45309; }
 .status-badge-warn    { -fx-background-color: #fef9c3; -fx-text-fill: #a16207; }
 .status-badge-offline { -fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; }
 
@@ -954,6 +970,7 @@
     -fx-max-width: 380;
     -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.04), 10, 0, 0, 2);
 }
+.pcmgmt-side-panel-wide { -fx-max-width: 560; }
 .detail-title { -fx-font-size: 16px; -fx-font-weight: 700; -fx-text-fill: #0f172a; }
 .detail-close-btn {
     -fx-background-color: transparent;
@@ -1021,6 +1038,10 @@
 .main-grid-scroll { -fx-background-color: #ffffff; -fx-background: #ffffff; }
 .main-grid-scroll > .viewport { -fx-background-color: #ffffff; }
 .main-grid-content { -fx-background-color: #ffffff; }
+.classroom-table .column-header .label {
+    -fx-alignment: CENTER;
+    -fx-text-alignment: CENTER;
+}
 .pc-grid-section-label {
     -fx-background-color: transparent;
     -fx-text-fill: #64748b;
@@ -1035,8 +1056,14 @@
     -fx-cursor: hand;
 }
 .pc-card-teacher {
-    -fx-border-color: #2563eb;
-    -fx-border-width: 2;
+}
+.pc-card-teacher-wide {
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-alignment: CENTER;
+}
+.pc-card-teacher-wide .pc-card-number {
+    -fx-font-weight: 800;
 }
 .pc-card-number { -fx-font-size: 16px; -fx-font-weight: 600; }
 .pc-card-online { -fx-background-color: #22c55e; }
@@ -1752,21 +1779,66 @@
 }
 
 /* ── 명령 진행 단계 스텝퍼 (우측 상세 패널) ── */
-.cmd-step-row { -fx-padding: 4 0 4 0; }
-.cmd-step {
-    -fx-font-size: 12px;
-    -fx-font-weight: 700;
-    -fx-padding: 4 10 4 10;
-    -fx-background-radius: 12;
+.cmd-step-row {
+    -fx-padding: 8 2 6 2;
+    -fx-alignment: CENTER_LEFT;
 }
-.cmd-step-pending { -fx-text-fill: #94a3b8; -fx-background-color: #f1f5f9; }
-.cmd-step-active  { -fx-text-fill: #ffffff; -fx-background-color: #2563eb; }
-.cmd-step-done    { -fx-text-fill: #ffffff; -fx-background-color: #22c55e; }
-.cmd-step-failed  { -fx-text-fill: #ffffff; -fx-background-color: #ef4444; }
+.cmd-step-item {
+    -fx-alignment: TOP_CENTER;
+    -fx-min-width: 58;
+    -fx-pref-width: 58;
+}
+.cmd-step-badge {
+    -fx-min-width: 30;
+    -fx-pref-width: 30;
+    -fx-max-width: 30;
+    -fx-min-height: 30;
+    -fx-pref-height: 30;
+    -fx-max-height: 30;
+    -fx-alignment: CENTER;
+    -fx-font-size: 13px;
+    -fx-font-weight: 800;
+    -fx-background-radius: 999;
+    -fx-border-radius: 999;
+    -fx-border-width: 1;
+}
+.cmd-step-badge-pending {
+    -fx-text-fill: #94a3b8;
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #cbd5e1;
+}
+.cmd-step-badge-active {
+    -fx-text-fill: #ffffff;
+    -fx-background-color: #2563eb;
+    -fx-border-color: #2563eb;
+}
+.cmd-step-badge-done {
+    -fx-text-fill: #ffffff;
+    -fx-background-color: #22c55e;
+    -fx-border-color: #22c55e;
+}
+.cmd-step-badge-failed {
+    -fx-text-fill: #ffffff;
+    -fx-background-color: #ef4444;
+    -fx-border-color: #ef4444;
+}
+.cmd-step-label {
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-wrap-text: true;
+    -fx-text-alignment: CENTER;
+    -fx-alignment: CENTER;
+}
+.cmd-step-label-pending { -fx-text-fill: #94a3b8; }
+.cmd-step-label-active  { -fx-text-fill: #1d4ed8; }
+.cmd-step-label-done    { -fx-text-fill: #15803d; }
+.cmd-step-label-failed  { -fx-text-fill: #dc2626; }
+.cmd-step-connector-wrap { -fx-alignment: TOP_CENTER; }
 .cmd-step-connector {
-    -fx-min-width: 12;
-    -fx-pref-height: 2;
-    -fx-max-height: 2;
+    -fx-min-width: 20;
+    -fx-pref-height: 3;
+    -fx-max-height: 3;
+    -fx-background-radius: 999;
     -fx-background-color: #e2e8f0;
 }
 .cmd-step-connector-done { -fx-background-color: #22c55e; }
@@ -2514,4 +2586,74 @@
     -fx-padding: 7 12 7 12;
     -fx-background-radius: 6;
     -fx-cursor: hand;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Unified Control Height
+   입력 박스 높이를 기준으로 버튼/드롭다운/선택 컨트롤 높이를 통일한다.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.text-field,
+.password-field,
+.combo-box-base,
+.choice-box,
+.date-picker,
+.color-picker,
+.menu-button,
+.button,
+.toggle-button {
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+    -fx-max-height: 34;
+}
+
+.text-field,
+.password-field {
+    -fx-padding: 5 10 5 10;
+}
+
+.combo-box-base,
+.choice-box,
+.date-picker,
+.color-picker {
+    -fx-padding: 0;
+}
+
+.combo-box .list-cell,
+.choice-box .label,
+.date-picker .text-field,
+.color-picker .label {
+    -fx-padding: 0 10 0 10;
+}
+
+.button,
+.toggle-button,
+.menu-button {
+    -fx-padding: 0 14 0 14;
+}
+
+.btn-sm,
+.btn-tiny-delete,
+.rfe-nav-btn,
+.rfe-go-btn,
+.edit-panel-action-btn,
+.edit-panel-flow-btn {
+    -fx-padding: 0 10 0 10;
+}
+
+.tab-icon-btn,
+.detail-close-btn,
+.detail-view-toggle,
+.btn-icon-action {
+    -fx-min-width: 34;
+    -fx-pref-width: 34;
+    -fx-padding: 0;
+}
+
+.dashboard-toolbar-mini-toggle,
+.dashboard-toolbar-menu,
+.dashboard-menu-button,
+.module-panel-delete-btn,
+.ops-panel-refresh-btn {
+    -fx-padding: 0 12 0 12;
 }

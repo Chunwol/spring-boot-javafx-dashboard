@@ -595,7 +595,7 @@ public class DashboardController {
             statusRoleLabel = (Label) ns.get("statusRoleLabel");
         } catch (Exception e) {
             // fallback: use simple labels
-            statusSummaryLabel = new Label("강의실 0, 온라인 0/0");
+            statusSummaryLabel = new Label("강의실 0, 전체/온라인 0/0");
             connectivityLabel = new Label("연결 대기 중");
             clockLabel = new Label();
             statusRoleLabel = new Label("역할 USER");

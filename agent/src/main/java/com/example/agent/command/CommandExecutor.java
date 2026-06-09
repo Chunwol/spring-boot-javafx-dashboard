@@ -67,6 +67,7 @@ public class CommandExecutor {
     private final AgentConfig config;
     private final AgentConfigLoader configLoader;
     private final OkHttpClient httpClient;
+    private final OkHttpClient downloadClient; // 대용량 파일 전용 (타임아웃 완화)
     private final ObjectMapper mapper;
     private final PendingCommandResultStore pendingResultStore;
     private final UpdateCacheServer updateCacheServer;
@@ -88,6 +89,10 @@ public class CommandExecutor {
         this.config = config;
         this.configLoader = configLoader;
         this.httpClient = httpClient;
+        this.downloadClient = httpClient.newBuilder()
+                .readTimeout(10, TimeUnit.MINUTES)
+                .callTimeout(30, TimeUnit.MINUTES)
+                .build();
         this.mapper = mapper;
         this.pendingResultStore = pendingResultStore;
         this.updateCacheServer = updateCacheServer;
@@ -139,9 +144,9 @@ public class CommandExecutor {
             // LIST_FILES JSON은 4KB 제한 대신 2MB 허용
             int limit = "LIST_FILES".equals(type) ? OUTPUT_LIMIT_JSON : OUTPUT_LIMIT;
             persistAndSendResult(taskId, result, limit);
-        } catch (Exception e) {
-            // MEDIUM FIX#9: Mask sensitive data in error messages
-            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(e.getMessage());
+        } catch (Throwable t) {
+            // AWTError(headless), Error 하위 포함 — 결과 보고 누락 방지
+            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(t.getMessage());
             log.error("명령 실행 실패 taskId={}: {}", taskId, maskedMsg);
             persistAndSendResult(taskId, new CommandResult(1, "", maskedMsg));
         }
@@ -325,7 +330,7 @@ public class CommandExecutor {
                         .header("X-Agent-Token", config.getAgentToken())
                         .get()
                         .build();
-                try (Response resp = httpClient.newCall(dlReq).execute()) {
+                try (Response resp = downloadClient.newCall(dlReq).execute()) {
                     if (!resp.isSuccessful() || resp.body() == null) {
                         dialog.close();
                         return new CommandResult(1, "", "스크립트 다운로드 실패: HTTP " + resp.code());
@@ -665,9 +670,10 @@ public class CommandExecutor {
     private CollectZipResult zipRequestedPaths(Path zipPath, List<String> requestedPaths) throws IOException {
         int[] count = {0};
         List<String> issues = new ArrayList<>();
+        String interactiveHome = resolveInteractiveUserHome();
         try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zipPath))) {
             for (int i = 0; i < requestedPaths.size(); i++) {
-                String raw = requestedPaths.get(i);
+                String raw = expandHomePath(requestedPaths.get(i), interactiveHome);
                 Path p;
                 try {
                     p = Path.of(raw);
@@ -1203,7 +1209,7 @@ public class CommandExecutor {
         Request request = buildUpdateDownloadRequest(url, peerToken)
                 .header("Range", "bytes=" + start + "-" + end)
                 .build();
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = downloadClient.newCall(request).execute()) {
             ResponseBody body = response.body();
             if (body == null) {
                 throw new IOException("HTTP " + response.code() + " empty body");
@@ -1825,7 +1831,7 @@ public class CommandExecutor {
     // ─── 유틸 ────────────────────────────────────────────────────────────
 
     private static Path resolveTransferDestination(String destinationMode, String destinationPath) {
-        String userHome = System.getProperty("user.home", ".");
+        String userHome = resolveInteractiveUserHome();
         String mode = destinationMode == null ? "DOWNLOADS" : destinationMode.toUpperCase();
         return switch (mode) {
             case "DESKTOP" -> Path.of(userHome, "Desktop");
@@ -1837,6 +1843,86 @@ public class CommandExecutor {
             }
             default -> Path.of(userHome, "Downloads");
         };
+    }
+
+    /**
+     * SYSTEM/Session-0 환경에서 실제 로그인 사용자의 홈 디렉토리를 반환한다.
+     * 로그인 사용자를 찾지 못하면 java.home 기반 fallback을 사용한다.
+     */
+    /**
+     * ~, %USERPROFILE%, %HOMEPATH% 를 실제 로그인 사용자 홈 디렉토리로 치환한다.
+     * SYSTEM 계정으로 실행 중일 때 C:\Windows\system32\... 로 잘못 해석되는 것을 방지한다.
+     */
+    private static String expandHomePath(String raw, String userHome) {
+        if (raw == null) return raw;
+        String p = raw;
+        if (p.startsWith("~/") || p.startsWith("~\\") || p.equals("~")) {
+            p = userHome + p.substring(1);
+        }
+        p = p.replace("%USERPROFILE%", userHome)
+             .replace("%userprofile%", userHome)
+             .replace("%HOMEPATH%", userHome)
+             .replace("%homepath%", userHome);
+        return p;
+    }
+
+    private static String resolveInteractiveUserHome() {
+        String javaHome = System.getProperty("user.home", ".");
+
+        // SYSTEM 계정이 아니면 그대로 반환
+        String userName = System.getProperty("user.name", "");
+        if (!"SYSTEM".equalsIgnoreCase(userName)) {
+            return javaHome;
+        }
+
+        // Windows: 로그인된 사용자 목록에서 첫 번째 일반 사용자 홈 탐색
+        try {
+            Process proc = new ProcessBuilder("query", "user").redirectErrorStream(true).start();
+            if (proc.waitFor(5, TimeUnit.SECONDS)) {
+                String output = new String(proc.getInputStream().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                for (String line : output.split("\\R")) {
+                    String trimmed = line.trim();
+                    if (trimmed.startsWith(">") || trimmed.startsWith("USERNAME")) continue;
+                    // 첫 컬럼이 사용자명
+                    String[] parts = trimmed.split("\\s+");
+                    if (parts.length > 0) {
+                        String user = parts[0].replaceAll("[^\\w]", "");
+                        if (!user.isBlank()) {
+                            Path candidate = Path.of("C:\\Users", user);
+                            if (Files.isDirectory(candidate)) {
+                                return candidate.toString();
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // fallback: C:\Users 에서 첫 번째 실사용자 디렉토리
+        try {
+            Path usersDir = Path.of("C:\\Users");
+            if (Files.isDirectory(usersDir)) {
+                try (var stream = Files.list(usersDir)) {
+                    return stream
+                            .filter(Files::isDirectory)
+                            .filter(p -> {
+                                String n = p.getFileName().toString();
+                                return !n.equalsIgnoreCase("Public")
+                                        && !n.equalsIgnoreCase("Default")
+                                        && !n.equalsIgnoreCase("Default User")
+                                        && !n.equalsIgnoreCase("All Users")
+                                        && !n.equalsIgnoreCase("desktop.ini");
+                            })
+                            .findFirst()
+                            .map(Path::toString)
+                            .orElse(javaHome);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return javaHome;
     }
 
     private static String sanitizeName(String name) {

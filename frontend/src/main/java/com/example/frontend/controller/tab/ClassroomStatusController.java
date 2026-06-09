@@ -59,10 +59,16 @@ public class ClassroomStatusController {
     private static final double DETAIL_PANEL_WIDTH = 360.0;
     private static final double PC_CARD_MIN_SIZE = 34.0;
     private static final double PC_CARD_MAX_SIZE = 48.0;
+    private static final double TEACHER_PC_CARD_HEIGHT = 44.0;
+    private static final double OVERVIEW_TEACHER_PC_CARD_HEIGHT = 28.0;
+    private static final double DETAIL_GRID_SAFE_INSET = 18.0;
+    private static final double DETAIL_GRID_FALLBACK_INSET = 56.0;
+    private static final double OVERVIEW_PC_CARD_MIN_SIZE = 24.0;
+    private static final double OVERVIEW_PC_CARD_MAX_SIZE = 36.0;
     private static final int DETAIL_STUDENT_TARGET_ROWS = 6;
     private static final int MAIN_STUDENT_TARGET_ROWS = 4;
     private static final double OVERVIEW_ROOM_GAP = 12.0;
-    private static final double OVERVIEW_CARD_MIN_WIDTH = 180.0;
+    private static final double OVERVIEW_CARD_MIN_WIDTH = 168.0;
 
     // ── Left: classroom table ──────────────────────────────────────────────
     @FXML private Button downloadBtn, printBtn;
@@ -115,6 +121,8 @@ public class ClassroomStatusController {
     private FlowPane overviewRoomFlow;
     private List<ClassroomSummaryDto> overviewRooms = List.of();
     private Map<Long, List<PcStatusDto>> overviewPcByGroup = Map.of();
+    /** groupId → pcSection VBox. renderMainGrid가 채우고 refreshMainGrid가 재활용한다. */
+    private final Map<Long, VBox> overviewPcSectionByGroupId = new LinkedHashMap<>();
 
     @FXML
     public void initialize() {
@@ -157,10 +165,11 @@ public class ClassroomStatusController {
     private void setupTable() {
         // 컬럼이 테이블 폭을 꽉 채우도록 → 우측에 빈 여백 컬럼 안 생김
         classroomTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        colOnline.setText("전체/온라인");
         colClassroom.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getGroupName()));
         colOnline.setCellValueFactory(d -> {
             ClassroomSummaryDto r = d.getValue();
-            return new SimpleStringProperty(r.getOnlinePcs() + "/" + r.getTotalPcs());
+            return new SimpleStringProperty(r.getTotalPcs() + "/" + r.getOnlinePcs());
         });
         colStatus.setCellValueFactory(d -> new SimpleStringProperty(deriveStatusLabel(d.getValue())));
         colUpdated.setCellValueFactory(d -> new SimpleStringProperty(LocalDateTime.now().format(UPDATED_FMT)));
@@ -316,17 +325,11 @@ public class ClassroomStatusController {
             }
         });
 
-        // 상세 패널 그리드 wrap: 38~42대 기준 6줄 안팎으로 카드 크기 자동 조정
-        detailPanel.widthProperty().addListener((obs, ov, nv) -> {
-            double w = nv.doubleValue();
-            if (w > 20) {
-                double wrapLength = Math.max(120, w - 32);
-                detailTeacherGrid.setPrefWrapLength(wrapLength);
-                detailStudentGrid.setPrefWrapLength(wrapLength);
-                resizePcCards(detailTeacherGrid, 1);
-                resizePcCards(detailStudentGrid, DETAIL_STUDENT_TARGET_ROWS);
-            }
-        });
+        // 상세 패널 그리드 wrap: 실제 ScrollPane viewport 폭 기준으로 카드 크기 자동 조정
+        detailPanel.widthProperty().addListener((obs, ov, nv) ->
+                Platform.runLater(this::resizeDetailPcGrids));
+        detailPcGridScroll.viewportBoundsProperty().addListener((obs, ov, nv) ->
+                Platform.runLater(this::resizeDetailPcGrids));
     }
 
     private boolean fullscreen = false;
@@ -375,18 +378,33 @@ public class ClassroomStatusController {
     private void renderDetailGrid(List<PcStatusDto> pcs) {
         List<PcStatusDto> teachers = splitTeachers(pcs);
         List<PcStatusDto> students = splitStudents(pcs);
-        detailTeacherGrid.getChildren().setAll(buildTeacherCards(teachers));
-        detailStudentGrid.getChildren().setAll(buildStudentCards(students));
-        setSectionVisible(detailTeacherLabel, !teachers.isEmpty());
+        if (!tryUpdateFlowPaneStatuses(detailTeacherGrid, teachers)) {
+            detailTeacherGrid.getChildren().setAll(buildWideTeacherCards(teachers));
+        }
+        if (!tryUpdateFlowPaneStatuses(detailStudentGrid, students)) {
+            detailStudentGrid.getChildren().setAll(buildStudentCards(students));
+        }
+        setSectionVisible(detailTeacherLabel, false);
         setSectionVisible(detailTeacherGrid, !teachers.isEmpty());
-        setSectionVisible(detailStudentLabel, !students.isEmpty());
+        setSectionVisible(detailStudentLabel, false);
         setSectionVisible(detailStudentGrid, !students.isEmpty());
-        resizePcCards(detailTeacherGrid, 1);
-        resizePcCards(detailStudentGrid, DETAIL_STUDENT_TARGET_ROWS);
-        Platform.runLater(() -> {
-            resizePcCards(detailTeacherGrid, 1);
-            resizePcCards(detailStudentGrid, DETAIL_STUDENT_TARGET_ROWS);
-        });
+        resizeDetailPcGrids();
+        Platform.runLater(this::resizeDetailPcGrids);
+    }
+
+    /**
+     * PC 수가 동일할 때 상태 CSS 클래스만 갱신 — 카드 재생성 없이 떨림 제거.
+     * 수가 다르면 false 반환 → 호출자가 setAll로 전체 재빌드.
+     */
+    private static boolean tryUpdateFlowPaneStatuses(FlowPane flow, List<PcStatusDto> pcs) {
+        List<Node> children = flow.getChildren();
+        if (children.size() != pcs.size()) return false;
+        for (int i = 0; i < pcs.size(); i++) {
+            if (!(children.get(i) instanceof Region card)) return false;
+            card.getStyleClass().removeAll("pc-card-online", "pc-card-offline", "pc-card-warn");
+            card.getStyleClass().add("pc-card-" + pcStatusClass(pcs.get(i)));
+        }
+        return true;
     }
 
     /** 정렬 인덱스 기반 번호 카드 (이름에 숫자 없어도 1,2,3... 표시). */
@@ -397,6 +415,18 @@ public class ClassroomStatusController {
     private static StackPane buildTeacherPcCard(PcStatusDto pc, int index, int totalTeachers) {
         String label = totalTeachers <= 1 ? "교" : "교" + index;
         return buildPcCard(pc, label, true);
+    }
+
+    private static StackPane buildWideTeacherPcCard(PcStatusDto pc, int index, int totalTeachers) {
+        return buildWideTeacherPcCard(pc, index, totalTeachers, TEACHER_PC_CARD_HEIGHT);
+    }
+
+    private static StackPane buildWideTeacherPcCard(PcStatusDto pc, int index, int totalTeachers, double height) {
+        String label = totalTeachers <= 1 ? "교수 PC" : "교수 PC " + index;
+        StackPane card = buildPcCard(pc, label, true);
+        card.getStyleClass().add("pc-card-teacher-wide");
+        applyWideTeacherCardSize(card, 320, height);
+        return card;
     }
 
     private static StackPane buildPcCard(PcStatusDto pc, String labelText, boolean teacher) {
@@ -478,6 +508,18 @@ public class ClassroomStatusController {
         return nodes;
     }
 
+    private static List<Node> buildWideTeacherCards(List<PcStatusDto> teachers) {
+        return buildWideTeacherCards(teachers, TEACHER_PC_CARD_HEIGHT);
+    }
+
+    private static List<Node> buildWideTeacherCards(List<PcStatusDto> teachers, double height) {
+        List<Node> nodes = new ArrayList<>();
+        for (int i = 0; i < teachers.size(); i++) {
+            nodes.add(buildWideTeacherPcCard(teachers.get(i), i + 1, teachers.size(), height));
+        }
+        return nodes;
+    }
+
     private static List<Node> buildStudentCards(List<PcStatusDto> students) {
         List<Node> nodes = new ArrayList<>();
         for (int i = 0; i < students.size(); i++) {
@@ -512,6 +554,7 @@ public class ClassroomStatusController {
      */
     private void renderMainGrid() {
         mainGridContent.getChildren().clear();
+        overviewPcSectionByGroupId.clear();
         overviewRooms = new ArrayList<>(filtered);
         overviewPcByGroup = Map.of();
 
@@ -519,33 +562,53 @@ public class ClassroomStatusController {
         roomFlow.setAlignment(javafx.geometry.Pos.TOP_LEFT);
         overviewRoomFlow = roomFlow;
 
-        // 빈 카드들을 먼저 그린 뒤
-        Map<Long, VBox[]> cardMap = new LinkedHashMap<>();
         for (ClassroomSummaryDto c : overviewRooms) {
             VBox[] holder = new VBox[1];
             VBox card = buildClassroomCard(c, holder);
-            cardMap.put(c.getGroupId(), holder);
+            overviewPcSectionByGroupId.put(c.getGroupId(), holder[0]);
             roomFlow.getChildren().add(card);
         }
         mainGridContent.getChildren().add(roomFlow);
         layoutOverviewGrid();
+        fetchOverviewPcStatuses(overviewRooms);
+    }
 
-        // PC 전체를 한 번에 조회 → 강의실별로 분배 (N+1 방지)
+    /** PC 전체를 한 번에 조회 → 강의실별로 분배 (N+1 방지). 기존 카드 재사용 시에도 호출됨. */
+    private void fetchOverviewPcStatuses(List<ClassroomSummaryDto> rooms) {
         apiClient.getPagedList("/dashboard/pcs", new TypeReference<List<PcStatusDto>>() {})
                 .thenAccept(allPcs -> Platform.runLater(() -> {
                     if (allPcs == null) return;
                     overviewPcByGroup = allPcs.stream()
                             .filter(pc -> pc.getGroupId() != null)
                             .collect(java.util.stream.Collectors.groupingBy(PcStatusDto::getGroupId));
-                    for (ClassroomSummaryDto c : overviewRooms) {
-                        VBox[] pcHolder = cardMap.get(c.getGroupId());
-                        if (pcHolder == null || pcHolder[0] == null) continue;
+                    for (ClassroomSummaryDto c : rooms) {
+                        VBox pcSection = overviewPcSectionByGroupId.get(c.getGroupId());
+                        if (pcSection == null) continue;
                         List<PcStatusDto> pcs = overviewPcByGroup.getOrDefault(c.getGroupId(), List.of());
-                        fillCardPcGrid(pcHolder[0], pcs, c);
+                        fillCardPcGrid(pcSection, pcs, c);
                     }
                     layoutOverviewGrid();
                 }))
                 .exceptionally(ex -> { log.debug("전체 PC 조회 실패: {}", ex.getMessage()); return null; });
+    }
+
+    /**
+     * 자동 갱신 시 강의실 목록 변경 없으면 카드 재빌드 없이 PC 상태만 갱신 (깜빡임·사라짐 방지).
+     * 강의실 추가/삭제/순서 변경 감지 시 전체 재빌드.
+     */
+    private void refreshMainGrid() {
+        List<ClassroomSummaryDto> currentRooms = new ArrayList<>(filtered);
+        List<Long> currentIds = currentRooms.stream()
+                .map(ClassroomSummaryDto::getGroupId).toList();
+        List<Long> existingIds = new ArrayList<>(overviewPcSectionByGroupId.keySet());
+
+        if (!currentIds.equals(existingIds)) {
+            renderMainGrid();
+            return;
+        }
+
+        overviewRooms = currentRooms;
+        fetchOverviewPcStatuses(currentRooms);
     }
 
     /**
@@ -557,31 +620,28 @@ public class ClassroomStatusController {
         Label title = new Label(c.getGroupName());
         title.getStyleClass().add("classroom-section-title");
 
-        // 카운터 (온라인 · 경고 · 오프라인) — 백엔드 PcStatusDto 로드 전 요약
-        Label onlineLbl = new Label("○ " + c.getOnlinePcs());
-        onlineLbl.getStyleClass().add("ccard-counter-online");
-        Label totalLbl  = new Label("전체 " + c.getTotalPcs());
-        totalLbl.getStyleClass().add("ccard-counter-total");
-        HBox counters = new HBox(8, onlineLbl, totalLbl);
+        // 카운터 (총/켜짐, 예: 43/22)
+        Label ratioLbl = new Label(c.getTotalPcs() + "/" + c.getOnlinePcs());
+        ratioLbl.getStyleClass().add("ccard-counter-total");
+        HBox counters = new HBox(8, ratioLbl);
         counters.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
         // PC 카드 그리드 (비동기 로드) — 교사 PC를 상단에 고정하고 학생 PC를 아래에 배치
-        Label teacherLabel = new Label("교수 PC");
-        teacherLabel.getStyleClass().add("pc-grid-section-label");
-        teacherLabel.setMaxWidth(Double.MAX_VALUE);
         FlowPane teacherFlow = new FlowPane(4, 4);
         teacherFlow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-        teacherFlow.widthProperty().addListener((obs, ov, nv) -> resizePcCards(teacherFlow, 1));
-        VBox teacherSection = new VBox(4, teacherLabel, teacherFlow);
+        teacherFlow.getProperties().put("pcCardMinSize", OVERVIEW_PC_CARD_MIN_SIZE);
+        teacherFlow.getProperties().put("pcCardMaxSize", OVERVIEW_PC_CARD_MAX_SIZE);
+        teacherFlow.widthProperty().addListener((obs, ov, nv) ->
+                resizeWideTeacherCards(teacherFlow, OVERVIEW_TEACHER_PC_CARD_HEIGHT));
+        VBox teacherSection = new VBox(0, teacherFlow);
 
-        Label studentLabel = new Label("학생 PC");
-        studentLabel.getStyleClass().add("pc-grid-section-label");
-        studentLabel.setMaxWidth(Double.MAX_VALUE);
         FlowPane studentFlow = new FlowPane(4, 4);
         studentFlow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        studentFlow.getProperties().put("pcCardMinSize", OVERVIEW_PC_CARD_MIN_SIZE);
+        studentFlow.getProperties().put("pcCardMaxSize", OVERVIEW_PC_CARD_MAX_SIZE);
         studentFlow.widthProperty().addListener((obs, ov, nv) ->
                 resizePcCards(studentFlow, MAIN_STUDENT_TARGET_ROWS));
-        VBox studentSection = new VBox(4, studentLabel, studentFlow);
+        VBox studentSection = new VBox(0, studentFlow);
 
         VBox pcSection = new VBox(8, teacherSection, studentSection);
         setSectionVisible(teacherSection, false);
@@ -603,8 +663,7 @@ public class ClassroomStatusController {
         card.getProperties().put("teacherFlow", teacherFlow);
         card.getProperties().put("studentSection", studentSection);
         card.getProperties().put("studentFlow", studentFlow);
-        pcSection.getProperties().put("onlineLbl", onlineLbl);
-        pcSection.getProperties().put("totalLbl",  totalLbl);
+        pcSection.getProperties().put("ratioLbl",  ratioLbl);
         pcSection.getProperties().put("counters",  counters);
         pcSection.getProperties().put("teacherSection", teacherSection);
         pcSection.getProperties().put("teacherFlow", teacherFlow);
@@ -621,36 +680,45 @@ public class ClassroomStatusController {
         FlowPane teacherFlow = (FlowPane) pcSection.getProperties().get("teacherFlow");
         VBox studentSection = (VBox) pcSection.getProperties().get("studentSection");
         FlowPane studentFlow = (FlowPane) pcSection.getProperties().get("studentFlow");
-        Label onlineLbl      = (Label)     pcSection.getProperties().get("onlineLbl");
-        Label totalLbl       = (Label)     pcSection.getProperties().get("totalLbl");
+        Label ratioLbl       = (Label)     pcSection.getProperties().get("ratioLbl");
         HBox  counters       = (HBox)      pcSection.getProperties().get("counters");
         if (teacherFlow == null || studentFlow == null) return;
 
         List<PcStatusDto> teachers = splitTeachers(pcs);
         List<PcStatusDto> students = splitStudents(pcs);
 
-        teacherFlow.getChildren().setAll(buildTeacherCards(teachers));
-        studentFlow.getChildren().setAll(buildStudentCards(students));
+        if (!tryUpdateFlowPaneStatuses(teacherFlow, teachers)) {
+            teacherFlow.getChildren().setAll(buildWideTeacherCards(teachers, OVERVIEW_TEACHER_PC_CARD_HEIGHT));
+        }
+        if (!tryUpdateFlowPaneStatuses(studentFlow, students)) {
+            studentFlow.getChildren().setAll(buildStudentCards(students));
+        }
         setSectionVisible(teacherSection, !teachers.isEmpty());
         setSectionVisible(studentSection, !students.isEmpty());
-        resizePcCards(teacherFlow, 1);
+        resizeWideTeacherCards(teacherFlow, OVERVIEW_TEACHER_PC_CARD_HEIGHT);
         resizePcCards(studentFlow, MAIN_STUDENT_TARGET_ROWS);
         Platform.runLater(() -> {
-            resizePcCards(teacherFlow, 1);
+            resizeWideTeacherCards(teacherFlow, OVERVIEW_TEACHER_PC_CARD_HEIGHT);
             resizePcCards(studentFlow, MAIN_STUDENT_TARGET_ROWS);
         });
 
-        if (onlineLbl != null && totalLbl != null && counters != null) {
+        if (ratioLbl != null && counters != null) {
             long online = pcs.stream().filter(pc -> "ONLINE".equalsIgnoreCase(pc.getStatus()) || "IDLE".equalsIgnoreCase(pc.getStatus())).count();
             long warn   = pcs.stream().filter(pc -> "BROKEN".equalsIgnoreCase(pc.getStatus()) || "FAILED".equalsIgnoreCase(pc.getStatus())).count();
-            onlineLbl.setText("● " + online);
-            onlineLbl.getStyleClass().setAll(online > 0 ? "ccard-counter-online" : "ccard-counter-zero");
-            if (warn > 0 && counters.getChildren().size() < 3) {
-                Label warnLbl = new Label("⚠ " + warn);
-                warnLbl.getStyleClass().add("ccard-counter-warn");
-                counters.getChildren().add(1, warnLbl);
+            Label warnLbl = (Label) pcSection.getProperties().get("warnLbl");
+            ratioLbl.setText(pcs.size() + "/" + online);
+            if (warn > 0) {
+                if (warnLbl == null) {
+                    warnLbl = new Label();
+                    warnLbl.getStyleClass().add("ccard-counter-warn");
+                    counters.getChildren().add(1, warnLbl);
+                    pcSection.getProperties().put("warnLbl", warnLbl);
+                }
+                warnLbl.setText("⚠ " + warn);
+            } else if (warnLbl != null) {
+                counters.getChildren().remove(warnLbl);
+                pcSection.getProperties().remove("warnLbl");
             }
-            totalLbl.setText("/" + pcs.size());
         }
     }
 
@@ -679,7 +747,8 @@ public class ClassroomStatusController {
             double totalHeight = estimateOverviewGridHeight(cards, columns, candidateWidth);
             double overflow = Math.max(0, totalHeight - availableHeight);
             if (overflow < bestOverflow - 1
-                    || (Math.abs(overflow - bestOverflow) < 1 && candidateWidth > bestCardWidth)) {
+                    || (Math.abs(overflow - bestOverflow) < 1
+                    && (columns > bestColumns || (columns == bestColumns && candidateWidth > bestCardWidth)))) {
                 bestOverflow = overflow;
                 bestColumns = columns;
                 bestCardWidth = candidateWidth;
@@ -749,23 +818,35 @@ public class ClassroomStatusController {
         double contentWidth = Math.max(120, cardWidth - 24);
         double height = 84;
         if (teacherCount > 0) {
-            height += estimatePcSectionHeight(contentWidth, teacherCount, 1);
+            height += teacherCount * OVERVIEW_TEACHER_PC_CARD_HEIGHT + Math.max(0, teacherCount - 1) * 4;
         }
         if (studentCount > 0) {
             if (teacherCount > 0) {
                 height += 8;
             }
-            height += estimatePcSectionHeight(contentWidth, studentCount, MAIN_STUDENT_TARGET_ROWS);
+            height += estimatePcSectionHeight(
+                    contentWidth,
+                    studentCount,
+                    MAIN_STUDENT_TARGET_ROWS,
+                    OVERVIEW_PC_CARD_MIN_SIZE,
+                    OVERVIEW_PC_CARD_MAX_SIZE
+            );
         }
         return height;
     }
 
-    private double estimatePcSectionHeight(double contentWidth, int count, int targetRows) {
-        PcGridMetrics metrics = calculatePcGridMetrics(contentWidth, count, targetRows, 4);
+    private double estimatePcSectionHeight(
+            double contentWidth,
+            int count,
+            int targetRows,
+            double minCardSize,
+            double maxCardSize
+    ) {
+        PcGridMetrics metrics = calculatePcGridMetrics(contentWidth, count, targetRows, 4, minCardSize, maxCardSize);
         if (metrics.rows == 0) {
             return 0;
         }
-        return 18 + metrics.rows * metrics.cardSize + Math.max(0, metrics.rows - 1) * 4;
+        return metrics.rows * metrics.cardSize + Math.max(0, metrics.rows - 1) * 4;
     }
 
     private void applyOverviewCardWidth(VBox card, double cardWidth) {
@@ -777,7 +858,7 @@ public class ClassroomStatusController {
         FlowPane studentFlow = (FlowPane) card.getProperties().get("studentFlow");
         if (teacherFlow != null) {
             teacherFlow.setPrefWrapLength(Math.max(120, cardWidth - 24));
-            resizePcCards(teacherFlow, 1);
+            resizeWideTeacherCards(teacherFlow, OVERVIEW_TEACHER_PC_CARD_HEIGHT);
         }
         if (studentFlow != null) {
             studentFlow.setPrefWrapLength(Math.max(120, cardWidth - 24));
@@ -793,6 +874,31 @@ public class ClassroomStatusController {
         section.setManaged(visible);
     }
 
+    private void resizeDetailPcGrids() {
+        if (detailTeacherGrid == null || detailStudentGrid == null) {
+            return;
+        }
+        double wrapLength = resolveDetailGridWrapLength();
+        detailTeacherGrid.setPrefWrapLength(wrapLength);
+        detailStudentGrid.setPrefWrapLength(wrapLength);
+        resizeWideTeacherCards(detailTeacherGrid);
+        resizePcCards(detailStudentGrid, DETAIL_STUDENT_TARGET_ROWS);
+    }
+
+    private double resolveDetailGridWrapLength() {
+        double width = detailPcGridScroll == null ? 0 : detailPcGridScroll.getViewportBounds().getWidth();
+        if (width <= 1 && detailPcGridScroll != null) {
+            width = detailPcGridScroll.getWidth();
+        }
+        if (width <= 1 && detailPanel != null) {
+            width = detailPanel.getWidth() - DETAIL_GRID_FALLBACK_INSET;
+        }
+        if (width <= 1) {
+            width = 320;
+        }
+        return Math.max(120, width - DETAIL_GRID_SAFE_INSET);
+    }
+
     private static void resizePcCards(FlowPane flow, int targetRows) {
         if (flow == null) {
             return;
@@ -802,13 +908,25 @@ public class ClassroomStatusController {
             return;
         }
         double width = flow.getWidth();
-        if (width <= 1) {
-            width = flow.getPrefWrapLength();
+        double prefWrap = flow.getPrefWrapLength();
+        if (prefWrap > 1) {
+            width = width > 1 ? Math.min(width, prefWrap) : prefWrap;
+        } else if (width <= 1) {
+            width = prefWrap;
         }
         if (width <= 1) {
             width = 320;
         }
-        PcGridMetrics metrics = calculatePcGridMetrics(width, count, targetRows, Math.max(0, flow.getHgap()));
+        double minCardSize = resolveFlowDouble(flow, "pcCardMinSize", PC_CARD_MIN_SIZE);
+        double maxCardSize = resolveFlowDouble(flow, "pcCardMaxSize", PC_CARD_MAX_SIZE);
+        PcGridMetrics metrics = calculatePcGridMetrics(
+                width,
+                count,
+                targetRows,
+                Math.max(0, flow.getHgap()),
+                minCardSize,
+                maxCardSize
+        );
         for (Node child : flow.getChildren()) {
             if (child instanceof Region region) {
                 applyPcCardSize(region, metrics.cardSize);
@@ -816,18 +934,55 @@ public class ClassroomStatusController {
         }
     }
 
-    private static PcGridMetrics calculatePcGridMetrics(double width, int count, int targetRows, double hgap) {
+    private static void resizeWideTeacherCards(FlowPane flow) {
+        resizeWideTeacherCards(flow, TEACHER_PC_CARD_HEIGHT);
+    }
+
+    private static void resizeWideTeacherCards(FlowPane flow, double height) {
+        if (flow == null || flow.getChildren().isEmpty()) {
+            return;
+        }
+        double width = flow.getWidth();
+        double prefWrap = flow.getPrefWrapLength();
+        if (prefWrap > 1) {
+            width = width > 1 ? Math.min(width, prefWrap) : prefWrap;
+        } else if (width <= 1) {
+            width = prefWrap;
+        }
+        if (width <= 1) {
+            width = 320;
+        }
+        for (Node child : flow.getChildren()) {
+            if (child instanceof Region region) {
+                applyWideTeacherCardSize(region, width, height);
+            }
+        }
+    }
+
+    private static double resolveFlowDouble(FlowPane flow, String key, double defaultValue) {
+        Object value = flow.getProperties().get(key);
+        return value instanceof Number number ? number.doubleValue() : defaultValue;
+    }
+
+    private static PcGridMetrics calculatePcGridMetrics(
+            double width,
+            int count,
+            int targetRows,
+            double hgap,
+            double minCardSize,
+            double maxCardSize
+    ) {
         if (count <= 0) {
-            return new PcGridMetrics(0, 0, PC_CARD_MAX_SIZE);
+            return new PcGridMetrics(0, 0, maxCardSize);
         }
         int rows = Math.max(1, targetRows);
         int columns = Math.max(1, (int) Math.ceil(count / (double) rows));
         double size = Math.floor((width - hgap * (columns - 1)) / columns);
-        if (size < PC_CARD_MIN_SIZE) {
-            columns = Math.max(1, (int) Math.floor((width + hgap) / (PC_CARD_MIN_SIZE + hgap)));
+        if (size < minCardSize) {
+            columns = Math.max(1, (int) Math.floor((width + hgap) / (minCardSize + hgap)));
             size = Math.floor((width - hgap * (columns - 1)) / columns);
         }
-        size = Math.max(PC_CARD_MIN_SIZE, Math.min(PC_CARD_MAX_SIZE, size));
+        size = Math.max(minCardSize, Math.min(maxCardSize, size));
         rows = Math.max(1, (int) Math.ceil(count / (double) columns));
         return new PcGridMetrics(columns, rows, size);
     }
@@ -836,6 +991,30 @@ public class ClassroomStatusController {
         card.setPrefSize(size, size);
         card.setMinSize(size, size);
         card.setMaxSize(size, size);
+        if (card instanceof StackPane stack
+                && !stack.getChildren().isEmpty()
+                && stack.getChildren().get(0) instanceof Label label) {
+            double fontSize = Math.max(11, Math.min(16, Math.floor(size * 0.45)));
+            label.setStyle("-fx-font-size: " + (int) fontSize + "px;");
+        }
+    }
+
+    private static void applyWideTeacherCardSize(Region card, double width) {
+        applyWideTeacherCardSize(card, width, TEACHER_PC_CARD_HEIGHT);
+    }
+
+    private static void applyWideTeacherCardSize(Region card, double width, double height) {
+        double normalizedWidth = Math.max(120, width);
+        double normalizedHeight = Math.max(24, height);
+        card.setPrefSize(normalizedWidth, normalizedHeight);
+        card.setMinSize(normalizedWidth, normalizedHeight);
+        card.setMaxSize(normalizedWidth, normalizedHeight);
+        if (card instanceof StackPane stack
+                && !stack.getChildren().isEmpty()
+                && stack.getChildren().get(0) instanceof Label label) {
+            int fontSize = normalizedHeight <= 32 ? 11 : 13;
+            label.setStyle("-fx-font-size: " + fontSize + "px;");
+        }
     }
 
     private record PcGridMetrics(int columns, int rows, double cardSize) {}
@@ -882,7 +1061,7 @@ public class ClassroomStatusController {
     }
 
     private void wireFilters() {
-        statusFilter.getItems().setAll("전체", "정상", "경고", "오프라인");
+        statusFilter.getItems().setAll("전체", "온라인", "명령 실행중", "경고", "오프라인");
         statusFilter.getSelectionModel().selectFirst();
         statusFilter.valueProperty().addListener((o, ov, nv) -> applyFilters());
         classroomFilter.valueProperty().addListener((o, ov, nv) -> applyFilters());
@@ -919,7 +1098,8 @@ public class ClassroomStatusController {
                     refreshClassroomFilter();
                     classroomTable.setPlaceholder(new Label(
                             list.isEmpty() ? "표시할 강의실이 없습니다." : ""));
-                    if (mainGridMode) renderMainGrid();
+                    if (mainGridMode) refreshMainGrid();
+                    else classroomTable.refresh(); // 동일 행 수일 때 셀 재렌더 보장
                     if (selectedClassroom != null) {
                         list.stream()
                                 .filter(c -> c.getGroupId().equals(selectedClassroom.getGroupId()))
@@ -1087,18 +1267,34 @@ public class ClassroomStatusController {
     // ─────────────────────────────────────────────────────────────────────
 
     private static String deriveStatusLabel(ClassroomSummaryDto r) {
+        if (r.getRunningCommandCount() > 0) return "명령 실행중";
         if (r.getTotalPcs() <= 0) return "오프라인";
-        if (r.getOnlinePcs() == 0) return "오프라인";
-        if (r.getOnlinePcs() < r.getTotalPcs() * 0.5) return "경고";
-        return "정상";
+        boolean teacherOnline = isOnlineState(r.getTeacherPcStatus());
+        int studentOnline = Math.max(0, r.getOnlinePcs() - (teacherOnline ? 1 : 0));
+        if (teacherOnline) {
+            return "온라인"; // 교수PC ON
+        }
+        if (studentOnline > 0) {
+            return "경고";   // 교수PC OFF + 학생PC ON
+        }
+        return "오프라인";   // 교수PC OFF + 학생PC OFF
     }
 
     private static String statusToClass(String label) {
         return switch (label) {
-            case "정상" -> "ok";
+            case "온라인" -> "ok";
+            case "명령 실행중" -> "running";
             case "경고" -> "warn";
             case "오프라인" -> "offline";
             default -> "ok";
         };
+    }
+
+    private static boolean isOnlineState(String status) {
+        if (status == null) {
+            return false;
+        }
+        String normalized = status.trim().toUpperCase();
+        return "ONLINE".equals(normalized) || "IDLE".equals(normalized);
     }
 }

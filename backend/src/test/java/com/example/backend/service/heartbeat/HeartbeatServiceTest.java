@@ -56,6 +56,8 @@ class HeartbeatServiceTest {
         ReflectionTestUtils.setField(heartbeatService, "trafficLogMinIntervalSeconds", 30);
         ReflectionTestUtils.setField(heartbeatService, "trafficSampleIntervalSeconds", 2);
         ReflectionTestUtils.setField(heartbeatService, "maxCommandRetries", 3);
+        ReflectionTestUtils.setField(heartbeatService, "dispatchCommandOnHeartbeat", true);
+        ReflectionTestUtils.setField(heartbeatService, "autoCatchupCheckIntervalSeconds", 300);
     }
 
     @Test
@@ -83,7 +85,7 @@ class HeartbeatServiceTest {
         acked.setRetryCount(1);
 
         when(pcMasterRepository.findById(pc.getMacAddress())).thenReturn(Optional.of(pc));
-        when(classroomResolutionService.resolveGroupIdByIp("10.10.0.20")).thenReturn(null);
+        when(classroomResolutionService.resolveGroupId("10.10.0.20", pc.getMacAddress())).thenReturn(null);
         when(classroomResolutionService.resolveRole(null, "10.10.0.20", pc.getMacAddress()))
                 .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
         when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
@@ -118,7 +120,7 @@ class HeartbeatServiceTest {
         pc.setLastAgentSessionId("old-session");
 
         when(pcMasterRepository.findById(pc.getMacAddress())).thenReturn(Optional.of(pc));
-        when(classroomResolutionService.resolveGroupIdByIp("10.10.0.20")).thenReturn(null);
+        when(classroomResolutionService.resolveGroupId("10.10.0.20", pc.getMacAddress())).thenReturn(null);
         when(classroomResolutionService.resolveRole(null, "10.10.0.20", pc.getMacAddress()))
                 .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
         when(commandQueueRepository.findNextDispatchCandidates(eq(pc.getMacAddress()), any()))
@@ -141,7 +143,7 @@ class HeartbeatServiceTest {
         heartbeat.setOutboundKbps(1.0);
 
         when(pcMasterRepository.findById("AA:BB:CC:DD:EE:11")).thenReturn(Optional.empty());
-        when(classroomResolutionService.resolveGroupIdByIp("10.10.0.21")).thenReturn(null);
+        when(classroomResolutionService.resolveGroupId("10.10.0.21", "AA:BB:CC:DD:EE:11")).thenReturn(null);
         when(classroomResolutionService.resolveRole(null, "10.10.0.21", "AA:BB:CC:DD:EE:11"))
                 .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
         when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
@@ -180,7 +182,7 @@ class HeartbeatServiceTest {
         ));
 
         when(pcMasterRepository.findById("AA:BB:CC:DD:EE:99")).thenReturn(Optional.empty());
-        when(classroomResolutionService.resolveGroupIdByIp("10.10.0.99")).thenReturn(null);
+        when(classroomResolutionService.resolveGroupId("10.10.0.99", "AA:BB:CC:DD:EE:99")).thenReturn(null);
         when(classroomResolutionService.resolveRole(null, "10.10.0.99", "AA:BB:CC:DD:EE:99"))
                 .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
         when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
@@ -230,5 +232,83 @@ class HeartbeatServiceTest {
         assertThat(saved.getAgentVersion()).isEqualTo("1.2.3");
         assertThat(saved.getLastSeen()).isNotNull();
         verify(webSocketService).sendDashboardUpdate(any());
+    }
+
+    @Test
+    void processHeartbeat_usesMacForTeacherGroupResolution() {
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress("AA:BB:CC:DD:EE:55");
+        heartbeat.setHostname("teacher-pc");
+        heartbeat.setIpAddress("10.10.9.55");
+
+        when(pcMasterRepository.findById("AA:BB:CC:DD:EE:55")).thenReturn(Optional.empty());
+        when(classroomResolutionService.resolveGroupId("10.10.9.55", "AA:BB:CC:DD:EE:55")).thenReturn(12L);
+        when(classroomResolutionService.resolveRole(12L, "10.10.9.55", "AA:BB:CC:DD:EE:55"))
+                .thenReturn(ClassroomResolutionService.PcRole.TEACHER);
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+        when(commandQueueRepository.findNextDispatchCandidates(eq("AA:BB:CC:DD:EE:55"), any()))
+                .thenReturn(List.of());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        ArgumentCaptor<PcMaster> captor = ArgumentCaptor.forClass(PcMaster.class);
+        verify(pcMasterRepository).save(captor.capture());
+        assertThat(captor.getValue().getGroupId()).isEqualTo(12L);
+        assertThat(captor.getValue().getRole()).isEqualTo("TEACHER");
+    }
+
+    @Test
+    void processHeartbeat_skipsAutoCatchupWithinCooldownForSameVersion() {
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress("AA:BB:CC:DD:EE:31");
+        heartbeat.setHostname("pc-31");
+        heartbeat.setIpAddress("10.10.0.31");
+        heartbeat.setAgentVersion("1.0.0");
+
+        when(pcMasterRepository.findById("AA:BB:CC:DD:EE:31"))
+                .thenReturn(Optional.empty(), Optional.of(savedPc("AA:BB:CC:DD:EE:31", "1.0.0")));
+        when(classroomResolutionService.resolveGroupId("10.10.0.31", "AA:BB:CC:DD:EE:31")).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.31", "AA:BB:CC:DD:EE:31"))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq("AA:BB:CC:DD:EE:31"), any()))
+                .thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+        heartbeatService.processHeartbeat(heartbeat);
+
+        verify(fileDistributionOrchestrator, times(1)).tryAutoCatchUpOnHeartbeat(any());
+    }
+
+    @Test
+    void processHeartbeat_canDisableCommandDispatchOnHeartbeat() {
+        ReflectionTestUtils.setField(heartbeatService, "dispatchCommandOnHeartbeat", false);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress("AA:BB:CC:DD:EE:41");
+        heartbeat.setHostname("pc-41");
+        heartbeat.setIpAddress("10.10.0.41");
+
+        when(pcMasterRepository.findById("AA:BB:CC:DD:EE:41")).thenReturn(Optional.empty());
+        when(classroomResolutionService.resolveGroupId("10.10.0.41", "AA:BB:CC:DD:EE:41")).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.41", "AA:BB:CC:DD:EE:41"))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        var response = heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(response).isNull();
+        verify(commandQueueRepository, never()).findNextDispatchCandidates(eq("AA:BB:CC:DD:EE:41"), any());
+    }
+
+    private PcMaster savedPc(String macAddress, String agentVersion) {
+        PcMaster pc = new PcMaster();
+        pc.setMacAddress(macAddress);
+        pc.setPcName("pc");
+        pc.setIpAddress("10.10.0.31");
+        pc.setStatus("ONLINE");
+        pc.setRole("UNKNOWN");
+        pc.setAgentVersion(agentVersion);
+        return pc;
     }
 }

@@ -2,9 +2,11 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
@@ -19,26 +21,29 @@
     <padding><Insets top="20" right="20" bottom="20" left="20" /></padding>
     <children>
 
-        <!-- 헤더 -->
+        <Label text="토큰 관리" styleClass="tab-title" />
+
         <HBox alignment="CENTER_LEFT" spacing="10">
             <children>
-                <Label text="토큰 관리" styleClass="tab-title" />
-                <Label fx:id="updatedLabel" text="" styleClass="detail-updated-label" />
-                <Region HBox.hgrow="ALWAYS" />
-                <Button fx:id="copyKeyBtn" text="설치키 복사" styleClass="btn-primary-outline">
-                    <tooltip><Tooltip text="설치키를 클립보드에 복사합니다" /></tooltip>
-                </Button>
-                <Button fx:id="refreshBtn" text="조회" styleClass="btn-primary" />
+                <Label text="보기:" styleClass="pcmgmt-label-title" />
+                <ComboBox fx:id="agentStatusFilter" promptText="상태 전체" prefWidth="120" styleClass="filter-combo" />
+                <ComboBox fx:id="tokenStatusFilter" promptText="인증 전체" prefWidth="120" styleClass="filter-combo" />
+                <TextField fx:id="tokenSearchField" prefWidth="200" promptText="검색: PC명, IP, MAC" />
+                <Button fx:id="refreshBtn" text="새로고침" styleClass="btn-primary" />
+                <Label fx:id="updatedLabel" text="" styleClass="pcmgmt-summary-label" HBox.hgrow="ALWAYS" />
             </children>
         </HBox>
 
         <!-- 설치키 + 등록 제어 -->
-        <HBox spacing="10" alignment="CENTER_LEFT">
+        <HBox spacing="10" alignment="CENTER_LEFT" styleClass="pcmgmt-section-divider">
             <children>
                 <Label text="설치 키:" styleClass="mgmt-section-label" />
                 <Label fx:id="installKeyLabel" text="불러오는 중..." styleClass="code-tag" />
-                <Button fx:id="refreshKeyBtn" text="↺" styleClass="btn-neutral,btn-sm">
-                    <tooltip><Tooltip text="설치 키 재발급 (기존 키 무효화)" /></tooltip>
+                <Button fx:id="copyKeyBtn" text="복사" styleClass="btn-primary-outline,btn-sm">
+                    <tooltip><Tooltip text="설치키를 클립보드에 복사합니다" /></tooltip>
+                </Button>
+                <Button fx:id="refreshKeyBtn" text="변경" styleClass="btn-warning,btn-sm">
+                    <tooltip><Tooltip text="설치 키를 변경합니다. 기존 키는 무효화됩니다." /></tooltip>
                 </Button>
                 <Button fx:id="downloadConfigBtn" text="설정 파일 다운로드" styleClass="btn-neutral,btn-sm" />
                 <Region HBox.hgrow="ALWAYS" />

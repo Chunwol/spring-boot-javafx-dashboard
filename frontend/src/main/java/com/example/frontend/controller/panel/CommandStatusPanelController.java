@@ -21,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -35,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class CommandStatusPanelController {
 
-    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter UPDATED_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
     private static final Logger log = LoggerFactory.getLogger(CommandStatusPanelController.class);
     private static final String FETCH_STATUS_QUERY = "QUEUED,DELIVERED,ACKED,COMPLETED,FAILED";
     private static final String ALL_FILTER = "전체";
@@ -240,7 +239,7 @@ public class CommandStatusPanelController {
                 .exceptionally(ex -> {
                     Platform.runLater(() -> {
                         summaryLabel.setText("서버 연결 오류");
-                        lastUpdatedLabel.setText("마지막 갱신: 실패 " + LocalTime.now().format(TIME_FORMAT));
+                        lastUpdatedLabel.setText(LocalDateTime.now().format(UPDATED_FORMAT) + " 갱신 실패");
                     });
                     return null;
                 });
@@ -364,7 +363,7 @@ public class CommandStatusPanelController {
         if (recent.isEmpty()) {
             summaryLabel.setText("대기 중인 명령 없음");
             commandTable.setItems(FXCollections.observableArrayList());
-            lastUpdatedLabel.setText("마지막 갱신: " + LocalTime.now().format(TIME_FORMAT));
+            lastUpdatedLabel.setText(LocalDateTime.now().format(UPDATED_FORMAT) + " 갱신됨");
             return;
         }
 
@@ -372,7 +371,7 @@ public class CommandStatusPanelController {
             "최근 120건: 진행중 %d (Q:%d D:%d A:%d 검증:%d) / 시점저장 %d / 완료 %d / 실패 %d",
             activeTotal, queued, delivered, acked, verifying, scmateReset, completed, failed));
         applyTableView();
-        lastUpdatedLabel.setText("마지막 갱신: " + LocalTime.now().format(TIME_FORMAT));
+        lastUpdatedLabel.setText(LocalDateTime.now().format(UPDATED_FORMAT) + " 갱신됨");
 
         // 선택된 명령이 있으면 최신 상태로 패널 갱신 → 진행 단계가 자동으로 진행
         if (selectedKey != null) {
@@ -654,9 +653,19 @@ public class CommandStatusPanelController {
             return "명령완료";
         }
         
-        // 기본 상태
+        // 기본 상태 (FAILED는 stderr 첫 줄을 함께 표시)
         return switch(commandStatus) {
-            case QUEUED, DELIVERED, ACKED, COMPLETED, FAILED -> commandStatus.label();
+            case QUEUED, DELIVERED, ACKED, COMPLETED -> commandStatus.label();
+            case FAILED -> {
+                String err = asText(row, "stderr").trim();
+                if (!err.isBlank()) {
+                    int nl = err.indexOf('\n');
+                    String firstLine = nl > 0 ? err.substring(0, nl).trim() : err;
+                    if (firstLine.length() > 80) firstLine = firstLine.substring(0, 80) + "…";
+                    yield "실패 — " + firstLine;
+                }
+                yield commandStatus.label();
+            }
             default -> rawStatus.isBlank() ? "-" : rawStatus;
         };
     }
@@ -809,7 +818,7 @@ public class CommandStatusPanelController {
     /** 메타 행(키-값)을 1회 생성하고 값 라벨을 metaValueLabels에 보관. */
     private void buildDetailMeta() {
         if (detailMetaBox == null) return;
-        String[] keys = {"강의실", "PC", "IP", "실행방식", "전송대상", "대상경로", "종료코드", "검증상태", "스크립트"};
+        String[] keys = {"강의실", "PC", "IP", "오류 내용", "실행방식", "전송대상", "대상경로", "종료코드", "검증상태", "스크립트"};
         for (String key : keys) {
             Label k = new Label(key);
             k.getStyleClass().add("meta-key");
@@ -839,6 +848,8 @@ public class CommandStatusPanelController {
         metaValueLabels.get("강의실").setText(orDash(extractGroupName(row)));
         metaValueLabels.get("PC").setText(orDash(asText(row, "pcName")));
         metaValueLabels.get("IP").setText(orDash(asText(row, "ipAddress")));
+        String errDetail = resolveCommandStatus(row) == CommandStatus.FAILED ? asText(row, "stderr") : "";
+        metaValueLabels.get("오류 내용").setText(orDash(errDetail));
         metaValueLabels.get("실행방식").setText(orDash(extractRunMode(row)));
         metaValueLabels.get("전송대상").setText(orDash(extractTransferDisplay(row)));
         metaValueLabels.get("대상경로").setText(orDash(extractDestinationDisplay(row)));
@@ -872,20 +883,41 @@ public class CommandStatusPanelController {
             default -> 0;
         };
         for (int i = 0; i < STEP_LABELS.length; i++) {
-            Label step = new Label(STEP_LABELS[i]);
-            step.getStyleClass().add("cmd-step");
-            if (failed && i == current) step.getStyleClass().add("cmd-step-failed");
-            else if (i < current) step.getStyleClass().add("cmd-step-done");
-            else if (i == current) step.getStyleClass().add("cmd-step-active");
-            else step.getStyleClass().add("cmd-step-pending");
-            progressStepsBox.getChildren().add(step);
+            boolean isFailed = failed && i == current;
+            boolean isDone = i < current;
+            boolean isActive = i == current && !failed;
+
+            Label badge = new Label(isFailed ? "!" : (isDone ? "✓" : String.valueOf(i + 1)));
+            badge.getStyleClass().add("cmd-step-badge");
+            if (isFailed) badge.getStyleClass().add("cmd-step-badge-failed");
+            else if (isDone) badge.getStyleClass().add("cmd-step-badge-done");
+            else if (isActive) badge.getStyleClass().add("cmd-step-badge-active");
+            else badge.getStyleClass().add("cmd-step-badge-pending");
+
+            Label caption = new Label(STEP_LABELS[i]);
+            caption.getStyleClass().add("cmd-step-label");
+            if (isFailed) caption.getStyleClass().add("cmd-step-label-failed");
+            else if (isDone) caption.getStyleClass().add("cmd-step-label-done");
+            else if (isActive) caption.getStyleClass().add("cmd-step-label-active");
+            else caption.getStyleClass().add("cmd-step-label-pending");
+
+            VBox stepBox = new VBox(6, badge, caption);
+            stepBox.getStyleClass().add("cmd-step-item");
+            stepBox.setAlignment(javafx.geometry.Pos.TOP_CENTER);
+            progressStepsBox.getChildren().add(stepBox);
 
             if (i < STEP_LABELS.length - 1) {
+                StackPane connectorBox = new StackPane();
+                connectorBox.getStyleClass().add("cmd-step-connector-wrap");
                 Region connector = new Region();
                 connector.getStyleClass().add("cmd-step-connector");
+                connector.setMaxWidth(Double.MAX_VALUE);
                 if (i < current) connector.getStyleClass().add("cmd-step-connector-done");
-                HBox.setHgrow(connector, Priority.ALWAYS);
-                progressStepsBox.getChildren().add(connector);
+                connectorBox.getChildren().add(connector);
+                connectorBox.setPadding(new javafx.geometry.Insets(14, 0, 0, 0));
+                connectorBox.setAlignment(javafx.geometry.Pos.TOP_CENTER);
+                progressStepsBox.getChildren().add(connectorBox);
+                HBox.setHgrow(connectorBox, Priority.ALWAYS);
             }
         }
     }

@@ -29,8 +29,13 @@
                 <children>
                     <Label text="네트워크" styleClass="tab-title" />
                     <Region HBox.hgrow="ALWAYS" />
-                    <Label fx:id="updatedLabel" text="" styleClass="detail-updated-label" />
                     <ComboBox fx:id="statusFilter" prefWidth="120" promptText="상태" styleClass="filter-combo" />
+                    <Button fx:id="refreshBtn" text="새로고침" styleClass="btn-primary" />
+                    <Label fx:id="updatedLabel" text="" styleClass="detail-updated-label" />
+                    <Button fx:id="fullscreenBtn" styleClass="tab-icon-btn">
+                        <graphic><FontIcon iconLiteral="mdi2f-fullscreen" iconSize="16" /></graphic>
+                        <tooltip><Tooltip text="전체화면 / 해제" /></tooltip>
+                    </Button>
                     <Button fx:id="downloadBtn" styleClass="tab-icon-btn">
                         <graphic><FontIcon iconLiteral="mdi2d-download" iconSize="16" /></graphic>
                         <tooltip><Tooltip text="다운로드" /></tooltip>
@@ -39,7 +44,6 @@
                         <graphic><FontIcon iconLiteral="mdi2p-printer" iconSize="16" /></graphic>
                         <tooltip><Tooltip text="인쇄" /></tooltip>
                     </Button>
-                    <Button fx:id="refreshBtn" text="조회" styleClass="btn-primary" />
                 </children>
             </HBox>
 
@@ -72,7 +76,7 @@
             <TableView fx:id="classroomTable" styleClass="app-table,network-table" VBox.vgrow="ALWAYS">
                 <columns>
                     <TableColumn fx:id="roomCol"     text="강의실"        prefWidth="140" />
-                    <TableColumn fx:id="pcCountCol"  text="PC수 (온/전)" prefWidth="120" />
+                    <TableColumn fx:id="pcCountCol"  text="PC수 (전/온)" prefWidth="120" />
                     <TableColumn fx:id="inCol"       text="인바운드(Mbps)" prefWidth="130" />
                     <TableColumn fx:id="outCol"      text="아웃바운드(Mbps)" prefWidth="130" />
                     <TableColumn fx:id="loadCol"     text="부하율"        prefWidth="200" />

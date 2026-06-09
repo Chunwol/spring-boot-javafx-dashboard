@@ -25,6 +25,9 @@ public class ClassroomSummaryDto {
     
     @Schema(description = "교사 PC 상태", example = "ONLINE")
     private String teacherPcStatus;
+
+    @Schema(description = "진행 중인 명령 수", example = "2")
+    private int runningCommandCount;
     
     @Schema(description = "마지막 하트비트 시간")
     private String lastHeartbeat;

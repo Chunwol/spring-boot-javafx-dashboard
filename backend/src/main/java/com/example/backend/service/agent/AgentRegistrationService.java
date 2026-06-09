@@ -1,5 +1,6 @@
 package com.example.backend.service.agent;
 
+import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.agent.AgentRegisterRequest;
 import com.example.backend.dto.agent.AgentRegisterResponse;
 import com.example.backend.model.UserSetting;
@@ -9,7 +10,6 @@ import com.example.backend.repository.UserSettingRepository;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +39,8 @@ public class AgentRegistrationService {
 
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
+    private final AgentTokenService agentTokenService;
+    private final AgentInstallKeyService agentInstallKeyService;
     private final UserSettingRepository userSettingRepository;
     /**
      * Stripe Lock: MAC 해시 기반으로 512개의 독립 잠금 슬롯을 사용.
@@ -49,14 +51,15 @@ public class AgentRegistrationService {
             .mapToObj(i -> new Object())
             .toArray();
 
-    @Value("${agent.install-key:CHANGE_ME_INSTALL_KEY}")
-    private String installKey;
-
     public AgentRegistrationService(PcMasterRepository pcMasterRepository,
                                     AgentAuthTokenRepository agentAuthTokenRepository,
+                                    AgentTokenService agentTokenService,
+                                    AgentInstallKeyService agentInstallKeyService,
                                     UserSettingRepository userSettingRepository) {
         this.pcMasterRepository = pcMasterRepository;
         this.agentAuthTokenRepository = agentAuthTokenRepository;
+        this.agentTokenService = agentTokenService;
+        this.agentInstallKeyService = agentInstallKeyService;
         this.userSettingRepository = userSettingRepository;
     }
 
@@ -137,6 +140,7 @@ public class AgentRegistrationService {
                 agentAuthTokenRepository.delete(token);
             }
         }
+        agentTokenService.evictCachedTokensForMac(mac);
 
         return AgentRegisterResponse.of(plainToken, "등록 완료. 하트비트를 시작하세요.");
     }
@@ -190,19 +194,23 @@ public class AgentRegistrationService {
      * 설치키를 검증한다. 타이밍 어택 방지를 위해 MessageDigest.isEqual(상수 시간 비교)을 사용한다.
      *
      * @param requestInstallKey 요청에서 전달된 설치키
-     * @throws IllegalArgumentException 설치키가 없거나 불일치하는 경우
+     * @throws UnauthorizedException 설치키가 없거나 불일치하는 경우
      */
     private void validateInstallKey(String requestInstallKey) {
         if (requestInstallKey == null || requestInstallKey.isBlank()) {
-            throw new IllegalArgumentException("설치키가 누락되었습니다.");
+            throw new UnauthorizedException("설치키가 누락되었습니다.");
+        }
+        String currentInstallKey = agentInstallKeyService.getInstallKey();
+        if (currentInstallKey == null || currentInstallKey.isBlank()) {
+            throw new UnauthorizedException("서버 설치키가 설정되어 있지 않습니다.");
         }
         // WHY MessageDigest.isEqual: 문자열 equals()는 길이 불일치 시 조기 종료하여
         // 타이밍 어택으로 키 길이를 추론할 수 있다. 상수 시간 비교로 이를 방지한다.
         boolean match = MessageDigest.isEqual(
                 requestInstallKey.getBytes(StandardCharsets.UTF_8),
-                installKey.getBytes(StandardCharsets.UTF_8));
+                currentInstallKey.getBytes(StandardCharsets.UTF_8));
         if (!match) {
-            throw new IllegalArgumentException("설치키가 유효하지 않습니다.");
+            throw new UnauthorizedException("설치키가 유효하지 않습니다.");
         }
     }
 

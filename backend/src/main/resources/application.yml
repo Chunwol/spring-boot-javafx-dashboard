@@ -22,11 +22,12 @@ spring:
       data-source-properties:
         prepareThreshold: ${DB_PREPARE_THRESHOLD:0}
   jpa:
+    open-in-view: ${JPA_OPEN_IN_VIEW:${SPRING_JPA_OPEN_IN_VIEW:false}}
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:validate}
     properties:
       hibernate.dialect: ${JPA_HIBERNATE_DIALECT:org.hibernate.dialect.PostgreSQLDialect}
-      hibernate.jdbc.time_zone: UTC
+      hibernate.jdbc.time_zone: ${APP_HIBERNATE_JDBC_TIME_ZONE:${APP_TIME_ZONE:Asia/Seoul}}
       hibernate.jdbc.batch_size: ${JPA_BATCH_SIZE:50}
       hibernate.order_inserts: true
       hibernate.order_updates: true
@@ -132,6 +133,8 @@ app:
     ip-range:
       maximum-size: ${IP_RANGE_CACHE_MAX_SIZE:10000}
       expire-minutes: ${IP_RANGE_CACHE_EXPIRE_MINUTES:10}
+  agent:
+    token-cache-ttl-seconds: ${AGENT_TOKEN_CACHE_TTL_SECONDS:300}
   jwt:
     secret: ${JWT_SECRET:your-secret-key-change-me-in-production}
     expiration: ${JWT_EXPIRATION:86400000}
@@ -141,8 +144,10 @@ app:
     offline-scan-fixed-rate-ms: ${HEARTBEAT_OFFLINE_SCAN_FIXED_RATE_MS:60000}
     offline-scan-initial-delay-ms: ${HEARTBEAT_OFFLINE_SCAN_INITIAL_DELAY_MS:30000}
     persist-interval-seconds: ${HEARTBEAT_PERSIST_INTERVAL_SECONDS:30}
+    auto-catchup-check-interval-seconds: ${HEARTBEAT_AUTO_CATCHUP_CHECK_INTERVAL_SECONDS:300}
   command:
     timeout-seconds: ${COMMAND_TIMEOUT_SECONDS:45}
+    dispatch-on-heartbeat: ${COMMAND_DISPATCH_ON_HEARTBEAT:true}
     verify-offline-timeout-seconds: ${COMMAND_VERIFY_OFFLINE_TIMEOUT_SECONDS:120}
     verify-offline-silence-seconds: ${COMMAND_VERIFY_OFFLINE_SILENCE_SECONDS:40}
     verify-online-timeout-seconds: ${COMMAND_VERIFY_ONLINE_TIMEOUT_SECONDS:240}

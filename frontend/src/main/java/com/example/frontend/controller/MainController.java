@@ -221,6 +221,12 @@ public class MainController {
             mainSidebar.setVisible(!hide);
             mainSidebar.setManaged(!hide);
         }
+        if (mainTabPane != null) {
+            mainTabPane.getStyleClass().remove("main-tabpane-chrome-hidden");
+            if (hide) {
+                mainTabPane.getStyleClass().add("main-tabpane-chrome-hidden");
+            }
+        }
     }
 
     /** Stage 종료/탭 모듈 해제 시 호출 — 리소스 정리. */

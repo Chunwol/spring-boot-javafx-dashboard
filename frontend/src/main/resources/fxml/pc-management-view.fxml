@@ -3,6 +3,7 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.control.Separator?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
@@ -40,7 +41,7 @@
             <!-- 헤더 -->
             <HBox alignment="CENTER_LEFT" spacing="8">
                 <children>
-                    <Label text="명령 전송 확인" styleClass="detail-title"/>
+                    <Label fx:id="sendPanelTitleLabel" text="명령 전송 확인" styleClass="detail-title"/>
                     <Region HBox.hgrow="ALWAYS"/>
                     <Button fx:id="sendPanelCloseBtn" styleClass="detail-close-btn">
                         <graphic><FontIcon iconLiteral="mdi2c-close" iconSize="16"/></graphic>
@@ -55,11 +56,13 @@
 
             <Separator/>
 
-            <!-- 옵션 (파일 전송·스크립트용, 동적으로 채움) -->
-            <VBox fx:id="sendOptionsBox" spacing="10"/>
-
-            <!-- 여백 -->
-            <Region VBox.vgrow="ALWAYS"/>
+            <ScrollPane fx:id="sendOptionsScroll" fitToWidth="true" hbarPolicy="NEVER"
+                        styleClass="cmd-detail-scroll" VBox.vgrow="ALWAYS">
+                <content>
+                    <!-- 옵션 (파일 전송·스크립트용, 동적으로 채움) -->
+                    <VBox fx:id="sendOptionsBox" spacing="10"/>
+                </content>
+            </ScrollPane>
 
             <!-- 버튼 -->
             <HBox spacing="8" alignment="CENTER_RIGHT">

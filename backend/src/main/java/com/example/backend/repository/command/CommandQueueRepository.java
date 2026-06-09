@@ -34,6 +34,16 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
            "ORDER BY c.createdAt DESC")
     List<CommandQueue> findActiveCommands();
 
+    @Query("""
+           SELECT p.groupId AS groupId, COUNT(c.taskId) AS activeCount
+           FROM CommandQueue c
+           JOIN PcMaster p ON LOWER(p.macAddress) = LOWER(c.macAddress)
+           WHERE c.status IN ('QUEUED','DELIVERED','ACKED')
+             AND p.groupId IN :groupIds
+           GROUP BY p.groupId
+           """)
+    List<GroupActiveCommandCountProjection> countActiveCommandsByGroupIds(@Param("groupIds") List<Long> groupIds);
+
     /** 상태 목록 기반 명령 조회 (CommandController에서 사용) */
     List<CommandQueue> findByStatusInOrderByCreatedAtDesc(List<String> statuses);
 
@@ -102,4 +112,9 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
                                       @Param("stdout") String stdout,
                                       @Param("stderr") String stderr,
                                       @Param("completedAt") LocalDateTime completedAt);
+
+           interface GroupActiveCommandCountProjection {
+               Long getGroupId();
+               Long getActiveCount();
+           }
 }

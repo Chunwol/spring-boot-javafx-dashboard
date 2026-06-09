@@ -10,6 +10,7 @@
 <?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <VBox fx:id="brokenPcBox" spacing="12" alignment="TOP_LEFT" styleClass="tab-main"
@@ -17,25 +18,22 @@
       xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml">
     <padding><Insets top="20" right="20" bottom="20" left="20" /></padding>
     <children>
-        <Label text="고장 PC 등록" styleClass="mgmt-section-title" />
-        <Label text="* 표시는 필수 입력 항목입니다. IP 주소와 고장 사유는 반드시 입력하세요."
-               styleClass="mgmt-hint-label" wrapText="true" />
+        <Label text="고장 PC" styleClass="tab-title" />
 
-        <HBox fx:id="brokenFilterBox" spacing="10.0" alignment="CENTER_LEFT">
+        <HBox fx:id="brokenForm" spacing="10.0" alignment="CENTER_LEFT" styleClass="pcmgmt-section-divider">
             <children>
-                <ComboBox fx:id="brokenGroupCombo" promptText="강의실 필터" />
-            </children>
-        </HBox>
-
-        <HBox fx:id="brokenForm" spacing="10.0" alignment="CENTER_LEFT">
-            <children>
-                <TextField fx:id="brokenIpField"   promptText="* IP 주소" prefWidth="160.0">
+                <Label text="보기:" styleClass="pcmgmt-label-title" />
+                <ComboBox fx:id="brokenGroupCombo" promptText="강의실" prefWidth="140.0" styleClass="filter-combo" />
+                <ComboBox fx:id="brokenStatusCombo" promptText="상태" prefWidth="120.0" styleClass="filter-combo" />
+                <TextField fx:id="brokenSearchField" promptText="검색: IP, MAC, 사유" prefWidth="200.0" />
+                <Region HBox.hgrow="ALWAYS" />
+                <TextField fx:id="brokenIpField" promptText="* IP 주소" prefWidth="140.0">
                     <tooltip><Tooltip text="필수 — 고장 PC의 IP 주소 (예: 192.168.1.10)" /></tooltip>
                 </TextField>
-                <TextField fx:id="brokenMacField"  promptText="MAC 주소 (선택)" prefWidth="160.0">
+                <TextField fx:id="brokenMacField" promptText="MAC 주소 (선택)" prefWidth="150.0">
                     <tooltip><Tooltip text="선택 — 알고 있으면 입력 (예: AA:BB:CC:DD:EE:FF)" /></tooltip>
                 </TextField>
-                <TextField fx:id="brokenNoteField" promptText="* 고장 사유" HBox.hgrow="ALWAYS">
+                <TextField fx:id="brokenNoteField" promptText="* 고장 사유" prefWidth="220.0">
                     <tooltip><Tooltip text="필수 — 고장 증상이나 사유를 입력하세요" /></tooltip>
                 </TextField>
                 <Button fx:id="brokenRegisterBtn" text="고장 등록" styleClass="btn-warning,btn-sm" />

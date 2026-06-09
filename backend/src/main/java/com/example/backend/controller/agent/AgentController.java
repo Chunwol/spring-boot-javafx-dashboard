@@ -2,6 +2,7 @@ package com.example.backend.controller.agent;
 
 import com.example.backend.dto.agent.AgentRegisterRequest;
 import com.example.backend.dto.agent.AgentRegisterResponse;
+import com.example.backend.service.agent.AgentInstallKeyService;
 import com.example.backend.service.agent.AgentRegistrationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +38,7 @@ import java.util.Map;
 public class AgentController {
 
     private final AgentRegistrationService agentRegistrationService;
+    private final AgentInstallKeyService agentInstallKeyService;
     private final ObjectMapper objectMapper;
 
     @Value("${server.servlet.context-path:}")
@@ -44,9 +46,6 @@ public class AgentController {
 
     @Value("${server.port:8888}")
     private int serverPort;
-
-    @Value("${agent.install-key:INST-CHANGE-ME-BEFORE-DEPLOY}")
-    private String installKey;
 
     /**
      * 에이전트 최초 등록.
@@ -123,7 +122,7 @@ public class AgentController {
             HttpServletRequest request) throws JsonProcessingException {
         Map<String, Object> config = new HashMap<>();
         config.put("serverUrl", resolveExternalServerUrl(request));
-        config.put("installKey", installKey);
+        config.put("installKey", agentInstallKeyService.getInstallKey());
         config.put("agentToken", "");
         config.put("heartbeatIntervalSec", 12);
         config.put("jitterSec", 3);

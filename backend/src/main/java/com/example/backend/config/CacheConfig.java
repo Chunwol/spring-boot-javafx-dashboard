@@ -53,7 +53,7 @@ public class CacheConfig {
     @Bean
     @ConditionalOnProperty(name = "app.cache.provider", havingValue = "caffeine")
     public CacheManager caffeineCacheManager() {
-        CaffeineCacheManager manager = new CaffeineCacheManager("ipRangeCache");
+        CaffeineCacheManager manager = new CaffeineCacheManager("ipRangeCache", "pcRoleCache");
         manager.setCaffeine(Caffeine.newBuilder()
                 .maximumSize(ipRangeCacheMaximumSize)          // 최대 10,000개 항목
                 .expireAfterWrite(ipRangeCacheExpireMinutes, TimeUnit.MINUTES) // TTL 후 만료
@@ -81,7 +81,9 @@ public class CacheConfig {
 
         return RedisCacheManager.builder(redisConnectionFactory)
                 .cacheDefaults(config)
-                .withInitialCacheConfigurations(Map.of("ipRangeCache", config)) // ipRangeCache 초기 구성
+                .withInitialCacheConfigurations(Map.of(
+                        "ipRangeCache", config,
+                        "pcRoleCache", config)) // classroom resolution caches 초기 구성
                 .transactionAware()                             // 트랜잭션 커밋 후 캐시 반영
                 .build();
     }

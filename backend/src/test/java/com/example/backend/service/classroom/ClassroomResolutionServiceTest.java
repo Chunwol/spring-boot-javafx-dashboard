@@ -1,9 +1,8 @@
 package com.example.backend.service.classroom;
 
 import com.example.backend.model.classroom.ClassroomIpRange;
+import com.example.backend.service.classroom.TeacherDeviceLookupService.TeacherDeviceMatch;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
-import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
-import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,7 +18,7 @@ import static org.mockito.Mockito.*;
 class ClassroomResolutionServiceTest {
 
     @Mock ClassroomIpRangeRepository rangeRepository;
-    @Mock ClassroomTeacherDeviceRepository teacherDeviceRepository;
+    @Mock TeacherDeviceLookupService teacherDeviceLookupService;
     @InjectMocks ClassroomResolutionService service;
 
     @Test
@@ -49,10 +48,8 @@ class ClassroomResolutionServiceTest {
 
     @Test
     void resolveGroupIdByIp_teacherDeviceIpTakesPrecedence() {
-        ClassroomTeacherDevice teacherDevice = new ClassroomTeacherDevice();
-        teacherDevice.setGroupId(30L);
-        when(teacherDeviceRepository.findFirstByIpAddress("10.0.0.10"))
-                .thenReturn(teacherDevice);
+        when(teacherDeviceLookupService.findMatch("10.0.0.10", null))
+                .thenReturn(new TeacherDeviceMatch(1L, 30L));
 
         Long groupId = service.resolveGroupIdByIp("10.0.0.10");
 
@@ -86,9 +83,8 @@ class ClassroomResolutionServiceTest {
 
     @Test
     void resolveRole_teacherByIpWithoutGroupId() {
-        ClassroomTeacherDevice device = new ClassroomTeacherDevice();
-        when(teacherDeviceRepository.findFirstByIpAddress("192.168.1.10"))
-                .thenReturn(device);
+        when(teacherDeviceLookupService.findMatch("192.168.1.10", "AA:BB:CC:DD:EE:FF"))
+                .thenReturn(new TeacherDeviceMatch(2L, 1L));
 
         assertThat(service.resolveRole(null, "192.168.1.10", "AA:BB:CC:DD:EE:FF"))
                 .isEqualTo(ClassroomResolutionService.PcRole.TEACHER);
@@ -96,9 +92,8 @@ class ClassroomResolutionServiceTest {
 
     @Test
     void resolveRole_teacherByIp() {
-        ClassroomTeacherDevice device = new ClassroomTeacherDevice();
-        when(teacherDeviceRepository.findFirstByGroupIdAndIpAddress(1L, "192.168.1.10"))
-                .thenReturn(device);
+        when(teacherDeviceLookupService.findMatch("192.168.1.10", "AA:BB:CC:DD:EE:FF"))
+                .thenReturn(new TeacherDeviceMatch(3L, 1L));
 
         assertThat(service.resolveRole(1L, "192.168.1.10", "AA:BB:CC:DD:EE:FF"))
                 .isEqualTo(ClassroomResolutionService.PcRole.TEACHER);
@@ -106,11 +101,8 @@ class ClassroomResolutionServiceTest {
 
     @Test
     void resolveRole_teacherByMac() {
-        when(teacherDeviceRepository.findFirstByGroupIdAndIpAddress(1L, "192.168.1.10"))
-                .thenReturn(null);
-        ClassroomTeacherDevice device = new ClassroomTeacherDevice();
-        when(teacherDeviceRepository.findFirstByGroupIdAndMacAddress(1L, "AA:BB:CC:DD:EE:FF"))
-                .thenReturn(device);
+        when(teacherDeviceLookupService.findMatch("192.168.1.10", "AA:BB:CC:DD:EE:FF"))
+                .thenReturn(new TeacherDeviceMatch(4L, 1L));
 
         assertThat(service.resolveRole(1L, "192.168.1.10", "AA:BB:CC:DD:EE:FF"))
                 .isEqualTo(ClassroomResolutionService.PcRole.TEACHER);
@@ -118,12 +110,38 @@ class ClassroomResolutionServiceTest {
 
     @Test
     void resolveRole_student() {
-        when(teacherDeviceRepository.findFirstByGroupIdAndIpAddress(1L, "192.168.1.50"))
-                .thenReturn(null);
-        when(teacherDeviceRepository.findFirstByGroupIdAndMacAddress(1L, "AA:BB:CC:DD:EE:FF"))
-                .thenReturn(null);
-
         assertThat(service.resolveRole(1L, "192.168.1.50", "AA:BB:CC:DD:EE:FF"))
                 .isEqualTo(ClassroomResolutionService.PcRole.STUDENT);
+    }
+
+    @Test
+    void resolveGroupIdByIp_trimsTeacherDeviceLookupInput() {
+        when(teacherDeviceLookupService.findMatch(" 10.0.0.11 ", null))
+                .thenReturn(new TeacherDeviceMatch(5L, 31L));
+
+        Long groupId = service.resolveGroupIdByIp(" 10.0.0.11 ");
+
+        assertThat(groupId).isEqualTo(31L);
+        verify(rangeRepository, never()).findAll();
+    }
+
+    @Test
+    void resolveRole_teacherByMac_ignoresCaseAndSeparators() {
+        when(teacherDeviceLookupService.findMatch("192.168.1.50", "aa-bb-cc-dd-ee-ff"))
+                .thenReturn(new TeacherDeviceMatch(6L, 1L));
+
+        assertThat(service.resolveRole(null, "192.168.1.50", "aa-bb-cc-dd-ee-ff"))
+                .isEqualTo(ClassroomResolutionService.PcRole.TEACHER);
+    }
+
+    @Test
+    void resolveGroupId_teacherDeviceMacTakesPrecedence() {
+        when(teacherDeviceLookupService.findMatch("10.0.9.9", "AA-BB-CC-DD-EE-FF"))
+                .thenReturn(new TeacherDeviceMatch(7L, 44L));
+
+        Long groupId = service.resolveGroupId("10.0.9.9", "AA-BB-CC-DD-EE-FF");
+
+        assertThat(groupId).isEqualTo(44L);
+        verify(rangeRepository, never()).findAll();
     }
 }

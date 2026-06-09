@@ -86,8 +86,15 @@ public class HeartbeatService {
     @Value("${app.command.max-retries:3}")
     private int maxCommandRetries;
 
+    @Value("${app.command.dispatch-on-heartbeat:true}")
+    private boolean dispatchCommandOnHeartbeat;
+
+    @Value("${app.heartbeat.auto-catchup-check-interval-seconds:300}")
+    private int autoCatchupCheckIntervalSeconds;
+
     private final ConcurrentMap<String, LocalDateTime> lastPcPersistedAt = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, LocalDateTime> lastTrafficPersistedAt = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AutoCatchupCheckState> lastAutoCatchupCheckedAt = new ConcurrentHashMap<>();
 
     /**
      * 하트비트 처리 + 트래픽 로그 저장 + 대기 명령 조회를 하나의 트랜잭션으로 수행.
@@ -123,7 +130,7 @@ public class HeartbeatService {
         }
 
         // 자동 그룹핑 (IP 매칭 실패 시 기존 groupId를 해제)
-        Long groupId = classroomResolutionService.resolveGroupIdByIp(heartbeat.getIpAddress());
+        Long groupId = classroomResolutionService.resolveGroupId(heartbeat.getIpAddress(), mac);
         pc.setGroupId(groupId);
 
         if ((previousGroupId != null && !previousGroupId.equals(groupId))
@@ -166,11 +173,7 @@ public class HeartbeatService {
         handleAgentSessionChange(mac, previousAgentSessionId, pc.getLastAgentSessionId(), now);
 
         // 최신/진행중 배포 기준 버전과 다를 경우, 늦게 켜진 에이전트를 자동 캐치업 대상으로 추가한다.
-        try {
-            fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(pc);
-        } catch (Exception ex) {
-            log.warn("자동 캐치업 큐잉 실패 mac={} message={}", mac, ex.getMessage());
-        }
+        maybeAutoCatchUpOnHeartbeat(pc, now);
 
         // SCMATE 초기화 복구 완료 자동 감지
         // PC가 OFFLINE → ONLINE으로 복귀하면 SCMATE 복구 완료로 표시
@@ -193,6 +196,9 @@ public class HeartbeatService {
         persistTrafficSamples(mac, heartbeat, now);
 
         // 대기 명령 꺼내기: QUEUED -> DELIVERED (CAS — long-poll과 race condition 방지)
+        if (!dispatchCommandOnHeartbeat) {
+            return null;
+        }
         return dispatchNextCommand(mac);
     }
 
@@ -359,6 +365,42 @@ public class HeartbeatService {
         return Math.max(0L, Math.round(value));
     }
 
+    private void maybeAutoCatchUpOnHeartbeat(PcMaster pc, LocalDateTime now) {
+        if (pc == null || pc.getMacAddress() == null || pc.getMacAddress().isBlank()) {
+            return;
+        }
+        if (!shouldRunAutoCatchupCheck(pc, now)) {
+            return;
+        }
+
+        String currentVersion = normalizeVersion(pc.getAgentVersion());
+        lastAutoCatchupCheckedAt.put(pc.getMacAddress(), new AutoCatchupCheckState(now, currentVersion));
+
+        try {
+            fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(pc);
+        } catch (Exception ex) {
+            log.warn("자동 캐치업 큐잉 실패 mac={} message={}", pc.getMacAddress(), ex.getMessage());
+        }
+    }
+
+    private boolean shouldRunAutoCatchupCheck(PcMaster pc, LocalDateTime now) {
+        if (autoCatchupCheckIntervalSeconds <= 0) {
+            return true;
+        }
+
+        AutoCatchupCheckState previous = lastAutoCatchupCheckedAt.get(pc.getMacAddress());
+        if (previous == null) {
+            return true;
+        }
+
+        String currentVersion = normalizeVersion(pc.getAgentVersion());
+        if (!Objects.equals(previous.agentVersion(), currentVersion)) {
+            return true;
+        }
+
+        return Duration.between(previous.checkedAt(), now).getSeconds() >= autoCatchupCheckIntervalSeconds;
+    }
+
     private void registerGroupReassignmentAudit(String mac, String detailJson, String ipAddress) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             auditService.log(mac, "PC_GROUP_REASSIGNED", "PC", mac, detailJson, ipAddress);
@@ -385,6 +427,14 @@ public class HeartbeatService {
             return null;
         }
         String trimmed = sessionId.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeVersion(String version) {
+        if (version == null) {
+            return null;
+        }
+        String trimmed = version.trim();
         return trimmed.isEmpty() ? null : trimmed;
     }
 
@@ -441,5 +491,8 @@ public class HeartbeatService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record AutoCatchupCheckState(LocalDateTime checkedAt, String agentVersion) {
     }
 }

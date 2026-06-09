@@ -19,7 +19,8 @@ EXPOSE 8888
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8888/actuator/health || exit 1
 
-ENV SERVER_PORT=8888 \
-    JAVA_OPTS="-Xmx512m -Xms256m"
+ENV TZ=Asia/Seoul \
+    SERVER_PORT=8888 \
+    JAVA_OPTS="-Duser.timezone=Asia/Seoul -Xmx512m -Xms256m"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar --server.port=${SERVER_PORT}"]

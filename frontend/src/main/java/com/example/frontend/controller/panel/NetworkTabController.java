@@ -33,7 +33,7 @@ import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.LocalTime;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,7 +50,8 @@ import java.util.Map;
 public class NetworkTabController {
 
     private static final Logger log = LoggerFactory.getLogger(NetworkTabController.class);
-    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter UPDATED_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
+    private static final DateTimeFormatter CHART_TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final double DETAIL_PANEL_WIDTH = 380.0;
     private static final int MAX_CHART_POINTS = 30;
 
@@ -65,6 +66,7 @@ public class NetworkTabController {
     @FXML private TableColumn<Map<String, Object>, Double> loadCol;
     @FXML private TableColumn<Map<String, Object>, String> statusCol;
     @FXML private Label       updatedLabel;
+    @FXML private Button      fullscreenBtn;
     @FXML private Button      refreshBtn;
     @FXML private Button      downloadBtn;
     @FXML private Button      printBtn;
@@ -103,7 +105,7 @@ public class NetworkTabController {
         // 강의실 표 컬럼 바인딩
         roomCol.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("groupName"))));
         pcCountCol.setCellValueFactory(d -> new SimpleStringProperty(
-                d.getValue().getOrDefault("onlinePcs", 0) + " / " + d.getValue().getOrDefault("totalPcs", 0)));
+                d.getValue().getOrDefault("totalPcs", 0) + " / " + d.getValue().getOrDefault("onlinePcs", 0)));
         inCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("inboundMbps"))));
         outCol.setCellValueFactory(d -> new SimpleStringProperty(formatMbps(d.getValue().get("outboundMbps"))));
 
@@ -166,6 +168,7 @@ public class NetworkTabController {
         statusFilter.setValue("전체");
         statusFilter.valueProperty().addListener((o, v, n) -> applyFilter());
 
+        if (fullscreenBtn != null) fullscreenBtn.setOnAction(e -> toggleFullscreen());
         refreshBtn.setOnAction(e -> refresh());
         detailCloseBtn.setOnAction(e -> hideDetail());
         if (downloadBtn != null) downloadBtn.setOnAction(e -> exportToCsv());
@@ -173,6 +176,20 @@ public class NetworkTabController {
 
         applyThresholds();
         refresh();
+    }
+
+    private boolean fullscreen = false;
+
+    private void toggleFullscreen() {
+        fullscreen = !fullscreen;
+        com.example.frontend.controller.MainController mc =
+                com.example.frontend.controller.MainController.getInstance();
+        if (mc != null) mc.setChromeHidden(fullscreen);
+        javafx.stage.Stage stage =
+                (javafx.stage.Stage) classroomTable.getScene().getWindow();
+        stage.setFullScreen(fullscreen);
+        var icon = (org.kordamp.ikonli.javafx.FontIcon) fullscreenBtn.getGraphic();
+        icon.setIconLiteral(fullscreen ? "mdi2f-fullscreen-exit" : "mdi2f-fullscreen");
     }
 
     public void startAutoRefresh(int intervalSec) {
@@ -199,12 +216,13 @@ public class NetworkTabController {
     // ── 데이터 갱신 ────────────────────────────────────────────────────────
 
     private void refresh() {
-        String now = LocalTime.now().format(TIME_FMT);
-        updatedLabel.setText(now + " 갱신");
+        LocalDateTime now = LocalDateTime.now();
+        String chartTime = now.format(CHART_TIME_FMT);
+        updatedLabel.setText(now.format(UPDATED_FMT) + " 갱신됨");
 
         // 1) 전체 트래픽 → 차트 포인트
         dashboardService.fetchNetworkTrafficAsync((in, out) -> Platform.runLater(() ->
-                appendChartPoint(now, in, out)));
+                appendChartPoint(chartTime, in, out)));
 
         // 2) 강의실 목록 → 표 행 동기화 + 강의실별 PC 트래픽 합산
         apiClient.getPagedList("/dashboard/classrooms", new TypeReference<List<ClassroomSummaryDto>>() {})

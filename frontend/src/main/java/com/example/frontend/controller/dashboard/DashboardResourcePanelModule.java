@@ -244,8 +244,8 @@ public class DashboardResourcePanelModule {
             boolean added = panels.stream().anyMatch(p ->
                     "CLASSROOM_HEARTBEAT".equalsIgnoreCase(p.getPanelType())
                             && dto.getGroupId().equals(p.getRefGroupId()));
-            String sub = (added ? "추가됨" : "미추가") + " , 온라인 "
-                    + dto.getOnlinePcs() + "/" + dto.getTotalPcs();
+            String sub = (added ? "추가됨" : "미추가") + " , 전체/온라인 "
+                    + dto.getTotalPcs() + "/" + dto.getOnlinePcs();
             return new ResourceRowModel("GROUP_ADD:" + dto.getGroupId(), dto.getGroupName(), sub,
                     ResourceKind.CLASSROOM, dto.getGroupId(), added);
         }

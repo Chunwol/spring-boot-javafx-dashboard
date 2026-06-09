@@ -30,11 +30,11 @@
                     <Button fx:id="refreshButton" text="새로고침" styleClass="btn-primary">
                         <tooltip><Tooltip text="최신 명령 실행 상태를 다시 조회합니다" /></tooltip>
                     </Button>
+                    <Label fx:id="lastUpdatedLabel" text="" styleClass="resource-sub-label" />
                 </children>
             </HBox>
 
             <Label fx:id="summaryLabel" text="조회 중..." styleClass="module-panel-summary" />
-            <Label fx:id="lastUpdatedLabel" text="마지막 갱신: -" styleClass="resource-sub-label" />
 
             <!-- 검색 -->
             <HBox alignment="CENTER_LEFT" spacing="8">

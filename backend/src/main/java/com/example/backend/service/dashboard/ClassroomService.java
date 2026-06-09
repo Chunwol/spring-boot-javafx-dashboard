@@ -9,8 +9,10 @@ import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
 import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
+import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.util.DeviceAddressUtil;
 import com.example.backend.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,17 +47,20 @@ public class ClassroomService {
     private final ClassroomIpRangeRepository ipRangeRepository;
     private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
     private final TrafficLogsRepository trafficLogsRepository;
+    private final CommandQueueRepository commandQueueRepository;
 
     public ClassroomService(ClassroomGroupRepository classroomGroupRepository,
                             PcMasterRepository pcMasterRepository,
                             ClassroomIpRangeRepository ipRangeRepository,
                             ClassroomTeacherDeviceRepository teacherDeviceRepository,
-                            TrafficLogsRepository trafficLogsRepository) {
+                            TrafficLogsRepository trafficLogsRepository,
+                            CommandQueueRepository commandQueueRepository) {
         this.classroomGroupRepository = classroomGroupRepository;
         this.pcMasterRepository = pcMasterRepository;
         this.ipRangeRepository = ipRangeRepository;
         this.teacherDeviceRepository = teacherDeviceRepository;
         this.trafficLogsRepository = trafficLogsRepository;
+        this.commandQueueRepository = commandQueueRepository;
     }
 
     /**
@@ -100,6 +105,7 @@ public class ClassroomService {
             List<PcMaster> groupPcs = groupIds.isEmpty() ? List.of() : pcMasterRepository.findByGroupIdIn(groupIds);
             List<ClassroomIpRange> allIpRanges = ipRangeRepository.findAll();
             List<ClassroomTeacherDevice> allTeachers = teacherDeviceRepository.findAll();
+            Map<Long, Long> activeCommandsByGroup = loadActiveCommandCounts(groupIds);
 
             List<ClassroomSummaryDto> summaries = new ArrayList<>();
 
@@ -133,10 +139,8 @@ public class ClassroomService {
                 if (!teachers.isEmpty()) {
                     boolean anyOnlineTeacher = teachers.stream().anyMatch(t -> {
                         List<PcMaster> candidates = pcs.stream().filter(pc -> {
-                            boolean macMatch = t.getMacAddress() != null && pc.getMacAddress() != null
-                                    && t.getMacAddress().equalsIgnoreCase(pc.getMacAddress());
-                            boolean ipMatch = t.getIpAddress() != null && pc.getIpAddress() != null
-                                    && t.getIpAddress().equals(pc.getIpAddress());
+                            boolean macMatch = DeviceAddressUtil.sameMac(t.getMacAddress(), pc.getMacAddress());
+                            boolean ipMatch = DeviceAddressUtil.sameIp(t.getIpAddress(), pc.getIpAddress());
                             return macMatch || ipMatch;
                         }).toList();
                         return candidates.stream().anyMatch(pc -> pc.getLastSeen() != null
@@ -152,6 +156,7 @@ public class ClassroomService {
                 summary.setTotalPcs((int) totalCount);
                 summary.setIpRanges(ipRanges);
                 summary.setTeacherPcStatus(teacherStatus);
+                summary.setRunningCommandCount(activeCommandsByGroup.getOrDefault(groupId, 0L).intValue());
                 summary.setVisible(true);
                 summaries.add(summary);
             }
@@ -160,6 +165,23 @@ public class ClassroomService {
         } catch (Exception e) {
             logger.error("Failed to fetch classroom summaries", e);
             return new ArrayList<>();
+        }
+    }
+
+    private Map<Long, Long> loadActiveCommandCounts(List<Long> groupIds) {
+        if (groupIds == null || groupIds.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return commandQueueRepository.countActiveCommandsByGroupIds(groupIds).stream()
+                    .filter(row -> row.getGroupId() != null)
+                    .collect(Collectors.toMap(
+                            CommandQueueRepository.GroupActiveCommandCountProjection::getGroupId,
+                            row -> row.getActiveCount() == null ? 0L : row.getActiveCount(),
+                            Long::sum));
+        } catch (Exception e) {
+            logger.warn("Failed to load classroom active command counts: {}", e.getMessage());
+            return Map.of();
         }
     }
 

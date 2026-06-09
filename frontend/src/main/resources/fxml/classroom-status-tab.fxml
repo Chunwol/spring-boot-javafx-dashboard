@@ -70,7 +70,7 @@
                         <columns>
                             <TableColumn fx:id="colClassroom" text="강의실" prefWidth="120" />
                             <TableColumn fx:id="colPcStatus" text="PC상태" prefWidth="260" />
-                            <TableColumn fx:id="colOnline" text="온라인" prefWidth="100" />
+                            <TableColumn fx:id="colOnline" text="전체/온라인" prefWidth="100" />
                             <TableColumn fx:id="colStatus" text="상태" prefWidth="100" />
                             <TableColumn fx:id="colUpdated" text="갱신" prefWidth="180" />
                         </columns>

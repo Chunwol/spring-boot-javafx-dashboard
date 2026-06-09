@@ -1,12 +1,12 @@
 package com.example.backend.service.classroom;
 
 import com.example.backend.model.classroom.ClassroomIpRange;
-import com.example.backend.model.classroom.ClassroomTeacherDevice;
 import com.example.backend.repository.classroom.ClassroomIpRangeRepository;
-import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository;
+import com.example.backend.util.DeviceAddressUtil;
 import com.example.backend.util.IpRangeUtil;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,12 +27,12 @@ public class ClassroomResolutionService {
     }
 
     private final ClassroomIpRangeRepository rangeRepository;
-    private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
+    private final TeacherDeviceLookupService teacherDeviceLookupService;
 
     public ClassroomResolutionService(ClassroomIpRangeRepository rangeRepository,
-                                     ClassroomTeacherDeviceRepository teacherDeviceRepository) {
+                                      TeacherDeviceLookupService teacherDeviceLookupService) {
         this.rangeRepository = rangeRepository;
-        this.teacherDeviceRepository = teacherDeviceRepository;
+        this.teacherDeviceLookupService = teacherDeviceLookupService;
     }
 
     /**
@@ -53,14 +53,32 @@ public class ClassroomResolutionService {
     @Cacheable(value = "ipRangeCache", key = "#ip", unless = "#result == null")
     @Transactional(readOnly = true)
     public Long resolveGroupIdByIp(String ip) {
-        if (!IpRangeUtil.isIpv4(ip)) return null;
-        ClassroomTeacherDevice explicitTeacherDevice = teacherDeviceRepository.findFirstByIpAddress(ip);
-        if (explicitTeacherDevice != null && explicitTeacherDevice.getGroupId() != null) {
-            return explicitTeacherDevice.getGroupId();
+        return resolveGroupId(ip, null);
+    }
+
+    /**
+     * IP 또는 MAC 주소를 기준으로 강의실 그룹 ID를 변환한다.
+     * 교사 PC 등록 정보가 있으면 IP/MAC 둘 중 하나만 일치해도 해당 그룹을 우선 반환한다.
+     *
+     * @param ip  IPv4 주소 문자열
+     * @param mac MAC 주소 문자열
+     * @return 매핑된 그룹 ID, 없으면 null
+     */
+    @Cacheable(value = "ipRangeCache",
+            key = "T(java.lang.String).valueOf(#ip).concat('|').concat(T(java.lang.String).valueOf(#mac))",
+            unless = "#result == null")
+    @Transactional(readOnly = true)
+    public Long resolveGroupId(String ip, String mac) {
+        TeacherDeviceLookupService.TeacherDeviceMatch teacherMatch =
+                teacherDeviceLookupService.findMatch(ip, mac);
+        if (teacherMatch != null && teacherMatch.groupId() != null) {
+            return teacherMatch.groupId();
         }
+        String normalizedIp = DeviceAddressUtil.normalizeIp(ip);
+        if (!IpRangeUtil.isIpv4(normalizedIp)) return null;
         List<ClassroomIpRange> all = rangeRepository.findAll();
         for (ClassroomIpRange r : all) {
-            if (IpRangeUtil.containsIp(ip, r.getCidr(), r.getStartIp(), r.getEndIp())) {
+            if (IpRangeUtil.containsIp(normalizedIp, r.getCidr(), r.getStartIp(), r.getEndIp())) {
                 return r.getGroupId();
             }
         }
@@ -71,9 +89,12 @@ public class ClassroomResolutionService {
      * 강의실 IP 범위가 변경될 때 캐시를 전체 무효화한다.
      * IP 범위 추가/수정/삭제 이후 반드시 호출해야 한다.
      */
-    @CacheEvict(value = "ipRangeCache", allEntries = true)
+    @Caching(evict = {
+            @CacheEvict(value = "ipRangeCache", allEntries = true),
+            @CacheEvict(value = "pcRoleCache", allEntries = true)
+    })
     public void evictIpRangeCache() {
-        // Spring Cache가 evict 처리
+        teacherDeviceLookupService.evictCache();
     }
 
     /**
@@ -84,21 +105,16 @@ public class ClassroomResolutionService {
      * @param mac     PC의 MAC 주소
      * @return TEACHER, STUDENT, UNKNOWN 중 하나
      */
+    @Cacheable(
+            value = "pcRoleCache",
+            key = "T(java.lang.String).valueOf(#groupId).concat('|').concat(T(java.lang.String).valueOf(#ip)).concat('|').concat(T(java.lang.String).valueOf(#mac))",
+            sync = true)
     @Transactional(readOnly = true)
     public PcRole resolveRole(Long groupId, String ip, String mac) {
-        if (ip != null && teacherDeviceRepository.findFirstByIpAddress(ip) != null) {
-            return PcRole.TEACHER;
-        }
-        if (mac != null && teacherDeviceRepository.findFirstByMacAddress(mac) != null) {
+        if (teacherDeviceLookupService.findMatch(ip, mac) != null) {
             return PcRole.TEACHER;
         }
         if (groupId == null) return PcRole.UNKNOWN;
-        if (ip != null && teacherDeviceRepository.findFirstByGroupIdAndIpAddress(groupId, ip) != null) {
-            return PcRole.TEACHER;
-        }
-        if (mac != null && teacherDeviceRepository.findFirstByGroupIdAndMacAddress(groupId, mac) != null) {
-            return PcRole.TEACHER;
-        }
         return PcRole.STUDENT;
     }
 }

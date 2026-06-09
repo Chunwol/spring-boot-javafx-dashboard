@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      TZ: ${APP_TIME_ZONE:-Asia/Seoul}
       POSTGRES_DB: ${POSTGRES_DB:-dashboard_db}
       POSTGRES_USER: ${POSTGRES_USER:-dashboard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -52,7 +53,9 @@ services:
     ports:
       - "8888:8888"
     environment:
+      TZ: ${APP_TIME_ZONE:-Asia/Seoul}
       SERVER_PORT: 8888
+      JAVA_OPTS: -Duser.timezone=${APP_TIME_ZONE:-Asia/Seoul} -Xmx512m -Xms256m
       SERVER_FORWARD_HEADERS_STRATEGY: NATIVE
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dashboard_db}
       DB_DRIVER: org.postgresql.Driver

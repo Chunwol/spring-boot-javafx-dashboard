@@ -68,6 +68,8 @@ public class DashboardPcManagementModule {
     private static final int REMOTE_LIST_PAGE_SIZE = 200;
     private static final int REMOTE_LIST_POLL_INTERVAL_MS = 150;
     private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
+    private static final double DEFAULT_SIDE_PANEL_WIDTH = 330.0;
+    private static final double COLLECT_SIDE_PANEL_WIDTH = 520.0;
     private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
     private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";
     private static final int AGENT_ROLLOUT_INITIAL_WAVE_SIZE = 5;
@@ -84,7 +86,9 @@ public class DashboardPcManagementModule {
 
     // 전송 확인 슬라이드 패널
     @FXML private VBox   sendPanel;
+    @FXML private Label  sendPanelTitleLabel;
     @FXML private VBox   sendSummaryBox;
+    @FXML private ScrollPane sendOptionsScroll;
     @FXML private VBox   sendOptionsBox;
     @FXML private Button sendConfirmBtn;
     @FXML private Button sendCancelBtn;
@@ -107,6 +111,8 @@ public class DashboardPcManagementModule {
     private Label selectionHintLabel;
     private ComboBox<String> commandCombo;
     private Button rolloutBtn;
+    private javafx.animation.Timeline sidePanelAnim;
+    private Runnable sidePanelCleanup;
 
     // 데이터 (동기화된 컬렉션 - 백그라운드 스레드와 FX 스레드 간 동기화)
     private final List<PcStatusDto> allPcs = Collections.synchronizedList(new ArrayList<>());
@@ -791,12 +797,14 @@ public class DashboardPcManagementModule {
                     || contains(p.getMacAddress(), q)).collect(Collectors.toList());
         }
 
-        // 온라인 먼저 정렬
+        // 교사PC 우선, 호스트명(pcName) 오름차순
         display.sort((a, b) -> {
-            if (a.isOnline() != b.isOnline()) return a.isOnline() ? -1 : 1;
-            String na = a.getGroupName() != null ? a.getGroupName() : "";
-            String nb = b.getGroupName() != null ? b.getGroupName() : "";
-            return na.compareTo(nb);
+            boolean aTeacher = "TEACHER".equals(a.getRole());
+            boolean bTeacher = "TEACHER".equals(b.getRole());
+            if (aTeacher != bTeacher) return aTeacher ? -1 : 1;
+            String na = a.getPcName() != null ? a.getPcName() : "";
+            String nb = b.getPcName() != null ? b.getPcName() : "";
+            return na.compareToIgnoreCase(nb);
         });
 
         pcTable.setItems(FXCollections.observableArrayList(display));
@@ -897,11 +905,9 @@ public class DashboardPcManagementModule {
             showAlert("대상 없음", "조건에 해당하는 PC가 없습니다.", Alert.AlertType.INFORMATION);
             return;
         }
-        // 파일 수집은 원격 파일 탐색기(에이전트 파일 시스템 브라우저) 다이얼로그 필수
+        // 파일 수집은 우측 사이드 패널에서 원격 탐색 후 바로 실행
         if ("COLLECT_FILES".equals(command)) {
-            String collectPayloadJson = chooseCollectPayloadJson(targetPcs);
-            if (collectPayloadJson == null || collectPayloadJson.isBlank()) return;
-            showSendPanel(command, commandLabel, targetPcs, null, collectPayloadJson);
+            showCollectPanel(commandLabel, targetPcs);
             return;
         }
         // 나머지 모든 명령 → 슬라이드 패널 직접 오픈 (팝업 없음)
@@ -913,6 +919,70 @@ public class DashboardPcManagementModule {
         synchronized (allPcs) { return new ArrayList<>(allPcs); }
     }
 
+    private void prepareSidePanel(String title, String confirmText, String cancelText, double targetWidth) {
+        disposeSidePanelResources();
+        if (sendPanel == null) {
+            return;
+        }
+        sendPanel.getStyleClass().remove("pcmgmt-side-panel-wide");
+        if (targetWidth > DEFAULT_SIDE_PANEL_WIDTH) {
+            sendPanel.getStyleClass().add("pcmgmt-side-panel-wide");
+        }
+        sendPanel.setMaxWidth(targetWidth);
+        if (sendPanelTitleLabel != null) {
+            sendPanelTitleLabel.setText(title);
+        }
+        if (sendConfirmBtn != null) {
+            sendConfirmBtn.disableProperty().unbind();
+            sendConfirmBtn.setDisable(false);
+            sendConfirmBtn.setText(confirmText);
+        }
+        if (sendCancelBtn != null) {
+            sendCancelBtn.setText(cancelText);
+        }
+        if (sendSummaryBox != null) {
+            sendSummaryBox.getChildren().clear();
+        }
+        if (sendOptionsBox != null) {
+            sendOptionsBox.getChildren().clear();
+        }
+        if (sendOptionsScroll != null) {
+            sendOptionsScroll.setVvalue(0);
+        }
+    }
+
+    private void openSidePanel(double targetWidth) {
+        if (sendPanel == null) {
+            return;
+        }
+        if (sidePanelAnim != null) {
+            sidePanelAnim.stop();
+        }
+        sendPanel.setManaged(true);
+        sendPanel.setVisible(true);
+        if (sendPanel.getPrefWidth() <= 0) {
+            sendPanel.setPrefWidth(0);
+        }
+        sidePanelAnim = new javafx.animation.Timeline(
+                new javafx.animation.KeyFrame(javafx.util.Duration.millis(220),
+                        new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), targetWidth,
+                                javafx.animation.Interpolator.EASE_BOTH)));
+        sidePanelAnim.play();
+    }
+
+    private void disposeSidePanelResources() {
+        if (sidePanelCleanup == null) {
+            return;
+        }
+        try {
+            sidePanelCleanup.run();
+        } catch (Exception ex) {
+            log.debug("사이드 패널 정리 중 예외: {}", ex.getMessage());
+        } finally {
+            sidePanelCleanup = null;
+        }
+    }
+
     // ─────────────────────────────────────────
     // 전송 확인 슬라이드 패널
     // ─────────────────────────────────────────
@@ -921,6 +991,7 @@ public class DashboardPcManagementModule {
     private void showSendPanel(String commandType, String commandLabel, List<PcStatusDto> targetPcs,
                                TransferSource transferSource, String collectPayloadJson) {
         if (sendPanel == null) return;
+        prepareSidePanel("명령 전송 확인", "전송 실행", "취소", DEFAULT_SIDE_PANEL_WIDTH);
         long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
         long offlineCount = targetPcs.size() - onlineCount;
         boolean isFileTransfer  = "RUN_FILE_TRANSFER".equals(commandType);
@@ -947,7 +1018,6 @@ public class DashboardPcManagementModule {
 
         // ── 옵션 ─────────────────────────────────────────────────────────
         sendOptionsBox.getChildren().clear();
-        sendOptionsBox.getStyleClass().clear();
 
         // 람다 캡처용 배열
         ComboBox<String>[] runModeRef  = new ComboBox[]{null};
@@ -1195,24 +1265,26 @@ public class DashboardPcManagementModule {
         });
 
         // ── 슬라이드 인 애니메이션 ────────────────────────────────────────
-        sendPanel.setManaged(true);
-        sendPanel.setVisible(true);
-        sendPanel.setPrefWidth(0);
-        javafx.animation.Timeline tl = new javafx.animation.Timeline(
-            new javafx.animation.KeyFrame(javafx.util.Duration.millis(220),
-                new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), 330,
-                    javafx.animation.Interpolator.EASE_BOTH)));
-        tl.play();
+        openSidePanel(DEFAULT_SIDE_PANEL_WIDTH);
     }
 
     private void closeSendPanel() {
         if (sendPanel == null) return;
-        javafx.animation.Timeline tl = new javafx.animation.Timeline(
+        disposeSidePanelResources();
+        if (sidePanelAnim != null) {
+            sidePanelAnim.stop();
+        }
+        sidePanelAnim = new javafx.animation.Timeline(
             new javafx.animation.KeyFrame(javafx.util.Duration.millis(160),
                 new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), 0,
                     javafx.animation.Interpolator.EASE_BOTH)));
-        tl.setOnFinished(e -> { sendPanel.setManaged(false); sendPanel.setVisible(false); });
-        tl.play();
+        sidePanelAnim.setOnFinished(e -> {
+            sendPanel.setManaged(false);
+            sendPanel.setVisible(false);
+            sendPanel.getStyleClass().remove("pcmgmt-side-panel-wide");
+            sendPanel.setMaxWidth(DEFAULT_SIDE_PANEL_WIDTH);
+        });
+        sidePanelAnim.play();
     }
 
     // ─────────────────────────────────────────
@@ -1793,26 +1865,35 @@ public class DashboardPcManagementModule {
         };
     }
 
-    private String chooseCollectPayloadJson(List<PcStatusDto> targetPcs) {
+    private void showCollectPanel(String commandLabel, List<PcStatusDto> targetPcs) {
         PcStatusDto browsePc = targetPcs.stream().filter(PcStatusDto::isOnline).findFirst().orElse(null);
         if (browsePc == null) {
             showAlert("탐색 불가", "온라인 PC가 없어 원격 탐색기를 열 수 없습니다.", Alert.AlertType.WARNING);
-            return null;
+            return;
         }
 
-        // ─── 다이얼로그 ──────────────────────────────────────────────
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("원격 파일 탐색기");
-        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        dialog.getDialogPane().setPrefWidth(1040);
-        dialog.getDialogPane().setPrefHeight(700);
+        long onlineCount = targetPcs.stream().filter(PcStatusDto::isOnline).count();
+        long offlineCount = targetPcs.size() - onlineCount;
+        String browsePcLabel = browsePc.getPcName() == null || browsePc.getPcName().isBlank()
+                ? (browsePc.getMacAddress() == null || browsePc.getMacAddress().isBlank() ? "-" : browsePc.getMacAddress())
+                : browsePc.getPcName();
 
-        // ─── 경로 툴바 ────────────────────────────────────────────
+        prepareSidePanel("파일/폴더 수집", "수집 실행", "닫기", COLLECT_SIDE_PANEL_WIDTH);
+        sendSummaryBox.getChildren().setAll(
+                styledLabel(commandLabel, "detail-section-title"),
+                styledLabel("수집 예정: " + onlineCount + "대 (온라인만)", "pcmgmt-dialog-text-success"),
+                offlineCount > 0
+                        ? styledLabel("미수집 " + offlineCount + "대 (오프라인)", "pcmgmt-dialog-text-muted")
+                        : styledLabel("전체 온라인 — 미수집 없음", "pcmgmt-dialog-text-muted"),
+                styledLabel("탐색 기준 PC: " + browsePcLabel, "pcmgmt-dialog-text-muted"),
+                styledLabel("선택한 경로를 대상 온라인 PC 전체에서 동일하게 수집합니다.", "pcmgmt-dialog-text-muted")
+        );
+
         TextField currentPathField = new TextField();
         currentPathField.setEditable(false);
         currentPathField.setPromptText("(드라이브 목록)");
         currentPathField.getStyleClass().add("rfe-path-field");
-        HBox.setHgrow(currentPathField, Priority.ALWAYS);
+        currentPathField.setMaxWidth(Double.MAX_VALUE);
 
         Button upButton      = new Button("↑ 상위");
         Button rootButton    = new Button("⌂ 루트");
@@ -1832,16 +1913,14 @@ public class DashboardPcManagementModule {
         Button goButton = new Button("이동");
         goButton.getStyleClass().add("rfe-go-btn");
 
-        HBox pathBar = new HBox(6, currentPathField, upButton, rootButton, refreshButton, usbOnlyCheck);
-        pathBar.setAlignment(Pos.CENTER_LEFT);
-        HBox navBar  = new HBox(6, pathInputField, goButton);
+        FlowPane actionRow = new FlowPane(6, 6, upButton, rootButton, refreshButton, usbOnlyCheck);
+        actionRow.setAlignment(Pos.CENTER_LEFT);
+        HBox navBar = new HBox(6, pathInputField, goButton);
         navBar.setAlignment(Pos.CENTER_LEFT);
-
-        VBox toolbar = new VBox(6, pathBar, navBar);
+        VBox toolbar = new VBox(8, currentPathField, actionRow, navBar);
         toolbar.getStyleClass().add("rfe-toolbar");
         toolbar.setPadding(new Insets(10, 12, 10, 12));
 
-        // ─── 왼쪽: 원격 파일 목록 ────────────────────────────────
         Label loadingLabel = new Label("⏳ 탐색 중...");
         loadingLabel.getStyleClass().add("rfe-loading");
         loadingLabel.setMaxWidth(Double.MAX_VALUE);
@@ -1851,7 +1930,9 @@ public class DashboardPcManagementModule {
         ListView<RemoteBrowseEntry> remoteList = new ListView<>();
         remoteList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         remoteList.getStyleClass().add("rfe-file-list");
-        VBox.setVgrow(remoteList, Priority.ALWAYS);
+        remoteList.setPrefHeight(280);
+        remoteList.setMinHeight(240);
+        remoteList.setPlaceholder(styledLabel("표시할 항목이 없습니다.", "pcmgmt-dialog-text-muted"));
 
         Button loadMoreButton = new Button("↓ 더 불러오기");
         loadMoreButton.getStyleClass().add("rfe-nav-btn");
@@ -1866,51 +1947,26 @@ public class DashboardPcManagementModule {
         pagingRow.setPadding(new Insets(5, 10, 5, 10));
         pagingRow.getStyleClass().add("rfe-paging-row");
 
-        VBox leftPanel = new VBox(0, loadingLabel, remoteList, pagingRow);
-        VBox.setVgrow(leftPanel, Priority.ALWAYS);
-        HBox.setHgrow(leftPanel, Priority.ALWAYS);
-
-        // ─── 오른쪽: 수집 경로 목록 + 설정 ─────────────────────
-        Label collTitle = new Label("수집 경로 목록");
-        collTitle.getStyleClass().add("rfe-panel-title");
-
+        javafx.collections.ObservableList<String> selectedPathItems = FXCollections.observableArrayList();
         ListView<String> selectedPathList = new ListView<>();
         selectedPathList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         selectedPathList.getStyleClass().add("rfe-file-list");
-        VBox.setVgrow(selectedPathList, Priority.ALWAYS);
+        selectedPathList.setItems(selectedPathItems);
+        selectedPathList.setPrefHeight(160);
+        selectedPathList.setMinHeight(130);
+        selectedPathList.setPlaceholder(styledLabel("아직 추가된 수집 경로가 없습니다.", "pcmgmt-dialog-text-muted"));
 
-        Button addSelectedButton    = new Button("+ 추가");
-        Button removeSelectedButton = new Button("− 제거");
+        Button addSelectedButton    = new Button("+ 선택 경로 추가");
+        Button removeSelectedButton = new Button("− 선택 항목 제거");
         addSelectedButton.getStyleClass().add("rfe-add-btn");
         removeSelectedButton.getStyleClass().add("rfe-remove-btn");
 
         HBox collBtnRow = new HBox(6, addSelectedButton, removeSelectedButton);
         collBtnRow.setAlignment(Pos.CENTER_LEFT);
 
-        Separator collSep = new Separator();
-        VBox.setMargin(collSep, new Insets(8, 0, 8, 0));
-
-        Label outputLabel = new Label("묶음 파일명 (zip)");
-        outputLabel.getStyleClass().add("rfe-panel-title");
-
         TextField outputField = new TextField("collected-bundle.zip");
         outputField.setPromptText("파일명.zip");
 
-        VBox rightPanel = new VBox(6);
-        rightPanel.getStyleClass().add("rfe-right-panel");
-        rightPanel.setPadding(new Insets(12));
-        rightPanel.setMinWidth(260);
-        rightPanel.setPrefWidth(290);
-        rightPanel.getChildren().addAll(
-                collTitle, selectedPathList, collBtnRow, collSep, outputLabel, outputField
-        );
-
-        // ─── 메인 수평 분할 영역 ─────────────────────────────────
-        Separator vertDivider = new Separator(Orientation.VERTICAL);
-        HBox mainArea = new HBox(0, leftPanel, vertDivider, rightPanel);
-        VBox.setVgrow(mainArea, Priority.ALWAYS);
-
-        // ─── 하단 상태바 ─────────────────────────────────────────
         Label driveStatusLabel = new Label("로딩 중...");
         driveStatusLabel.getStyleClass().add("rfe-status-text");
         driveStatusLabel.setMaxWidth(Double.MAX_VALUE);
@@ -1930,14 +1986,21 @@ public class DashboardPcManagementModule {
         statusBar.getStyleClass().add("rfe-status-bar");
         statusBar.setPadding(new Insets(5, 12, 5, 12));
 
-        // ─── 최상위 레이아웃 ─────────────────────────────────────
-        VBox root = new VBox(0, toolbar, new Separator(), mainArea, statusBar);
-        VBox.setVgrow(mainArea, Priority.ALWAYS);
-        dialog.getDialogPane().setContent(root);
-        dialog.setHeaderText("탐색 대상: " + (browsePc.getPcName() == null ? browsePc.getMacAddress() : browsePc.getPcName()));
-
-        Button okBtn = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
-        if (okBtn != null) okBtn.setText("수집 실행");
+        VBox root = new VBox(10,
+                styledLabel("원격 파일 목록", "meta-key"),
+                toolbar,
+                loadingLabel,
+                remoteList,
+                pagingRow,
+                new Separator(),
+                styledLabel("수집 경로 목록", "meta-key"),
+                selectedPathList,
+                collBtnRow,
+                styledLabel("묶음 파일명 (zip)", "meta-key"),
+                outputField,
+                statusBar
+        );
+        sendOptionsBox.getChildren().setAll(root);
 
         final String[] currentPath = {""};
         final String[] driveSnapshotRef = {""};
@@ -2022,10 +2085,9 @@ public class DashboardPcManagementModule {
             return t;
         });
         refreshScheduler.scheduleAtFixedRate(() -> {
-            if (dialog.getDialogPane() == null || dialog.getDialogPane().getScene() == null) {
+            if (sendPanel == null || !sendPanel.isVisible() || sendPanel.getScene() == null) {
                 return;
             }
-            // currentPath[0] 읽기를 UI 스레드에서 수행 — 스케줄러 스레드의 가시성 문제 방지
             Platform.runLater(() -> {
                 if (currentPath[0] != null && !currentPath[0].isBlank()) {
                     return;
@@ -2040,7 +2102,7 @@ public class DashboardPcManagementModule {
                 );
             });
         }, 4, 4, TimeUnit.SECONDS);
-        dialog.setOnHidden(evt -> refreshScheduler.shutdownNow());
+        sidePanelCleanup = refreshScheduler::shutdownNow;
 
         addSelectedButton.setOnAction(e -> {
             List<RemoteBrowseEntry> selected = new ArrayList<>(remoteList.getSelectionModel().getSelectedItems());
@@ -2055,23 +2117,20 @@ public class DashboardPcManagementModule {
             for (RemoteBrowseEntry entry : selected) {
                 existing.add(resolveEntryAbsolutePath(currentPath[0], entry));
             }
-            selectedPathList.setItems(FXCollections.observableArrayList(existing));
+            selectedPathItems.setAll(existing);
         });
         removeSelectedButton.setOnAction(e -> {
             List<String> selected = new ArrayList<>(selectedPathList.getSelectionModel().getSelectedItems());
             if (selected.isEmpty()) {
                 return;
             }
-            List<String> next = new ArrayList<>(selectedPathList.getItems());
+            List<String> next = new ArrayList<>(selectedPathItems);
             next.removeAll(selected);
-            selectedPathList.setItems(FXCollections.observableArrayList(next));
+            selectedPathItems.setAll(next);
         });
 
         remoteList.setOnMouseClicked(ev -> {
-            // 더블클릭 시에만 이동 — 단순 클릭은 선택만 수행
             if (ev.getClickCount() < 2) return;
-            // 셀에서 직접 item 취득 — getSelectedItem()은 MOUSE_PRESSED~CLICKED 사이에
-            // setItems()가 끼어들면 null이 될 수 있어 셀 기반으로 우회
             javafx.scene.Node n = (javafx.scene.Node) ev.getTarget();
             while (n != null && !(n instanceof javafx.scene.control.ListCell)) n = n.getParent();
             if (!(n instanceof javafx.scene.control.ListCell)) return;
@@ -2098,35 +2157,37 @@ public class DashboardPcManagementModule {
             estimateLabel.setText(formatEstimateLabel(estimate));
         });
 
-        Optional<ButtonType> result = dialog.showAndWait();
-        if (result.isEmpty() || result.get() != ButtonType.OK) {
-            return null;
-        }
+        sendConfirmBtn.disableProperty().bind(Bindings.isEmpty(selectedPathItems));
+        sendConfirmBtn.setOnAction(ev -> {
+            List<String> paths = selectedPathItems.stream()
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .distinct()
+                    .toList();
+            if (paths.isEmpty()) {
+                showAlert("입력 오류", "수집할 파일/폴더를 1개 이상 선택하세요.", Alert.AlertType.WARNING);
+                return;
+            }
 
-        List<String> paths = selectedPathList.getItems().stream()
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .distinct()
-                .toList();
-        if (paths.isEmpty()) {
-            showAlert("입력 오류", "수집할 파일/폴더를 1개 이상 선택하세요.", Alert.AlertType.WARNING);
-            return null;
-        }
+            String outputName = outputField.getText() == null ? "" : outputField.getText().trim();
+            if (outputName.isBlank()) {
+                outputName = "collected-bundle.zip";
+            }
 
-        String outputName = outputField.getText() == null ? "" : outputField.getText().trim();
-        if (outputName.isBlank()) {
-            outputName = "collected-bundle.zip";
-        }
+            try {
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("paths", paths);
+                payload.put("outputName", outputName);
+                String collectPayloadJson = objectMapper.writeValueAsString(payload);
+                closeSendPanel();
+                executeCommand("COLLECT_FILES", targetPcs, ScriptExecutionOptions.none(), collectPayloadJson);
+            } catch (Exception e) {
+                showAlert("직렬화 오류", "수집 요청 생성에 실패했습니다.\n" + e.getMessage(), Alert.AlertType.ERROR);
+            }
+        });
 
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("paths", paths);
-            payload.put("outputName", outputName);
-            return objectMapper.writeValueAsString(payload);
-        } catch (Exception e) {
-            showAlert("직렬화 오류", "수집 요청 생성에 실패했습니다.\n" + e.getMessage(), Alert.AlertType.ERROR);
-            return null;
-        }
+        pathInputField.setOnAction(e -> goButton.fire());
+        openSidePanel(COLLECT_SIDE_PANEL_WIDTH);
     }
 
     private void loadRemoteEntriesAsync(PcStatusDto browsePc,

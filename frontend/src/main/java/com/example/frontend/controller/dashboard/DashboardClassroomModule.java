@@ -866,7 +866,7 @@ public class DashboardClassroomModule {
     }
 
     private String buildClassroomTooltipText(ClassroomSummaryDto summary) {
-        return summary.getGroupName() + " - " + summary.getOnlinePcs() + "/" + summary.getTotalPcs();
+        return summary.getGroupName() + " - 전체/온라인 " + summary.getTotalPcs() + "/" + summary.getOnlinePcs();
     }
 
     // ─── 드래그 / 리사이즈 ────────────────────────────────────────────────

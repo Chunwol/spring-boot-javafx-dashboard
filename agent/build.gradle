@@ -11,7 +11,7 @@ plugins {
 }
 
 group = 'com.example'
-version = '1.1.9'
+version = '1.1.10'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_25
@@ -157,6 +157,64 @@ tasks.register('deployPackage', Zip) {
 // deployPackage는 JAR + JRE 빌드 완료 후 실행
 tasks.named('deployPackage') { dependsOn(jar, 'buildJre') }
 
+tasks.register('prepareManualInstallSet') {
+    group = 'distribution'
+    description = 'Create MSI-free manual install set for PCs where Windows Installer is unavailable'
+    dependsOn jar, 'buildJre'
+
+    doLast {
+        def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+        def bundleDir = file("${rootDir}/dist/manual-install/PCAgent-${appVersion}-manual")
+        bundleDir.deleteDir()
+        bundleDir.mkdirs()
+
+        copy {
+            from("${layout.buildDirectory.get()}/libs/agent.jar")
+            into bundleDir
+        }
+
+        copy {
+            from(bundledJreDir)
+            into new File(bundleDir, 'jre')
+        }
+
+        copy {
+            from("${rootDir}/scripts/config.template.json")
+            into bundleDir
+            rename('config.template.json', 'config.json')
+        }
+
+        copy {
+            from("${rootDir}/scripts/install.bat")
+            from("${rootDir}/scripts/uninstall.bat")
+            from("${rootDir}/scripts/agent-watchdog.ps1")
+            from("${rootDir}/scripts/install-helper.ps1")
+            into bundleDir
+            rename('install.bat', 'install-agent.bat')
+            rename('uninstall.bat', 'uninstall-agent.bat')
+        }
+
+        copy {
+            from("${rootDir}/scripts/manual-install-readme.txt")
+            into bundleDir
+            rename('manual-install-readme.txt', 'README.txt')
+        }
+
+        println "[OK] Manual install set created: ${bundleDir.absolutePath}"
+    }
+}
+
+tasks.register('zipManualInstallSet', Zip) {
+    group = 'distribution'
+    description = 'Zip MSI-free manual install set'
+    dependsOn 'prepareManualInstallSet'
+
+    def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+    from("${rootDir}/dist/manual-install/PCAgent-${appVersion}-manual")
+    archiveFileName = "PCAgent-${appVersion}-manual.zip"
+    destinationDirectory = file("${rootDir}/dist/manual-install")
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // jpackage MSI 빌드 (SYSTEM 첫 설치 부트스트랩 + 번들 JRE 포함)
 // ═══════════════════════════════════════════════════════════════════════
@@ -193,6 +251,10 @@ tasks.register('jpackageMsi', Exec) {
         copy {
             from("${rootDir}/scripts/config.template.json")
             rename 'config.template.json', 'config.json'
+            into appInputDir
+        }
+        copy {
+            from("${rootDir}/scripts/agent-watchdog.ps1")
             into appInputDir
         }
 
@@ -248,6 +310,49 @@ tasks.register('jpackageMsi', Exec) {
             println "[OK] MSI created: ${msi.absolutePath} (${msi.length() / 1024 / 1024} MB)"
         }
     }
+}
+
+tasks.register('prepareMsiBatchSet') {
+    group = 'distribution'
+    description = 'Create batch-driven MSI install set for PCs that cannot open MSI directly'
+
+    doLast {
+        def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+        def msiFile = file("${rootDir}/dist/msi/PCAgent-${appVersion}.msi")
+        if (!msiFile.exists()) {
+            throw new GradleException("MSI not found: ${msiFile.absolutePath}")
+        }
+
+        def bundleDir = file("${rootDir}/dist/msi-batch/PCAgent-${appVersion}-batch")
+        bundleDir.deleteDir()
+        bundleDir.mkdirs()
+
+        copy {
+            from msiFile
+            into bundleDir
+        }
+
+        copy {
+            from("${rootDir}/scripts/msi-install-wrapper.bat")
+            from("${rootDir}/scripts/msi-uninstall-wrapper.bat")
+            into bundleDir
+            rename('msi-install-wrapper.bat', 'install-agent.bat')
+            rename('msi-uninstall-wrapper.bat', 'uninstall-agent.bat')
+            filter { line -> line.replace('${msiFileName}', msiFile.name) }
+        }
+
+        copy {
+            from("${rootDir}/scripts/msi-batch-readme.txt")
+            into bundleDir
+            rename('msi-batch-readme.txt', 'README.txt')
+        }
+
+        println "[OK] MSI batch set created: ${bundleDir.absolutePath}"
+    }
+}
+
+tasks.named('jpackageMsi') {
+    finalizedBy 'prepareMsiBatchSet'
 }
 
 // ═══════════════════════════════════════════════════════════════════════

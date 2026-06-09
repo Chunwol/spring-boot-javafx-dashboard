@@ -38,6 +38,9 @@ public class TokenMgmtTabController {
     @FXML private Button downloadConfigBtn;
     @FXML private Button toggleRegistrationBtn;
     @FXML private Button refreshBtn;
+    @FXML private ComboBox<String> agentStatusFilter;
+    @FXML private ComboBox<String> tokenStatusFilter;
+    @FXML private TextField tokenSearchField;
 
     @FXML private TableView<Map<String, Object>>           tokenTable;
     @FXML private TableColumn<Map<String, Object>, Boolean> colSelect;
@@ -73,6 +76,7 @@ public class TokenMgmtTabController {
     @FXML
     public void initialize() {
         setupTable();
+        setupFilters();
         wireButtons();
         load();
     }
@@ -135,9 +139,21 @@ public class TokenMgmtTabController {
     }
 
     private void refreshActionButtons() {
-        boolean anyChecked = checkMap.values().stream().anyMatch(SimpleBooleanProperty::get);
+        boolean anyChecked = getCheckedItems().size() > 0;
         revokeBtn.setDisable(!anyChecked);
         deleteBtn.setDisable(!anyChecked);
+    }
+
+    private void setupFilters() {
+        agentStatusFilter.getItems().setAll("전체", "온라인", "오프라인");
+        agentStatusFilter.getSelectionModel().selectFirst();
+        agentStatusFilter.valueProperty().addListener((obs, oldValue, newValue) -> applyFilters());
+
+        tokenStatusFilter.getItems().setAll("전체", "정상", "폐기됨");
+        tokenStatusFilter.getSelectionModel().selectFirst();
+        tokenStatusFilter.valueProperty().addListener((obs, oldValue, newValue) -> applyFilters());
+
+        tokenSearchField.textProperty().addListener((obs, oldValue, newValue) -> applyFilters());
     }
 
     // ── 버튼 연결 ─────────────────────────────────────────────────────────────
@@ -146,19 +162,22 @@ public class TokenMgmtTabController {
         refreshBtn.setOnAction(e -> load());
 
         copyKeyBtn.setOnAction(e -> {
-            if (!currentKey.isBlank() && !currentKey.equals("불러오는 중...")) {
+            if (!currentKey.isBlank()
+                    && !currentKey.equals("불러오는 중...")
+                    && !currentKey.equals("조회 실패")
+                    && !currentKey.equals("-")) {
                 ClipboardContent c = new ClipboardContent();
                 c.putString(currentKey);
                 Clipboard.getSystemClipboard().setContent(c);
                 copyKeyBtn.setText("복사됨!");
                 javafx.animation.PauseTransition t =
                         new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
-                t.setOnFinished(ev -> copyKeyBtn.setText("설치키 복사"));
+                t.setOnFinished(ev -> copyKeyBtn.setText("복사"));
                 t.play();
             }
         });
 
-        refreshKeyBtn.setOnAction(e -> loadInstallKey());
+        refreshKeyBtn.setOnAction(e -> rotateInstallKey());
         downloadConfigBtn.setOnAction(e -> downloadConfig());
         toggleRegistrationBtn.setOnAction(e -> toggleRegistration());
 
@@ -177,15 +196,14 @@ public class TokenMgmtTabController {
     private void loadInstallKey() {
         api.getJson("/admin/install-key", new TypeReference<Map<String, Object>>() {})
                 .thenAccept(resp -> Platform.runLater(() -> {
-                    if (resp == null) { installKeyLabel.setText("-"); return; }
-                    String key = str(resp.get("key"));
-                    if (key.isBlank() || "-".equals(key)) key = str(resp.get("keyPreview"));
-                    currentKey = key;
-                    installKeyLabel.setText(key.isBlank() ? "-" : key);
+                    applyInstallKey(resp);
                 }))
                 .exceptionally(ex -> {
                     log.warn("설치키 조회 실패: {}", ex.getMessage());
-                    Platform.runLater(() -> installKeyLabel.setText("조회 실패"));
+                    Platform.runLater(() -> {
+                        currentKey = "";
+                        installKeyLabel.setText("조회 실패");
+                    });
                     return null;
                 });
     }
@@ -215,9 +233,8 @@ public class TokenMgmtTabController {
                     allAgents.clear();
                     checkMap.clear();
                     if (list != null) allAgents.addAll(list);
-                    tokenTable.getItems().setAll(allAgents);
+                    applyFilters();
                     updatedLabel.setText(LocalDateTime.now().format(FMT) + " 갱신됨");
-                    refreshActionButtons();
                 }))
                 .exceptionally(ex -> {
                     log.warn("에이전트 목록 조회 실패: {}", ex.getMessage());
@@ -244,6 +261,50 @@ public class TokenMgmtTabController {
                         return null;
                     });
         });
+    }
+
+    private void rotateInstallKey() {
+        ButtonType change = new ButtonType("변경", ButtonBar.ButtonData.OK_DONE);
+        Alert confirm = new Alert(Alert.AlertType.WARNING,
+                "설치키를 변경하면 기존 설정 파일의 설치키로는 신규 등록 또는 토큰 재발급이 실패합니다.\n계속 진행하시겠습니까?",
+                change, ButtonType.CANCEL);
+        confirm.setTitle("설치키 변경");
+        confirm.setHeaderText("기존 설치키가 즉시 무효화됩니다.");
+        confirm.showAndWait().ifPresent(bt -> {
+            if (bt != change) return;
+            refreshKeyBtn.setDisable(true);
+            api.putJson("/admin/install-key", Map.of(), Map.class)
+                    .thenAccept(resp -> Platform.runLater(() -> {
+                        applyInstallKey(resp);
+                        refreshKeyBtn.setDisable(false);
+                        new Alert(Alert.AlertType.INFORMATION, "설치키가 변경되었습니다. 새 설정 파일을 배포해 주세요.").show();
+                    }))
+                    .exceptionally(ex -> {
+                        log.warn("설치키 변경 실패: {}", ex.getMessage());
+                        Platform.runLater(() -> {
+                            refreshKeyBtn.setDisable(false);
+                            new Alert(Alert.AlertType.ERROR, "설치키 변경 실패: " + ApiClient.userFacingErrorMessage(ex, "서버 오류")).show();
+                        });
+                        return null;
+                    });
+        });
+    }
+
+    private void applyInstallKey(Map<?, ?> resp) {
+        if (resp == null) {
+            currentKey = "";
+            installKeyLabel.setText("-");
+            return;
+        }
+        String fullKey = str(resp.get("key"));
+        if (fullKey.isBlank() || "-".equals(fullKey)) {
+            currentKey = "";
+            String preview = str(resp.get("keyPreview"));
+            installKeyLabel.setText(preview.isBlank() ? "-" : preview);
+            return;
+        }
+        currentKey = fullKey;
+        installKeyLabel.setText(fullKey);
     }
 
     private void applyRegistrationState(boolean enabled) {
@@ -325,12 +386,64 @@ public class TokenMgmtTabController {
     // ── 유틸 ─────────────────────────────────────────────────────────────────
 
     private List<Map<String, Object>> getCheckedItems() {
-        return allAgents.stream()
+        return tokenTable.getItems().stream()
                 .filter(a -> {
                     SimpleBooleanProperty p = checkMap.get(str(a.get("macAddress")));
                     return p != null && p.get();
                 })
                 .toList();
+    }
+
+    private void applyFilters() {
+        String agentStatus = agentStatusFilter == null ? "전체" : agentStatusFilter.getValue();
+        String tokenStatus = tokenStatusFilter == null ? "전체" : tokenStatusFilter.getValue();
+        String query = tokenSearchField == null || tokenSearchField.getText() == null
+                ? ""
+                : tokenSearchField.getText().trim().toLowerCase();
+        List<Map<String, Object>> filtered = allAgents.stream()
+                .filter(row -> matchesAgentStatus(row, agentStatus))
+                .filter(row -> matchesTokenStatus(row, tokenStatus))
+                .filter(row -> matchesSearch(row, query))
+                .toList();
+        tokenTable.getItems().setAll(filtered);
+        tokenTable.setPlaceholder(new Label(allAgents.isEmpty()
+                ? "등록된 에이전트가 없습니다."
+                : "조건에 맞는 에이전트가 없습니다."));
+        refreshActionButtons();
+    }
+
+    private static boolean matchesAgentStatus(Map<String, Object> row, String filter) {
+        if (filter == null || "전체".equals(filter)) {
+            return true;
+        }
+        boolean online = isOnlineState(str(row.get("status")));
+        return "온라인".equals(filter) ? online : !online;
+    }
+
+    private static boolean matchesTokenStatus(Map<String, Object> row, String filter) {
+        if (filter == null || "전체".equals(filter)) {
+            return true;
+        }
+        boolean active = Boolean.TRUE.equals(row.get("tokenActive"));
+        return "정상".equals(filter) ? active : !active;
+    }
+
+    private static boolean matchesSearch(Map<String, Object> row, String query) {
+        if (query == null || query.isBlank()) {
+            return true;
+        }
+        return contains(str(row.get("pcName")), query)
+                || contains(str(row.get("ipAddress")), query)
+                || contains(str(row.get("macAddress")), query);
+    }
+
+    private static boolean contains(String value, String query) {
+        return value != null && value.toLowerCase().contains(query);
+    }
+
+    private static boolean isOnlineState(String status) {
+        String normalized = status == null ? "" : status.trim().toUpperCase();
+        return "ONLINE".equals(normalized) || "IDLE".equals(normalized);
     }
 
     private static String str(Object o) { return o == null ? "-" : o.toString(); }

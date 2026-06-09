@@ -4,6 +4,7 @@ import com.example.backend.dto.command.CommandRequestDto;
 import com.example.backend.model.user.User;
 import com.example.backend.repository.user.UserRepository;
 import com.example.backend.service.admin.AdminService;
+import com.example.backend.service.agent.AgentInstallKeyService;
 import com.example.backend.service.agent.AgentTokenService;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.service.command.CommandLifecycleService;
@@ -13,7 +14,6 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -41,15 +41,13 @@ public class AdminController {
 
     private final CommandService commandService;
     private final CommandLifecycleService commandLifecycleService;
+    private final AgentInstallKeyService agentInstallKeyService;
     private final AgentTokenService agentTokenService;
     private final AuditService auditService;
     private final JdbcTemplate jdbcTemplate;
     private final AdminService adminService;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-
-    @Value("${agent.install-key:INST-CHANGE-ME-BEFORE-DEPLOY}")
-    private String installKey;
 
     @PutMapping("/change-password")
     @Operation(summary = "관리자 비밀번호 변경", description = "현재 비밀번호 확인 후 새 비밀번호로 변경합니다.")
@@ -128,17 +126,17 @@ public class AdminController {
     }
 
     @GetMapping("/install-key")
-    @Operation(summary = "에이전트 설치키 조회", description = "설치키 설정 여부와 앞 4자리만 반환합니다 (평문 노출 방지).")
+    @Operation(summary = "에이전트 설치키 조회", description = "관리자 화면에서 복사/배포할 현재 설치키와 미리보기를 반환합니다.")
     public ResponseEntity<Map<String, Object>> findInstallKey() {
-        boolean configured = installKey != null && !installKey.isBlank()
-                && !installKey.startsWith("INST-CHANGE-ME") && !installKey.startsWith("CHANGE_ME");
-        String preview = (installKey != null && installKey.length() > 4)
-                ? installKey.substring(0, 4) + "****" : "****";
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("configured", configured);
-        resp.put("keyPreview", preview);
-        // 관리자 대시보드에서 복사/배포를 위해 전체 키도 반환 (관리자 전용 엔드포인트)
-        resp.put("key", configured ? installKey : "-");
+        return ResponseEntity.ok(agentInstallKeyService.describeInstallKey());
+    }
+
+    @PutMapping("/install-key")
+    @Operation(summary = "에이전트 설치키 변경", description = "새 설치키를 발급하고 기존 설치키로는 신규 등록되지 않도록 합니다.")
+    public ResponseEntity<Map<String, Object>> rotateInstallKey() {
+        Map<String, Object> resp = agentInstallKeyService.rotateInstallKey();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        auditService.log(username, "CHANGE_INSTALL_KEY", "AGENT", "install-key");
         return ResponseEntity.ok(resp);
     }
 

@@ -36,8 +36,8 @@
                 <Button fx:id="copyKeyBtn"        text="복사"           styleClass="btn-primary,btn-sm">
                     <tooltip><Tooltip text="설치 키를 클립보드에 복사합니다" /></tooltip>
                 </Button>
-                <Button fx:id="refreshKeyBtn"     text="↺"             styleClass="btn-neutral,btn-sm">
-                    <tooltip><Tooltip text="설치 키 새로 발급 (기존 키는 무효화됩니다)" /></tooltip>
+                <Button fx:id="refreshKeyBtn"     text="변경"           styleClass="btn-warning,btn-sm">
+                    <tooltip><Tooltip text="설치 키를 변경합니다. 기존 키는 무효화됩니다." /></tooltip>
                 </Button>
                 <Button fx:id="downloadConfigBtn" text="설정 파일 다운로드" styleClass="btn-success,btn-sm">
                     <tooltip><Tooltip text="에이전트 설치에 필요한 설정 파일을 다운로드합니다" /></tooltip>

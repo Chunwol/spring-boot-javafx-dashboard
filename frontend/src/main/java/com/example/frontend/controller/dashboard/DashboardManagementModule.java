@@ -63,6 +63,8 @@ public class DashboardManagementModule {
     private ComboBox<ClassroomSummaryDto> groupComboBox;
     private ComboBox<ClassroomSummaryDto> teacherGroupCombo;
     private ComboBox<ClassroomSummaryDto> brokenGroupCombo;
+    private ComboBox<String> brokenStatusCombo;
+    private TextField brokenSearchField;
     private TableView<IpRangeItem> ipRangeTable;
     private TableView<TeacherDeviceItem> teacherDeviceTable;
     private TableView<PcStatusDto> brokenPcTable;
@@ -240,7 +242,11 @@ public class DashboardManagementModule {
         final Button copyKeyBtnFinal = copyKeyBtn;
         copyKeyBtn.setOnAction(e -> {
             String key = installKeyLabel.getText();
-            if (!key.isBlank() && !key.equals("불러오는 중...") && !key.equals("조회 실패") && !key.equals("-")) {
+            if (!key.isBlank()
+                    && !key.equals("불러오는 중...")
+                    && !key.equals("조회 실패")
+                    && !key.equals("-")
+                    && !key.contains("****")) {
                 ClipboardContent content = new ClipboardContent();
                 content.putString(key);
                 Clipboard.getSystemClipboard().setContent(content);
@@ -251,7 +257,7 @@ public class DashboardManagementModule {
                 reset.play();
             }
         });
-        refreshKeyBtn.setOnAction(e -> loadInstallKey());
+        refreshKeyBtn.setOnAction(e -> rotateInstallKey(refreshKeyBtn));
         downloadConfigBtn.setOnAction(e -> downloadConfigJson());
         refreshAgentBtnRef = refreshAgentBtn;
         refreshAgentBtn.setOnAction(e -> loadAgentList());
@@ -371,17 +377,49 @@ public class DashboardManagementModule {
     private void loadInstallKey() {
         apiClient.getJson("/admin/install-key", new TypeReference<Map<String, Object>>() {})
                 .thenAccept(resp -> Platform.runLater(() -> {
-                    // key = 전체 키, keyPreview = 앞4자리**** (fallback)
-                    String key = resp != null
-                            ? (str(resp.get("key")).equals("-") || str(resp.get("key")).isBlank()
-                               ? str(resp.get("keyPreview")) : str(resp.get("key")))
-                            : "-";
-                    installKeyLabel.setText(key);
+                    applyInstallKey(resp);
                 }))
                 .exceptionally(ex -> {
                     Platform.runLater(() -> installKeyLabel.setText("조회 실패"));
                     return null;
                 });
+    }
+
+    private void rotateInstallKey(Button sourceButton) {
+        ButtonType change = new ButtonType("변경", ButtonBar.ButtonData.OK_DONE);
+        Alert confirm = new Alert(Alert.AlertType.WARNING,
+                "설치키를 변경하면 기존 설정 파일의 설치키로는 신규 등록 또는 토큰 재발급이 실패합니다.\n계속 진행하시겠습니까?",
+                change, ButtonType.CANCEL);
+        confirm.setTitle("설치키 변경");
+        confirm.setHeaderText("기존 설치키가 즉시 무효화됩니다.");
+        confirm.showAndWait().ifPresent(bt -> {
+            if (bt != change) return;
+            sourceButton.setDisable(true);
+            apiClient.putJson("/admin/install-key", Map.of(), Map.class)
+                    .thenAccept(resp -> Platform.runLater(() -> {
+                        applyInstallKey(resp);
+                        sourceButton.setDisable(false);
+                        new Alert(Alert.AlertType.INFORMATION, "설치키가 변경되었습니다. 새 설정 파일을 배포해 주세요.").show();
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            sourceButton.setDisable(false);
+                            new Alert(Alert.AlertType.ERROR, "설치키 변경 실패: " + errorMessage(ex)).show();
+                        });
+                        return null;
+                    });
+        });
+    }
+
+    private void applyInstallKey(Map<?, ?> resp) {
+        String key = "-";
+        if (resp != null) {
+            key = str(resp.get("key"));
+            if (key.isBlank() || "-".equals(key)) {
+                key = str(resp.get("keyPreview"));
+            }
+        }
+        installKeyLabel.setText(key.isBlank() ? "-" : key);
     }
 
     private void loadRegistrationStatus() {
@@ -698,6 +736,8 @@ public class DashboardManagementModule {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/mgmt-broken-pc-section.fxml"));
             brokenPcVBox      = loader.load();
             brokenGroupCombo  = (ComboBox<ClassroomSummaryDto>) loader.getNamespace().get("brokenGroupCombo");
+            brokenStatusCombo = (ComboBox<String>) loader.getNamespace().get("brokenStatusCombo");
+            brokenSearchField = (TextField) loader.getNamespace().get("brokenSearchField");
             brokenIpField     = (TextField) loader.getNamespace().get("brokenIpField");
             brokenMacField    = (TextField) loader.getNamespace().get("brokenMacField");
             brokenNoteField   = (TextField) loader.getNamespace().get("brokenNoteField");
@@ -711,6 +751,10 @@ public class DashboardManagementModule {
             @Override public ClassroomSummaryDto fromString(String s) { return null; }
         });
         brokenGroupCombo.setOnAction(e -> applyBrokenPcFilter());
+        brokenStatusCombo.setItems(javafx.collections.FXCollections.observableArrayList("전체", "온라인", "오프라인", "고장"));
+        brokenStatusCombo.setValue("전체");
+        brokenStatusCombo.setOnAction(e -> applyBrokenPcFilter());
+        brokenSearchField.textProperty().addListener((obs, oldValue, newValue) -> applyBrokenPcFilter());
 
         final TextField brokenIpFinal   = brokenIpField;
         final TextField brokenMacFinal  = brokenMacField;
@@ -1216,13 +1260,43 @@ public class DashboardManagementModule {
             return;
         }
         ClassroomSummaryDto selected = brokenGroupCombo == null ? null : brokenGroupCombo.getValue();
+        String statusFilter = brokenStatusCombo == null ? "전체" : brokenStatusCombo.getValue();
+        String query = brokenSearchField == null || brokenSearchField.getText() == null
+                ? ""
+                : brokenSearchField.getText().trim().toLowerCase();
         List<PcStatusDto> filtered = cachedBrokenPcs;
         if (selected != null && selected.getGroupId() != null) {
-            filtered = cachedBrokenPcs.stream()
+            filtered = filtered.stream()
                     .filter(pc -> selected.getGroupId().equals(pc.getGroupId()))
                     .toList();
         }
+        if (statusFilter != null && !"전체".equals(statusFilter)) {
+            filtered = filtered.stream()
+                    .filter(pc -> statusFilter.equals(brokenStatusLabel(pc)))
+                    .toList();
+        }
+        if (!query.isBlank()) {
+            filtered = filtered.stream()
+                    .filter(pc -> containsIgnoreCase(pc.getIpAddress(), query)
+                            || containsIgnoreCase(pc.getMacAddress(), query)
+                            || containsIgnoreCase(pc.getPcName(), query)
+                            || containsIgnoreCase(pc.getBrokenNote(), query))
+                    .toList();
+        }
         brokenPcTable.getItems().setAll(filtered);
+    }
+
+    private static String brokenStatusLabel(PcStatusDto pc) {
+        String status = pc.getStatus() == null ? "" : pc.getStatus().toUpperCase();
+        return switch (status) {
+            case "BROKEN", "FAILED" -> "고장";
+            case "ONLINE", "IDLE" -> "온라인";
+            default -> pc.isOnline() ? "온라인" : "오프라인";
+        };
+    }
+
+    private static boolean containsIgnoreCase(String value, String lowerQuery) {
+        return value != null && value.toLowerCase().contains(lowerQuery);
     }
 
     private String resolveGroupName(Long groupId) {

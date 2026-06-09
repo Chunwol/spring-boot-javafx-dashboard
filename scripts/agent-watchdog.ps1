@@ -10,14 +10,20 @@
 
 .PARAMETER InstallDir
     에이전트 설치 폴더 경로. 기본값: C:\Program Files\PCAgent
+
+.PARAMETER LauncherPath
+    실행할 런처 경로. 기본값: InstallDir\PCAgent.exe
 #>
 param(
-    [string]$InstallDir = "C:\Program Files\PCAgent"
+    [string]$InstallDir = "C:\Program Files\PCAgent",
+    [string]$LauncherPath = ""
 )
 
-$logFile = Join-Path $InstallDir "watchdog.log"
-$jarPath = Join-Path $InstallDir "agent.jar"
-$exePath = Join-Path $InstallDir "agent.exe"
+$programDataLogDir = "C:\ProgramData\PCAgent\logs"
+if (!(Test-Path $programDataLogDir)) {
+    New-Item -ItemType Directory -Path $programDataLogDir -Force -ErrorAction SilentlyContinue | Out-Null
+}
+$logFile = Join-Path $programDataLogDir "watchdog.log"
 
 # ── 로그 유틸 ──────────────────────────────────────────────────────────────
 function Write-Log {
@@ -68,9 +74,43 @@ function Find-Java {
     return $null
 }
 
+function Resolve-Launcher {
+    param([string]$InstallDir, [string]$LauncherPath)
+
+    if ($LauncherPath -and (Test-Path $LauncherPath)) {
+        return $LauncherPath
+    }
+
+    $candidates = @(
+        (Join-Path $InstallDir "PCAgent.exe"),
+        (Join-Path $InstallDir "agent.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Resolve-Jar {
+    param([string]$InstallDir)
+
+    $candidates = @(
+        (Join-Path $InstallDir "app\agent.jar"),
+        (Join-Path $InstallDir "agent.jar")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
 # ── 메인 워치독 루프 ─────────────────────────────────────────────────────
 Write-Log "================================================================"
-Write-Log "PCAgent 워치독 시작. InstallDir=$InstallDir"
+Write-Log "PCAgent 워치독 시작. InstallDir=$InstallDir LauncherPath=$LauncherPath"
 Write-Log "================================================================"
 
 $consecutiveFails = 0
@@ -79,14 +119,17 @@ while ($true) {
     Trim-Log
 
     try {
-        if (Test-Path $exePath) {
+        $resolvedLauncher = Resolve-Launcher -InstallDir $InstallDir -LauncherPath $LauncherPath
+        $resolvedJar = Resolve-Jar -InstallDir $InstallDir
+
+        if ($resolvedLauncher) {
             # Native executable 모드
-            Write-Log "agent.exe 실행 중..."
-            $proc = Start-Process -FilePath $exePath `
+            Write-Log "런처 실행 중... ($resolvedLauncher)"
+            $proc = Start-Process -FilePath $resolvedLauncher `
                 -WorkingDirectory $InstallDir `
                 -NoNewWindow -PassThru -ErrorAction Stop
 
-        } elseif (Test-Path $jarPath) {
+        } elseif ($resolvedJar) {
             # JAR 모드 - 번들 JRE → JAVA_HOME → PATH → 설치 경로 순으로 탐색
             $bundledJava = Join-Path $InstallDir "jre\bin\java.exe"
             $javaExe = if (Test-Path $bundledJava) { $bundledJava } else { Find-Java }
@@ -100,7 +143,7 @@ while ($true) {
                 "-Xmx128m",
                 "-Dpcagent.config.dir=$InstallDir",
                 "-jar",
-                $jarPath
+                $resolvedJar
             )
             $proc = Start-Process -FilePath $javaExe `
                 -ArgumentList $javaArgs `
@@ -108,7 +151,7 @@ while ($true) {
                 -NoNewWindow -PassThru -ErrorAction Stop
 
         } else {
-            Write-Log "오류: $InstallDir 에 agent.jar 또는 agent.exe가 없습니다. 60초 후 재시도..."
+            Write-Log "오류: 실행 파일(PCAgent.exe/agent.exe) 또는 agent.jar를 찾을 수 없습니다. 60초 후 재시도..."
             Start-Sleep -Seconds 60
             $consecutiveFails++
             continue

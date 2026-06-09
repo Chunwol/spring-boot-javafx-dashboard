@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -498,17 +499,72 @@ public class ApiClient {
     /**
      * Spring Data Page<T> 응답에서 content 리스트를 추출합니다.
      * 백엔드가 일반 List를 반환하는 경우(legacy)에도 투명하게 동작합니다.
+     * page 파라미터를 명시하지 않은 경우에는 남은 페이지를 자동으로 모두 이어 받아 합칩니다.
      */
     public <T> CompletableFuture<List<T>> getPagedList(String path, TypeReference<List<T>> typeRef) {
-        return get(path).thenApply(body -> {
+        return get(path).thenCompose(body -> {
             try {
                 com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(body);
-                com.fasterxml.jackson.databind.JsonNode content = root.has("content") ? root.get("content") : root;
-                return objectMapper.convertValue(content, typeRef);
+                List<T> firstPage = extractPagedContent(root, typeRef);
+                if (!root.has("content") || hasQueryParam(path, "page")) {
+                    return CompletableFuture.completedFuture(firstPage);
+                }
+
+                int totalPages = Math.max(1, root.path("totalPages").asInt(1));
+                if (totalPages <= 1) {
+                    return CompletableFuture.completedFuture(firstPage);
+                }
+
+                int size = root.path("size").asInt(0);
+                List<CompletableFuture<List<T>>> pageFutures = new ArrayList<>();
+                for (int page = 1; page < totalPages; page++) {
+                    pageFutures.add(fetchPagedContent(appendPageParams(path, page, size), typeRef));
+                }
+
+                return CompletableFuture.allOf(pageFutures.toArray(CompletableFuture[]::new))
+                        .thenApply(ignored -> {
+                            List<T> merged = new ArrayList<>(firstPage);
+                            for (CompletableFuture<List<T>> future : pageFutures) {
+                                merged.addAll(future.join());
+                            }
+                            return merged;
+                        });
             } catch (Exception e) {
-                throw new java.util.concurrent.CompletionException(e);
+                return CompletableFuture.failedFuture(e);
             }
         });
+    }
+
+    private <T> CompletableFuture<List<T>> fetchPagedContent(String path, TypeReference<List<T>> typeRef) {
+        return get(path).thenApply(body -> {
+            try {
+                return extractPagedContent(objectMapper.readTree(body), typeRef);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        });
+    }
+
+    private <T> List<T> extractPagedContent(com.fasterxml.jackson.databind.JsonNode root,
+                                            TypeReference<List<T>> typeRef) {
+        com.fasterxml.jackson.databind.JsonNode content = root.has("content") ? root.get("content") : root;
+        return objectMapper.convertValue(content, typeRef);
+    }
+
+    private String appendPageParams(String path, int page, int size) {
+        StringBuilder builder = new StringBuilder(path);
+        builder.append(path.contains("?") ? "&" : "?")
+                .append("page=").append(page);
+        if (size > 0 && !hasQueryParam(path, "size")) {
+            builder.append("&size=").append(size);
+        }
+        return builder.toString();
+    }
+
+    private boolean hasQueryParam(String path, String name) {
+        String lower = path == null ? "" : path.toLowerCase(java.util.Locale.ROOT);
+        String key = name == null ? "" : name.toLowerCase(java.util.Locale.ROOT) + "=";
+        return lower.contains("?" + key) || lower.contains("&" + key);
     }
 
     public Map<String, Object> parseObject(String json) {
