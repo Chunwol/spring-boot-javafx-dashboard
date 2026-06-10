@@ -69,7 +69,7 @@ public class DashboardPcManagementModule {
     private static final int REMOTE_LIST_PAGE_SIZE = 200;
     private static final int REMOTE_LIST_POLL_INTERVAL_MS = 150;
     private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
-    private static final double DEFAULT_SIDE_PANEL_WIDTH = 330.0;
+    private static final double DEFAULT_SIDE_PANEL_WIDTH = 420.0;
     private static final double COLLECT_SIDE_PANEL_WIDTH = 520.0;
     private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
     private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";

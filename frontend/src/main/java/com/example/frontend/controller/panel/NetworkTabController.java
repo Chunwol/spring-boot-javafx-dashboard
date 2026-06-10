@@ -52,7 +52,7 @@ public class NetworkTabController {
     private static final Logger log = LoggerFactory.getLogger(NetworkTabController.class);
     private static final DateTimeFormatter UPDATED_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
     private static final DateTimeFormatter CHART_TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
-    private static final double DETAIL_PANEL_WIDTH = 380.0;
+    private static final double DETAIL_PANEL_WIDTH = 440.0;
     private static final int MAX_CHART_POINTS = 30;
 
     @FXML private AreaChart<String, Number> trafficChart;
@@ -318,6 +318,7 @@ public class NetworkTabController {
         if (panelAnim != null) panelAnim.stop();
         detailPanel.setVisible(true);
         detailPanel.setManaged(true);
+        detailPanel.setMaxWidth(DETAIL_PANEL_WIDTH);
         panelAnim = new Timeline(new KeyFrame(Duration.millis(220),
                 new KeyValue(detailPanel.prefWidthProperty(), DETAIL_PANEL_WIDTH),
                 new KeyValue(detailPanel.minWidthProperty(), DETAIL_PANEL_WIDTH)));
@@ -327,6 +328,7 @@ public class NetworkTabController {
     private void hideDetail() {
         if (panelAnim != null) panelAnim.stop();
         selectedGroupId = null;
+        detailPanel.setMaxWidth(Double.MAX_VALUE);
         panelAnim = new Timeline(new KeyFrame(Duration.millis(180),
                 new KeyValue(detailPanel.prefWidthProperty(), 0),
                 new KeyValue(detailPanel.minWidthProperty(), 0)));

@@ -56,7 +56,7 @@ public class ClassroomStatusController {
 
     private static final Logger log = LoggerFactory.getLogger(ClassroomStatusController.class);
     private static final DateTimeFormatter UPDATED_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm");
-    private static final double DETAIL_PANEL_WIDTH = 360.0;
+    private static final double DETAIL_PANEL_WIDTH = 440.0;
     private static final double PC_CARD_MIN_SIZE = 34.0;
     private static final double PC_CARD_MAX_SIZE = 48.0;
     private static final double TEACHER_PC_CARD_HEIGHT = 44.0;
@@ -1241,6 +1241,7 @@ public class ClassroomStatusController {
         if (panelAnim != null) panelAnim.stop();
         detailPanel.setVisible(true);
         detailPanel.setManaged(true);
+        detailPanel.setMaxWidth(DETAIL_PANEL_WIDTH);
         panelAnim = new Timeline(
                 new KeyFrame(Duration.millis(220),
                         new KeyValue(detailPanel.prefWidthProperty(), DETAIL_PANEL_WIDTH),
@@ -1251,6 +1252,7 @@ public class ClassroomStatusController {
     private void hideDetail() {
         if (panelAnim != null) panelAnim.stop();
         selectedClassroom = null;
+        detailPanel.setMaxWidth(Double.MAX_VALUE);
         panelAnim = new Timeline(
                 new KeyFrame(Duration.millis(180),
                         new KeyValue(detailPanel.prefWidthProperty(), 0),
