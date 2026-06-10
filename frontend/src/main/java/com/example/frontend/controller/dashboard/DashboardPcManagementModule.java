@@ -953,20 +953,17 @@ public class DashboardPcManagementModule {
     }
 
     private void openSidePanel(double targetWidth) {
-        if (sendPanel == null) {
-            return;
-        }
-        if (sidePanelAnim != null) {
-            sidePanelAnim.stop();
-        }
+        if (sendPanel == null) return;
+        if (sidePanelAnim != null) sidePanelAnim.stop();
         sendPanel.setManaged(true);
         sendPanel.setVisible(true);
-        if (sendPanel.getPrefWidth() <= 0) {
-            sendPanel.setPrefWidth(0);
-        }
+        sendPanel.setMaxWidth(targetWidth);
+        if (sendPanel.getPrefWidth() <= 0) sendPanel.setPrefWidth(0);
         sidePanelAnim = new javafx.animation.Timeline(
                 new javafx.animation.KeyFrame(javafx.util.Duration.millis(220),
                         new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), targetWidth,
+                                javafx.animation.Interpolator.EASE_BOTH),
+                        new javafx.animation.KeyValue(sendPanel.minWidthProperty(), targetWidth,
                                 javafx.animation.Interpolator.EASE_BOTH)));
         sidePanelAnim.play();
     }
@@ -1278,12 +1275,14 @@ public class DashboardPcManagementModule {
         sidePanelAnim = new javafx.animation.Timeline(
             new javafx.animation.KeyFrame(javafx.util.Duration.millis(160),
                 new javafx.animation.KeyValue(sendPanel.prefWidthProperty(), 0,
+                    javafx.animation.Interpolator.EASE_BOTH),
+                new javafx.animation.KeyValue(sendPanel.minWidthProperty(), 0,
                     javafx.animation.Interpolator.EASE_BOTH)));
         sidePanelAnim.setOnFinished(e -> {
             sendPanel.setManaged(false);
             sendPanel.setVisible(false);
             sendPanel.getStyleClass().remove("pcmgmt-side-panel-wide");
-            sendPanel.setMaxWidth(DEFAULT_SIDE_PANEL_WIDTH);
+            sendPanel.setMaxWidth(Double.MAX_VALUE);
         });
         sidePanelAnim.play();
     }
