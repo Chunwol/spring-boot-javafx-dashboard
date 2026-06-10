@@ -2093,11 +2093,12 @@ public class DashboardPcManagementModule {
                     return;
                 }
                 int epoch = browseEpoch[0];
+                // 자동 갱신은 loadingLabel 없이 조용히 수행 (사용자 액션 시에만 탐색중 표시)
                 loadRemoteEntriesAsync(
                         browsePc, "", 0, REMOTE_LIST_PAGE_SIZE, false,
                         currentPathField, remoteList, currentPath, usbOnlyCheck,
                         driveStatusLabel, driveSnapshotRef, usbDriveRoots,
-                        loadMoreButton, pagingStatusLabel, loadingLabel,
+                        loadMoreButton, pagingStatusLabel, null,
                         nextOffsetRef, hasMoreRef, remoteBrowseLoading, browseEpoch, epoch
                 );
             });

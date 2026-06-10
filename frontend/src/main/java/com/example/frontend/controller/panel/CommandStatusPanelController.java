@@ -930,6 +930,7 @@ public class CommandStatusPanelController {
         if (panelAnim != null) panelAnim.stop();
         detailPanel.setVisible(true);
         detailPanel.setManaged(true);
+        detailPanel.setMaxWidth(DETAIL_PANEL_WIDTH);
         panelAnim = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
                 javafx.util.Duration.millis(220),
                 new javafx.animation.KeyValue(detailPanel.prefWidthProperty(), DETAIL_PANEL_WIDTH),
@@ -940,6 +941,7 @@ public class CommandStatusPanelController {
     private void hideDetail() {
         if (panelAnim != null) panelAnim.stop();
         selectedKey = null;
+        detailPanel.setMaxWidth(Double.MAX_VALUE);
         panelAnim = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
                 javafx.util.Duration.millis(180),
                 new javafx.animation.KeyValue(detailPanel.prefWidthProperty(), 0),
