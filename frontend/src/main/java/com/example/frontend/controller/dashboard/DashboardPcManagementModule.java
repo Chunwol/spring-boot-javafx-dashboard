@@ -2706,8 +2706,7 @@ public class DashboardPcManagementModule {
         List<SelectableTransferItem> items = new ArrayList<>();
         Dialog<ButtonType> selectDialog = new Dialog<>();
         selectDialog.setTitle("파일/폴더 전송");
-        selectDialog.setWidth(850);
-        selectDialog.setHeight(650);
+        selectDialog.setResizable(true);
 
         VBox mainContent;
         VBox itemsList;
@@ -2773,6 +2772,9 @@ public class DashboardPcManagementModule {
         });
         
         selectDialog.getDialogPane().setContent(mainContent);
+        selectDialog.getDialogPane().setMinWidth(700);
+        selectDialog.getDialogPane().setPrefWidth(880);
+        selectDialog.getDialogPane().setMinHeight(480);
         selectDialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
         
         Button okBtn = (Button) selectDialog.getDialogPane().lookupButton(ButtonType.OK);

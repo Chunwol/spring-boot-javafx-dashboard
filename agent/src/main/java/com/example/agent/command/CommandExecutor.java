@@ -146,8 +146,13 @@ public class CommandExecutor {
             persistAndSendResult(taskId, result, limit);
         } catch (Throwable t) {
             // AWTError(headless), Error 하위 포함 — 결과 보고 누락 방지
-            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(t.getMessage());
-            log.error("명령 실행 실패 taskId={}: {}", taskId, maskedMsg);
+            String rawMsg = t.getMessage();
+            String maskedMsg = SensitiveDataMasker.maskExceptionMessage(rawMsg);
+            // getMessage()가 null이면 클래스명이라도 남겨 stderr가 비어 보이는 것을 방지
+            if (maskedMsg == null || maskedMsg.isBlank()) {
+                maskedMsg = t.getClass().getSimpleName();
+            }
+            log.error("명령 실행 실패 taskId={} type={}: {} ({})", taskId, type, maskedMsg, t.getClass().getName(), t);
             persistAndSendResult(taskId, new CommandResult(1, "", maskedMsg));
         }
     }
