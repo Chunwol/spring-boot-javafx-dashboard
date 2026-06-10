@@ -38,6 +38,7 @@ public class TokenMgmtTabController {
     @FXML private Button downloadConfigBtn;
     @FXML private Button toggleRegistrationBtn;
     @FXML private Button refreshBtn;
+    @FXML private ComboBox<String> classroomFilter;
     @FXML private ComboBox<String> agentStatusFilter;
     @FXML private ComboBox<String> tokenStatusFilter;
     @FXML private TextField tokenSearchField;
@@ -45,6 +46,7 @@ public class TokenMgmtTabController {
     @FXML private TableView<Map<String, Object>>           tokenTable;
     @FXML private TableColumn<Map<String, Object>, Boolean> colSelect;
     @FXML private TableColumn<Map<String, Object>, String>  colPcName;
+    @FXML private TableColumn<Map<String, Object>, String>  colClassroom;
     @FXML private TableColumn<Map<String, Object>, String>  colIp;
     @FXML private TableColumn<Map<String, Object>, String>  colMac;
     @FXML private TableColumn<Map<String, Object>, String>  colStatus;
@@ -58,6 +60,7 @@ public class TokenMgmtTabController {
     private final List<Map<String, Object>> allAgents = new ArrayList<>();
     /** MAC → 체크박스 선택 상태 */
     private final Map<String, SimpleBooleanProperty> checkMap = new HashMap<>();
+    private CheckBox selectAllBox;
     private String currentKey = "";
     private boolean registrationEnabled = true;
 
@@ -91,7 +94,21 @@ public class TokenMgmtTabController {
         tokenTable.setEditable(true);
         tokenTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
 
-        // 체크박스 컬럼
+        // 체크박스 컬럼 — 헤더에 전체선택 체크박스
+        selectAllBox = new CheckBox();
+        selectAllBox.setOnAction(e -> {
+            boolean checked = selectAllBox.isSelected();
+            tokenTable.getItems().forEach(row -> {
+                String mac = str(row.get("macAddress"));
+                checkMap.computeIfAbsent(mac, k -> {
+                    SimpleBooleanProperty p = new SimpleBooleanProperty(false);
+                    p.addListener((obs, ov, nv) -> refreshActionButtons());
+                    return p;
+                }).set(checked);
+            });
+            refreshActionButtons();
+        });
+        colSelect.setGraphic(selectAllBox);
         colSelect.setCellValueFactory(data -> {
             String mac = str(data.getValue().get("macAddress"));
             return checkMap.computeIfAbsent(mac, k -> {
@@ -105,9 +122,10 @@ public class TokenMgmtTabController {
         colSelect.setSortable(false);
 
         // 데이터 컬럼
-        colPcName.setCellValueFactory(d   -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
-        colIp.setCellValueFactory(d       -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
-        colMac.setCellValueFactory(d      -> new SimpleStringProperty(str(d.getValue().get("macAddress"))));
+        colPcName.setCellValueFactory(d    -> new SimpleStringProperty(str(d.getValue().get("pcName"))));
+        colClassroom.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("groupName"))));
+        colIp.setCellValueFactory(d        -> new SimpleStringProperty(str(d.getValue().get("ipAddress"))));
+        colMac.setCellValueFactory(d       -> new SimpleStringProperty(str(d.getValue().get("macAddress"))));
         colLastSeen.setCellValueFactory(d  -> new SimpleStringProperty(str(d.getValue().get("lastSeen"))));
 
         colStatus.setCellValueFactory(d -> new SimpleStringProperty(str(d.getValue().get("status"))));
@@ -139,12 +157,30 @@ public class TokenMgmtTabController {
     }
 
     private void refreshActionButtons() {
-        boolean anyChecked = getCheckedItems().size() > 0;
-        revokeBtn.setDisable(!anyChecked);
-        deleteBtn.setDisable(!anyChecked);
+        List<Map<String, Object>> visible = tokenTable.getItems();
+        long checkedCount = visible.stream()
+                .filter(a -> { SimpleBooleanProperty p = checkMap.get(str(a.get("macAddress"))); return p != null && p.get(); })
+                .count();
+        revokeBtn.setDisable(checkedCount == 0);
+        deleteBtn.setDisable(checkedCount == 0);
+        if (selectAllBox != null) {
+            if (visible.isEmpty() || checkedCount == 0) {
+                selectAllBox.setIndeterminate(false);
+                selectAllBox.setSelected(false);
+            } else if (checkedCount == visible.size()) {
+                selectAllBox.setIndeterminate(false);
+                selectAllBox.setSelected(true);
+            } else {
+                selectAllBox.setIndeterminate(true);
+            }
+        }
     }
 
     private void setupFilters() {
+        classroomFilter.getItems().setAll("전체");
+        classroomFilter.getSelectionModel().selectFirst();
+        classroomFilter.valueProperty().addListener((obs, ov, nv) -> applyFilters());
+
         agentStatusFilter.getItems().setAll("전체", "온라인", "오프라인");
         agentStatusFilter.getSelectionModel().selectFirst();
         agentStatusFilter.valueProperty().addListener((obs, oldValue, newValue) -> applyFilters());
@@ -154,6 +190,22 @@ public class TokenMgmtTabController {
         tokenStatusFilter.valueProperty().addListener((obs, oldValue, newValue) -> applyFilters());
 
         tokenSearchField.textProperty().addListener((obs, oldValue, newValue) -> applyFilters());
+    }
+
+    /** 에이전트 목록 로드 후 강의실 필터 ComboBox 항목을 실제 데이터로 채운다. */
+    private void refreshClassroomFilter() {
+        String prev = classroomFilter.getValue();
+        List<String> names = new ArrayList<>();
+        names.add("전체");
+        allAgents.stream()
+                .map(r -> str(r.get("groupName")))
+                .filter(n -> !n.isBlank() && !"-".equals(n))
+                .distinct()
+                .sorted()
+                .forEach(names::add);
+        classroomFilter.getItems().setAll(names);
+        if (prev != null && names.contains(prev)) classroomFilter.setValue(prev);
+        else classroomFilter.getSelectionModel().selectFirst();
     }
 
     // ── 버튼 연결 ─────────────────────────────────────────────────────────────
@@ -233,6 +285,7 @@ public class TokenMgmtTabController {
                     allAgents.clear();
                     checkMap.clear();
                     if (list != null) allAgents.addAll(list);
+                    refreshClassroomFilter();
                     applyFilters();
                     updatedLabel.setText(LocalDateTime.now().format(FMT) + " 갱신됨");
                 }))
@@ -395,12 +448,16 @@ public class TokenMgmtTabController {
     }
 
     private void applyFilters() {
+        // 필터 변경 시 이전 체크 상태 전부 초기화 (필터 밖 항목이 체크된 채 남는 버그 방지)
+        checkMap.values().forEach(p -> p.set(false));
+        String classroom  = classroomFilter  == null ? "전체" : classroomFilter.getValue();
         String agentStatus = agentStatusFilter == null ? "전체" : agentStatusFilter.getValue();
         String tokenStatus = tokenStatusFilter == null ? "전체" : tokenStatusFilter.getValue();
         String query = tokenSearchField == null || tokenSearchField.getText() == null
                 ? ""
                 : tokenSearchField.getText().trim().toLowerCase();
         List<Map<String, Object>> filtered = allAgents.stream()
+                .filter(row -> matchesClassroom(row, classroom))
                 .filter(row -> matchesAgentStatus(row, agentStatus))
                 .filter(row -> matchesTokenStatus(row, tokenStatus))
                 .filter(row -> matchesSearch(row, query))
@@ -410,6 +467,11 @@ public class TokenMgmtTabController {
                 ? "등록된 에이전트가 없습니다."
                 : "조건에 맞는 에이전트가 없습니다."));
         refreshActionButtons();
+    }
+
+    private static boolean matchesClassroom(Map<String, Object> row, String filter) {
+        if (filter == null || "전체".equals(filter)) return true;
+        return filter.equals(str(row.get("groupName")));
     }
 
     private static boolean matchesAgentStatus(Map<String, Object> row, String filter) {
