@@ -690,6 +690,7 @@
 .legend-label { -fx-font-size: 12px; -fx-text-fill: #475569; }
 .legend-dot-online  { -fx-fill: #22c55e; }
 .legend-dot-running { -fx-fill: #facc15; }
+.legend-dot-warn    { -fx-fill: #f97316; }
 .legend-dot-offline { -fx-fill: #ef4444; }
 
 .header-icon-btn {
@@ -847,7 +848,7 @@
 }
 .filter-combo:hover { -fx-border-color: #cbd5e1; }
 .filter-combo .arrow, .filter-combo .arrow-button .arrow { -fx-background-color: #64748b; }
-.filter-combo .list-cell { -fx-text-fill: #334155; -fx-padding: 3 8; }
+.filter-combo .list-cell { -fx-text-fill: #334155; -fx-padding: 5 10; -fx-font-size: 13px; }
 
 .btn-primary-outline, .btn-danger-outline {
     -fx-background-color: #ffffff;
@@ -2623,7 +2624,8 @@
 .choice-box .label,
 .date-picker .text-field,
 .color-picker .label {
-    -fx-padding: 0 10 0 10;
+    -fx-padding: 5 10 5 10;
+    -fx-font-size: 13px;
 }
 
 .button,

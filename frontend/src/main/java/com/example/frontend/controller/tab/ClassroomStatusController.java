@@ -179,21 +179,10 @@ public class ClassroomStatusController {
             protected void updateItem(String val, boolean empty) {
                 super.updateItem(val, empty);
                 if (empty || val == null) { setText(null); setGraphic(null); return; }
-                if (val.contains(",")) {
-                    HBox box = new HBox(4);
-                    box.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-                    for (String part : val.split(",")) {
-                        String t = part.trim();
-                        Label badge = new Label(t);
-                        badge.getStyleClass().addAll("status-badge", "status-badge-" + statusToClass(t));
-                        box.getChildren().add(badge);
-                    }
-                    setGraphic(box);
-                } else {
-                    Label badge = new Label(val);
-                    badge.getStyleClass().addAll("status-badge", "status-badge-" + statusToClass(val));
-                    setGraphic(badge);
-                }
+                Label badge = new Label(val);
+                badge.getStyleClass().add("status-badge");
+                badge.getStyleClass().add("status-badge-" + statusToClass(val));
+                setGraphic(badge);
                 setText(null);
             }
         });
@@ -1084,7 +1073,7 @@ public class ClassroomStatusController {
         filtered.setPredicate(r -> {
             if (r == null) return false;
             if (classroom != null && !"전체".equals(classroom) && !classroom.equals(r.getGroupName())) return false;
-            if (status != null && !"전체".equals(status) && !deriveStatusLabel(r).contains(status)) return false;
+            if (status != null && !"전체".equals(status) && !status.equals(deriveStatusLabel(r))) return false;
             return true;
         });
         if (mainGridMode) renderMainGrid();
@@ -1278,15 +1267,12 @@ public class ClassroomStatusController {
     // ─────────────────────────────────────────────────────────────────────
 
     private static String deriveStatusLabel(ClassroomSummaryDto r) {
-        boolean running = r.getRunningCommandCount() > 0;
-        if (r.getTotalPcs() <= 0) return running ? "명령 실행중" : "오프라인";
+        if (r.getRunningCommandCount() > 0) return "명령 실행중";
+        if (r.getTotalPcs() <= 0) return "오프라인";
         boolean teacherOnline = isOnlineState(r.getTeacherPcStatus());
         int studentOnline = Math.max(0, r.getOnlinePcs() - (teacherOnline ? 1 : 0));
-        boolean warned = !teacherOnline && studentOnline > 0;
-        if (running && warned) return "경고, 명령 실행중";
-        if (running) return "명령 실행중";
-        if (warned) return "경고";
         if (teacherOnline) return "온라인";
+        if (studentOnline > 0) return "경고";
         return "오프라인";
     }
 

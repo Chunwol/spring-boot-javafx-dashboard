@@ -40,6 +40,10 @@
                             <Label text="명령 수행 중" styleClass="legend-label" />
                         </HBox>
                         <HBox spacing="6" alignment="CENTER">
+                            <Circle radius="5" styleClass="legend-dot-warn" />
+                            <Label text="경고" styleClass="legend-label" />
+                        </HBox>
+                        <HBox spacing="6" alignment="CENTER">
                             <Circle radius="5" styleClass="legend-dot-offline" />
                             <Label text="오프라인" styleClass="legend-label" />
                         </HBox>
