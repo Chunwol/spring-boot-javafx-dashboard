@@ -474,28 +474,31 @@ public class HeartbeatSender {
     }
 
     private String resolveAgentVersion() {
-        try {
-            Package pkg = HeartbeatSender.class.getPackage();
-            if (pkg != null) {
-                String implementationVersion = pkg.getImplementationVersion();
-                if (implementationVersion != null && !implementationVersion.isBlank()) {
-                    return implementationVersion.trim();
-                }
-            }
-        } catch (Exception ignored) {
-        }
-
+        // 1) jpackage 또는 실행 스크립트가 -Dpcagent.version=x.y.z 를 전달하는 경우 (가장 신뢰)
         String systemProp = System.getProperty("pcagent.version");
         if (systemProp != null && !systemProp.isBlank()) {
             return systemProp.trim();
         }
 
+        // 2) MANIFEST.MF Implementation-Version 직접 읽기 (fat JAR 에서 Package API가 null 반환하는 경우 대비)
+        try (java.io.InputStream is = HeartbeatSender.class.getResourceAsStream("/META-INF/MANIFEST.MF")) {
+            if (is != null) {
+                java.util.jar.Manifest mf = new java.util.jar.Manifest(is);
+                String v = mf.getMainAttributes().getValue("Implementation-Version");
+                if (v != null && !v.isBlank()) {
+                    return v.trim();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 3) 환경변수 fallback
         String envVersion = System.getenv("AGENT_VERSION");
         if (envVersion != null && !envVersion.isBlank()) {
             return envVersion.trim();
         }
 
-        return "dev";
+        return "unknown";
     }
 
     /**
