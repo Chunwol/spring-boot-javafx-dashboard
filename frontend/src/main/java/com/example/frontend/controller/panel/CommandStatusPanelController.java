@@ -120,7 +120,7 @@ public class CommandStatusPanelController {
 
     /** 진행 단계 라벨 (대기중 → 전송됨 → 실행중 → 완료). */
     private static final String[] STEP_LABELS = {"대기중", "전송됨", "실행중", "완료"};
-    private static final double DETAIL_PANEL_WIDTH = 420.0;
+    private static final double DETAIL_PANEL_WIDTH = 480.0;
     /** 상세 패널에 표시 중인 명령 키 (폴링 갱신 시 추적용). */
     private String selectedKey;
     /** 메타 행의 값 라벨 — 선택/폴링마다 값만 갱신 (재생성 안 함). */

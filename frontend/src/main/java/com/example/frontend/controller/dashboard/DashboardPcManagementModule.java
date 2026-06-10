@@ -38,6 +38,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -1661,6 +1662,7 @@ public class DashboardPcManagementModule {
             AtomicInteger failed = new AtomicInteger(0);
             List<String> savedPaths = Collections.synchronizedList(new ArrayList<>());
             long startMs = System.currentTimeMillis();
+            ConcurrentHashMap<String, Double> pcFractions = new ConcurrentHashMap<>();
 
             CountDownLatch allDone = new CountDownLatch(total);
 
@@ -1674,7 +1676,8 @@ public class DashboardPcManagementModule {
                     String agentLabel = pc.getPcName() != null && !pc.getPcName().isBlank()
                             ? pc.getPcName() : pc.getMacAddress();
                     try {
-                        updateProgress(progress, agentLabel, "명령 전송 중...", -1, -1, done.get(), total, startMs);
+                        pcFractions.put(agentLabel, 0.0);
+                        updateProgress(progress, agentLabel, "명령 전송 중...", -1, -1, done.get(), total, startMs, pcFractions);
 
                         // 1. 명령 전송
                         Map<String, Object> body = new LinkedHashMap<>();
@@ -1692,7 +1695,7 @@ public class DashboardPcManagementModule {
                         long taskId = Long.parseLong(String.valueOf(taskIds.get(0)));
 
                         // 2. 완료 대기 폴링
-                        updateProgress(progress, agentLabel, "에이전트 수집 중...", -1, -1, done.get(), total, startMs);
+                        updateProgress(progress, agentLabel, "에이전트 수집 중...", -1, -1, done.get(), total, startMs, pcFractions);
                         int maxPoll = (COLLECT_TIMEOUT_SECONDS * 1000) / COLLECT_POLL_INTERVAL_MS;
                         String stdout = null;
                         for (int i = 0; i < maxPoll; i++) {
@@ -1724,27 +1727,29 @@ public class DashboardPcManagementModule {
                         Path savePath = agentDir.resolve(finalOutputName);
 
                         AtomicLong lastUpdate = new AtomicLong(0);
-                        updateProgress(progress, agentLabel, "다운로드 시작...", 0, -1, done.get(), total, startMs);
+                        updateProgress(progress, agentLabel, "다운로드 시작...", 0, -1, done.get(), total, startMs, pcFractions);
                         apiClient.downloadToFile(ApiUrlUtil.normalizeDownloadPath(downloadUrl), savePath, (received, totalBytes) -> {
                             long now = System.currentTimeMillis();
                             if (now - lastUpdate.get() > 200) { // 200ms 마다 UI 업데이트
                                 lastUpdate.set(now);
+                                if (totalBytes > 0) pcFractions.put(agentLabel, (double) received / totalBytes);
                                 updateProgress(progress, agentLabel,
                                         formatSize(received) + (totalBytes > 0 ? " / " + formatSize(totalBytes) : ""),
-                                        received, totalBytes, done.get(), total, startMs);
+                                        received, totalBytes, done.get(), total, startMs, pcFractions);
                             }
                         });
 
                         savedPaths.add(savePath.toString());
+                        pcFractions.put(agentLabel, 1.0);
                         int d = done.incrementAndGet();
-                        updateProgress(progress, agentLabel, "✓ 저장 완료: " + savePath.getFileName(), 1, 1, d, total, startMs);
+                        updateProgress(progress, agentLabel, "✓ 저장 완료: " + savePath.getFileName(), 1, 1, d, total, startMs, pcFractions);
                         log.info("수집 완료: {} → {}", agentLabel, savePath);
 
                     } catch (Exception ex) {
                         failed.incrementAndGet();
                         log.warn("수집 실패 [{}]: {}", agentLabel, ex.getMessage());
                         updateProgress(progress, agentLabel, "✗ 실패: " + ex.getMessage(), 0, 0,
-                                done.get(), total, startMs);
+                                done.get(), total, startMs, pcFractions);
                     } finally {
                         allDone.countDown();
                     }
@@ -1776,9 +1781,12 @@ public class DashboardPcManagementModule {
 
     private void updateProgress(CollectProgress p, String agentLabel, String fileStatus,
                                 long bytesReceived, long totalBytes,
-                                int done, int total, long startMs) {
+                                int done, int total, long startMs,
+                                ConcurrentHashMap<String, Double> pcFractions) {
         if (p == null) return;
-        double overallFraction = total > 0 ? (double) done / total : 0;
+        double overallFraction = (pcFractions != null && !pcFractions.isEmpty() && total > 0)
+                ? pcFractions.values().stream().mapToDouble(Double::doubleValue).sum() / total
+                : (total > 0 ? (double) done / total : 0);
         String etaText = computeEta(done, total, startMs);
         String fileFraction = totalBytes > 0
                 ? String.format("%.0f%%", 100.0 * bytesReceived / totalBytes)
