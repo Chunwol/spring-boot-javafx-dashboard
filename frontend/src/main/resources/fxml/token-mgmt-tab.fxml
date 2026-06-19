@@ -26,6 +26,7 @@
         <HBox alignment="CENTER_LEFT" spacing="10">
             <children>
                 <Label text="보기:" styleClass="pcmgmt-label-title" />
+                <ComboBox fx:id="classroomFilter" promptText="강의실 전체" prefWidth="140" styleClass="filter-combo" />
                 <ComboBox fx:id="agentStatusFilter" promptText="상태 전체" prefWidth="120" styleClass="filter-combo" />
                 <ComboBox fx:id="tokenStatusFilter" promptText="인증 전체" prefWidth="120" styleClass="filter-combo" />
                 <TextField fx:id="tokenSearchField" prefWidth="200" promptText="검색: PC명, IP, MAC" />
@@ -57,13 +58,14 @@
         <TableView fx:id="tokenTable" styleClass="app-table" VBox.vgrow="ALWAYS">
             <placeholder><Label text="등록된 에이전트가 없습니다." /></placeholder>
             <columns>
-                <TableColumn fx:id="colSelect"   text=""                prefWidth="40"  />
-                <TableColumn fx:id="colPcName"   text="PC명"            prefWidth="150" />
-                <TableColumn fx:id="colIp"       text="IP"              prefWidth="120" />
-                <TableColumn fx:id="colMac"      text="MAC"             prefWidth="140" />
-                <TableColumn fx:id="colStatus"   text="현재 상태"        prefWidth="100" />
-                <TableColumn fx:id="colToken"    text="에이전트 인증 상태" prefWidth="140" />
-                <TableColumn fx:id="colLastSeen" text="최근 접속 시간"    prefWidth="150" />
+                <TableColumn fx:id="colSelect"    text=""                prefWidth="40"  />
+                <TableColumn fx:id="colPcName"    text="PC명"            prefWidth="140" />
+                <TableColumn fx:id="colClassroom" text="강의실"           prefWidth="120" />
+                <TableColumn fx:id="colIp"        text="IP"              prefWidth="120" />
+                <TableColumn fx:id="colMac"       text="MAC"             prefWidth="140" />
+                <TableColumn fx:id="colStatus"    text="현재 상태"        prefWidth="100" />
+                <TableColumn fx:id="colToken"     text="인증 상태"        prefWidth="110" />
+                <TableColumn fx:id="colLastSeen"  text="최근 접속"        prefWidth="140" />
             </columns>
             <columnResizePolicy>
                 <TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" />

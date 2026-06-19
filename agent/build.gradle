@@ -11,7 +11,7 @@ plugins {
 }
 
 group = 'com.example'
-version = '1.1.11'
+version = '1.1.12'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_25
@@ -144,6 +144,11 @@ tasks.register('deployPackage', Zip) {
         into 'agent-package'
     }
 
+    // 원격제어(UltraVNC) 번들 → install.bat이 INSTALL_DIR\vnc 로 복사한다.
+    from("${rootDir}/vnc") {
+        into 'agent-package/vnc'
+    }
+
     // 설치 가이드 포함 (문서)
     from("${rootDir}/docs") {
         include 'AGENT_INSTALL_GUIDE.md'
@@ -198,6 +203,12 @@ tasks.register('prepareManualInstallSet') {
             from("${rootDir}/scripts/manual-install-readme.txt")
             into bundleDir
             rename('manual-install-readme.txt', 'README.txt')
+        }
+
+        // 원격제어(UltraVNC) 번들 → install.bat이 INSTALL_DIR\vnc 로 복사한다.
+        copy {
+            from("${rootDir}/vnc")
+            into new File(bundleDir, 'vnc')
         }
 
         println "[OK] Manual install set created: ${bundleDir.absolutePath}"
@@ -256,6 +267,14 @@ tasks.register('jpackageMsi', Exec) {
         copy {
             from("${rootDir}/scripts/agent-watchdog.ps1")
             into appInputDir
+        }
+
+        // 원격제어(UltraVNC) 번들 → 설치 시 app\vnc\ 로 배치.
+        // 에이전트 resolveVncServerPath()가 app\vnc\winvnc.exe 를 찾는다.
+        // winvnc.exe(서버) + createpassword.exe(버전호환 passwd 생성) + 의존 DLL 포함.
+        copy {
+            from("${rootDir}/vnc")
+            into new File(appInputDir, 'vnc')
         }
 
         // main.wxs: PCAgent.exe --first-install CA (창 없음)

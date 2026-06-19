@@ -62,6 +62,10 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
            List<CommandQueue> findTop200ByStatusAndDeliveredAtBeforeOrderByDeliveredAtAsc(
                   String status, LocalDateTime threshold);
 
+           /** QUEUED 상태에서 createdAt 기준 타임아웃된 명령 조회 */
+           List<CommandQueue> findTop200ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+                  String status, LocalDateTime threshold);
+
            /** ACK 후 결과 없이 타임아웃된 명령 조회 */
            List<CommandQueue> findByStatusAndAckedAtBefore(String status, LocalDateTime threshold);
 

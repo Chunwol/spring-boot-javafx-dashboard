@@ -1,8 +1,10 @@
 package com.example.backend.service.admin;
 
 import com.example.backend.model.agent.AgentAuthToken;
+import com.example.backend.model.classroom.ClassroomGroup;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.audit.AuditService;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ public class AdminService {
 
     private final PcMasterRepository pcMasterRepository;
     private final AgentAuthTokenRepository agentAuthTokenRepository;
+    private final ClassroomGroupRepository classroomGroupRepository;
     private final AuditService auditService;
 
     public List<Map<String, Object>> findAll() {
@@ -30,6 +33,10 @@ public class AdminService {
         for (PcMaster pc : pcs) {
             if (pc.getMacAddress() != null) pcByMac.put(pc.getMacAddress(), pc);
         }
+
+        // groupId → groupName 매핑 (쿼리 1회)
+        Map<Long, String> groupNames = new HashMap<>();
+        classroomGroupRepository.findAll().forEach(g -> groupNames.put(g.getId(), g.getName()));
 
         List<AgentAuthToken> tokens = agentAuthTokenRepository.findAll();
         Map<String, AgentAuthToken> tokenByMac = new LinkedHashMap<>();
@@ -50,6 +57,8 @@ public class AdminService {
             row.put("ipAddress", pc.getIpAddress());
             row.put("status", pc.getStatus());
             row.put("role", pc.getRole());
+            row.put("groupId", pc.getGroupId());
+            row.put("groupName", pc.getGroupId() != null ? groupNames.getOrDefault(pc.getGroupId(), "-") : "-");
             row.put("lastSeen", pc.getLastSeen());
             row.put("tokenActive", tok != null && !tok.isRevoked());
             row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);
@@ -69,6 +78,8 @@ public class AdminService {
             row.put("ipAddress", "-");
             row.put("status", "UNREGISTERED");
             row.put("role", "-");
+            row.put("groupId", null);
+            row.put("groupName", "-");
             row.put("lastSeen", null);
             row.put("tokenActive", tok != null && !tok.isRevoked());
             row.put("tokenIssuedAt", tok != null ? tok.getIssuedAt() : null);

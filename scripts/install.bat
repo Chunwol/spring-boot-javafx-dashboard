@@ -83,6 +83,20 @@ if exist "%SCRIPT_DIR%\agent-watchdog.ps1" (
     exit /b 1
 )
 
+rem 원격제어(UltraVNC) 번들 — 있으면 INSTALL_DIR\vnc 로 복사 (없어도 설치는 계속)
+rem 에이전트 resolveVncServerPath()가 INSTALL_DIR\vnc\winvnc.exe 를 찾는다.
+if exist "%SCRIPT_DIR%\vnc" (
+    if exist "%INSTALL_DIR%\vnc" rmdir /S /Q "%INSTALL_DIR%\vnc" >nul 2>&1
+    xcopy /E /I /Y /Q "%SCRIPT_DIR%\vnc" "%INSTALL_DIR%\vnc" >nul
+    if errorlevel 1 (
+        echo [WARN] VNC bundle copy failed ^(remote control may be unavailable^)
+    ) else (
+        echo [OK] VNC bundle copied ^(remote control^)
+    )
+) else (
+    echo [INFO] No VNC bundle found - remote control requires separate UltraVNC install
+)
+
 if "%USES_JAR%"=="1" (
     if exist "%SCRIPT_DIR%\jre" (
         if exist "%INSTALL_DIR%\jre" rmdir /S /Q "%INSTALL_DIR%\jre" >nul 2>&1

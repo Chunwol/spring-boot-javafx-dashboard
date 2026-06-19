@@ -48,8 +48,10 @@ public class AgentMain {
     private static final long SERVER_RETRY_SLEEP_MS = 10_000L;
     private static final long SERVER_BACKOFF_MS = 10 * 60 * 1000L;
     private static final long INTERNET_RETRY_MS = 30_000L;
-    private static final String MAIN_AUTOSTART_TASK = "PCAgent";
+    private static final String MAIN_AUTOSTART_TASK = "PCAgentWatchdog";
     private static final String LEGACY_WATCHDOG_TASK = "\\PCAgent\\Main";
+    // "PCAgent" 이름은 ASUS 계열 PC에서 Task Scheduler 충돌 → 마이그레이션 시 제거
+    private static final String LEGACY_FLAT_TASK = "PCAgent";
     private static final String WATCHDOG_SCRIPT_NAME = "agent-watchdog.ps1";
     private static final String LEGACY_AUTORUN_REG_KEY = "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
     private static final String LEGACY_AUTORUN_REG_VALUE = "PCAgent";
@@ -638,24 +640,25 @@ public class AgentMain {
     }
 
     private static void cleanupLegacyAutostartEntries() {
-        removeLegacyScheduledTask();
+        removeLegacyScheduledTask(LEGACY_WATCHDOG_TASK);
+        removeLegacyScheduledTask(LEGACY_FLAT_TASK);
         removeLegacyAutoRunRegistryValue();
     }
 
-    private static void removeLegacyScheduledTask() {
-        if (!isSchtaskRegistered(LEGACY_WATCHDOG_TASK)) {
+    private static void removeLegacyScheduledTask(String taskName) {
+        if (!isSchtaskRegistered(taskName)) {
             return;
         }
         try {
             Process proc = new ProcessBuilder(
                     "schtasks", "/Delete",
-                    "/TN", LEGACY_WATCHDOG_TASK,
+                    "/TN", taskName,
                     "/F"
             ).redirectErrorStream(true).start();
             if (proc.waitFor(10, TimeUnit.SECONDS) && proc.exitValue() == 0) {
-                log.info("레거시 자동 시작 작업 제거 완료: {}", LEGACY_WATCHDOG_TASK);
+                log.info("레거시 자동 시작 작업 제거 완료: {}", taskName);
             } else {
-                log.warn("레거시 자동 시작 작업 제거 실패: {}", LEGACY_WATCHDOG_TASK);
+                log.warn("레거시 자동 시작 작업 제거 실패: {}", taskName);
             }
         } catch (Exception e) {
             log.warn("레거시 자동 시작 작업 제거 중 오류: {}", e.getMessage());

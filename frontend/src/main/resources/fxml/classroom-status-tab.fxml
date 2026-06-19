@@ -24,42 +24,46 @@
     <VBox styleClass="tab-main" spacing="12" HBox.hgrow="ALWAYS">
         <padding><Insets top="20" right="20" bottom="20" left="20" /></padding>
         <children>
-            <!-- 제목 + 필터 + 보기 토글 + 액션 (한 줄) -->
+            <!-- 제목 + 필터 + 보기 토글 + 액션 (좁아지면 FlowPane이 다음 줄로 감싸 잘림 방지) -->
             <HBox alignment="CENTER_LEFT" spacing="8">
                 <children>
-                    <Label text="강의실 현황" styleClass="tab-title" />
+                    <Label text="강의실 현황" styleClass="tab-title" minWidth="-Infinity" />
                     <Region HBox.hgrow="ALWAYS" />
-                    <ComboBox fx:id="classroomFilter" promptText="강의실 전체" prefWidth="150" styleClass="filter-combo" />
-                    <ComboBox fx:id="statusFilter" promptText="온라인" prefWidth="120" styleClass="filter-combo" />
-                    <HBox spacing="2" alignment="CENTER" styleClass="main-view-toggle-group">
+                    <FlowPane hgap="8" vgap="6" alignment="CENTER_RIGHT" rowValignment="CENTER">
                         <children>
-                            <Button fx:id="mainViewListBtn" styleClass="detail-view-toggle">
-                                <graphic><FontIcon iconLiteral="mdi2v-view-list-outline" iconSize="14" /></graphic>
-                                <tooltip><Tooltip text="표 보기" /></tooltip>
+                            <ComboBox fx:id="classroomFilter" promptText="강의실 전체" prefWidth="150" styleClass="filter-combo" />
+                            <ComboBox fx:id="statusFilter" promptText="온라인" prefWidth="120" styleClass="filter-combo" />
+                            <HBox spacing="2" alignment="CENTER" styleClass="main-view-toggle-group">
+                                <children>
+                                    <Button fx:id="mainViewListBtn" styleClass="detail-view-toggle">
+                                        <graphic><FontIcon iconLiteral="mdi2v-view-list-outline" iconSize="14" /></graphic>
+                                        <tooltip><Tooltip text="표 보기" /></tooltip>
+                                    </Button>
+                                    <Button fx:id="mainViewGridBtn" styleClass="detail-view-toggle">
+                                        <graphic><FontIcon iconLiteral="mdi2v-view-grid-outline" iconSize="14" /></graphic>
+                                        <tooltip><Tooltip text="그리드 보기" /></tooltip>
+                                    </Button>
+                                </children>
+                            </HBox>
+                            <Button fx:id="fullscreenBtn" styleClass="tab-icon-btn">
+                                <graphic><FontIcon iconLiteral="mdi2f-fullscreen" iconSize="16" /></graphic>
+                                <tooltip><Tooltip text="전체화면 / 해제" /></tooltip>
                             </Button>
-                            <Button fx:id="mainViewGridBtn" styleClass="detail-view-toggle">
-                                <graphic><FontIcon iconLiteral="mdi2v-view-grid-outline" iconSize="14" /></graphic>
-                                <tooltip><Tooltip text="그리드 보기" /></tooltip>
+                            <Button fx:id="downloadBtn" styleClass="tab-icon-btn">
+                                <graphic><FontIcon iconLiteral="mdi2d-download" iconSize="16" /></graphic>
+                                <tooltip><Tooltip text="다운로드" /></tooltip>
                             </Button>
+                            <Button fx:id="printBtn" styleClass="tab-icon-btn">
+                                <graphic><FontIcon iconLiteral="mdi2p-printer" iconSize="16" /></graphic>
+                                <tooltip><Tooltip text="인쇄" /></tooltip>
+                            </Button>
+                            <Button fx:id="addClassroomBtn" styleClass="btn-primary-outline">
+                                <graphic><FontIcon iconLiteral="mdi2p-plus" iconSize="14" /></graphic>
+                                <text> 강의실 추가</text>
+                            </Button>
+                            <Button fx:id="refreshBtn" text="조회" styleClass="btn-primary" />
                         </children>
-                    </HBox>
-                    <Button fx:id="fullscreenBtn" styleClass="tab-icon-btn">
-                        <graphic><FontIcon iconLiteral="mdi2f-fullscreen" iconSize="16" /></graphic>
-                        <tooltip><Tooltip text="전체화면 / 해제" /></tooltip>
-                    </Button>
-                    <Button fx:id="downloadBtn" styleClass="tab-icon-btn">
-                        <graphic><FontIcon iconLiteral="mdi2d-download" iconSize="16" /></graphic>
-                        <tooltip><Tooltip text="다운로드" /></tooltip>
-                    </Button>
-                    <Button fx:id="printBtn" styleClass="tab-icon-btn">
-                        <graphic><FontIcon iconLiteral="mdi2p-printer" iconSize="16" /></graphic>
-                        <tooltip><Tooltip text="인쇄" /></tooltip>
-                    </Button>
-                    <Button fx:id="addClassroomBtn" styleClass="btn-primary-outline">
-                        <graphic><FontIcon iconLiteral="mdi2p-plus" iconSize="14" /></graphic>
-                        <text> 강의실 추가</text>
-                    </Button>
-                    <Button fx:id="refreshBtn" text="조회" styleClass="btn-primary" />
+                    </FlowPane>
                 </children>
             </HBox>
 

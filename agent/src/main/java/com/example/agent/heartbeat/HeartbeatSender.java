@@ -13,6 +13,9 @@ import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -294,6 +297,9 @@ public class HeartbeatSender {
             }
 
             if (heartbeatResponse.isSuccessful()) {
+                // 무중단 업데이트 롤백 판정용: heartbeat 성공 시각을 마커로 남긴다.
+                // 워치독이 업데이트 직후 이 마커의 갱신(mtime)을 보고 새 버전의 정상 동작을 확인한다.
+                writeHeartbeatOkMarker();
                 JsonNode node = heartbeatResponse.body.isBlank()
                         ? mapper.createObjectNode()
                         : mapper.readTree(heartbeatResponse.body);
@@ -470,6 +476,19 @@ public class HeartbeatSender {
             log.error("하트비트 송신자 종료 중 중단됨. 강제 종료 중...");
             commandExecutorService.shutdownNow();
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * heartbeat 성공 시각을 ProgramData\PCAgent\heartbeat-ok 에 기록한다.
+     * 무중단 업데이트 후 워치독이 이 마커의 갱신(mtime)을 보고 새 버전의 정상 동작을 판정한다.
+     */
+    private void writeHeartbeatOkMarker() {
+        try {
+            Path marker = configLoader.getConfigPath().getParent().resolve("heartbeat-ok");
+            Files.writeString(marker, Long.toString(System.currentTimeMillis()), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.debug("heartbeat-ok 마커 기록 실패: {}", e.getMessage());
         }
     }
 

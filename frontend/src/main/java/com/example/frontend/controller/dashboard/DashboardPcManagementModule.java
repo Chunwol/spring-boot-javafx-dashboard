@@ -5,7 +5,9 @@ import com.example.frontend.config.FrontendEnvConfig;
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.service.ApiClientException;
 import com.example.frontend.util.ApiUrlUtil;
+import com.example.frontend.util.Dialogs;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 
 import java.io.File;
 import java.io.IOException;
@@ -69,7 +72,8 @@ public class DashboardPcManagementModule {
     private static final int REMOTE_LIST_PAGE_SIZE = 200;
     private static final int REMOTE_LIST_POLL_INTERVAL_MS = 150;
     private static final int REMOTE_LIST_TIMEOUT_SECONDS = resolveRemoteListTimeoutSeconds();
-    private static final double DEFAULT_SIDE_PANEL_WIDTH = 420.0;
+    private static final double DEFAULT_SIDE_PANEL_WIDTH = 500.0;
+    private static final int REMOTE_VNC_PORT_DEFAULT = 5900;
     private static final double COLLECT_SIDE_PANEL_WIDTH = 520.0;
     private static final String SOURCE_MODE_SERVER_LABEL = "서버 단독 배포";
     private static final String SOURCE_MODE_HYBRID_LABEL = "하이브리드 배포(서버+에이전트)";
@@ -347,6 +351,13 @@ public class DashboardPcManagementModule {
         if (rolloutBtn != null) {
             rolloutBtn.setOnAction(e -> openAgentRolloutDialog());
         }
+        // 원격 제어 버튼 (교사 PC 단일/전체 — 체크 없으면 전체 온라인 교사 PC)
+        Button remoteBtn = new Button("🖥 원격 제어");
+        remoteBtn.getStyleClass().add("btn-neutral");
+        remoteBtn.setOnAction(e -> handleRemoteControl());
+        if (commandControlsFlow != null) {
+            commandControlsFlow.getChildren().add(remoteBtn);
+        }
         if (commandControlsFlow != null) {
             Runnable updateWrap = () -> {
                 double width = vbox.getWidth();
@@ -365,10 +376,12 @@ public class DashboardPcManagementModule {
     /**
      * 에이전트 업데이트 배포 — 간소화된 3단계 UI.
      *
-     * ① MSI 업로드 → ② 시점해제 경고 확인 → ③ 배포 시작
+     * ① agent.jar 업로드 → ② 무중단 방식 확인 → ③ 배포 시작
      *
      * 대상: 체크된 PC (없으면 전체). 내부는 기존 file-distribution 백엔드를 그대로 사용.
-     * 시점(SCMATE) 해제 없이 재부팅하면 작업이 날아가므로 배포 전 관리자에게 반드시 고지.
+     * 무중단 jar 교체 방식 — 워치독이 jar만 바꿔 재실행하며 PC를 재부팅하지 않는다.
+     * 새 버전이 마감 내 heartbeat 성공을 못 보이면 이전 버전으로 자동 롤백되므로,
+     * SCMATE 시점이 재부팅으로 날아갈 위험이 없다.
      */
     private void openAgentRolloutDialog() {
         if (apiClient.isViewerRole()) {
@@ -399,10 +412,10 @@ public class DashboardPcManagementModule {
         targetLabel.getStyleClass().add("pcmgmt-label-title");
 
         // ── ① MSI 업로드 ──
-        Label step1Label = new Label("① MSI 파일 업로드");
+        Label step1Label = new Label("① 에이전트 jar 업로드");
         step1Label.getStyleClass().add("pcmgmt-command-title");
 
-        Label uploadStatusLabel = new Label("MSI 파일을 선택해 업로드하세요.");
+        Label uploadStatusLabel = new Label("agent.jar 파일을 선택해 업로드하세요.");
         uploadStatusLabel.setWrapText(true);
         uploadStatusLabel.getStyleClass().add("pcmgmt-selection-hint");
 
@@ -410,7 +423,7 @@ public class DashboardPcManagementModule {
         final String[] uploadedFilename = {""};
         final String[] uploadedVersion = {""};
 
-        Button uploadBtn = new Button("📁 MSI 파일 선택 및 업로드");
+        Button uploadBtn = new Button("📁 agent.jar 선택 및 업로드");
         uploadBtn.getStyleClass().addAll("btn-primary");
         uploadBtn.setMaxWidth(Double.MAX_VALUE);
 
@@ -419,8 +432,8 @@ public class DashboardPcManagementModule {
         step2Label.getStyleClass().add("pcmgmt-command-title");
 
         javafx.scene.control.CheckBox scmateCheckBox = new javafx.scene.control.CheckBox(
-                "학생들이 시점을 해제(저장)했음을 확인했습니다.\n" +
-                "시점 미해제 상태에서 재부팅하면 작업 내용이 사라집니다.");
+                "무중단 업데이트입니다 — 에이전트 jar만 교체하며 PC를 재부팅하지 않습니다.\n" +
+                "새 버전이 90초 내 정상 동작하지 않으면 이전 버전으로 자동 롤백됩니다. (확인)");
         scmateCheckBox.setWrapText(true);
         scmateCheckBox.getStyleClass().add("pcmgmt-hint-label");
 
@@ -448,10 +461,9 @@ public class DashboardPcManagementModule {
         // ── 업로드 액션 ──
         uploadBtn.setOnAction(e -> {
             FileChooser chooser = new FileChooser();
-            chooser.setTitle("에이전트 MSI 선택");
+            chooser.setTitle("에이전트 jar 선택");
             chooser.getExtensionFilters().addAll(
-                    new FileChooser.ExtensionFilter("에이전트 설치 파일 (MSI 권장)", "*.msi"),
-                    new FileChooser.ExtensionFilter("레거시 바이너리", "*.jar", "*.exe", "*.zip"),
+                    new FileChooser.ExtensionFilter("에이전트 업데이트 (agent.jar)", "*.jar"),
                     new FileChooser.ExtensionFilter("All Files", "*.*"));
             File selected = chooser.showOpenDialog(
                     dialog.getDialogPane().getScene() == null ? null : dialog.getDialogPane().getScene().getWindow());
@@ -536,7 +548,8 @@ public class DashboardPcManagementModule {
                                         + "방식: 하이브리드 피어 배포\n"
                                         + "초기 웨이브: " + body.get("waveSize") + "대 / 확장률: " + AGENT_ROLLOUT_RAMP_UP_FACTOR + "\n"
                                         + "대상: " + targetDesc + "\n\n"
-                                        + "에이전트가 명령을 수신하면 MSI를 설치하고 재부팅합니다.\n"
+                                        + "에이전트가 jar를 무중단 교체하고 재실행합니다 (재부팅 없음).\n"
+                                        + "새 버전이 90초 내 정상 동작하지 않으면 자동 롤백됩니다.\n"
                                         + "명령 탭에서 진행 상태를 확인하세요.");
                                 deployBtn.setDisable(false);
                             });
@@ -920,6 +933,189 @@ public class DashboardPcManagementModule {
         synchronized (allPcs) { return new ArrayList<>(allPcs); }
     }
 
+    // ─────────────────────────────────────────
+    // 원격 제어 (VNC 콘솔 미러) — 교사 PC 단일/전체
+    // ─────────────────────────────────────────
+
+    private void handleRemoteControl() {
+        List<PcStatusDto> targets = resolveRemoteControlTargets();
+        if (targets.isEmpty()) {
+            showAlert("대상 없음",
+                    "원격 제어할 온라인 교사 PC가 없습니다.\n(PC를 체크하거나, 교사 PC가 온라인인지 확인하세요)",
+                    Alert.AlertType.WARNING);
+            return;
+        }
+        Window owner = (sendPanel != null && sendPanel.getScene() != null) ? sendPanel.getScene().getWindow() : null;
+        if (!Dialogs.confirm(owner, "원격 제어", "교사 PC 원격 제어",
+                targets.size() + "대 교사 PC의 화면을 원격 제어합니다.\n각 PC마다 뷰어 창이 열립니다. 진행할까요?")) {
+            return;
+        }
+        for (PcStatusDto pc : targets) {
+            startRemoteControlFor(pc);
+        }
+    }
+
+    /**
+     * 원격 제어 대상 결정.
+     * - 체크된 PC가 있으면: 그 PC들(명시 선택이므로 role 무관, 온라인만)
+     * - 체크가 없으면: 전체 온라인 교사 PC
+     */
+    private List<PcStatusDto> resolveRemoteControlTargets() {
+        if (!checkedMacs.isEmpty()) {
+            return resolveCheckedPcs().stream()
+                    .filter(PcStatusDto::isOnline)
+                    .collect(Collectors.toList());
+        }
+        return resolveAllPcs().stream()
+                .filter(PcStatusDto::isOnline)
+                .filter(pc -> "TEACHER".equalsIgnoreCase(pc.getRole()))
+                .collect(Collectors.toList());
+    }
+
+    /** 한 PC에 REMOTE_CONTROL_START 발행 → 결과(포트/1회용 비번) 폴링 → vncviewer 실행. */
+    @SuppressWarnings("unchecked")
+    private void startRemoteControlFor(PcStatusDto pc) {
+        Thread t = new Thread(() -> {
+            try {
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("scope", "SINGLE");
+                body.put("macAddress", pc.getMacAddress());
+                body.put("type", "REMOTE_CONTROL_START");
+                String resp = apiClient.postJson("/commands", body).join();
+                Map<String, Object> respBody = objectMapper.readValue(resp, new TypeReference<Map<String, Object>>() {});
+                List<Object> taskIds = (List<Object>) respBody.getOrDefault("taskIds", List.of());
+                if (taskIds.isEmpty()) throw new IllegalStateException("명령 큐 등록 실패");
+                long taskId = Long.parseLong(String.valueOf(taskIds.get(0)));
+
+                String stdout = pollCommandStdout(taskId, 30);
+                JsonNode r = objectMapper.readTree(stdout == null || stdout.isBlank() ? "{}" : stdout);
+                int port = r.path("port").asInt(REMOTE_VNC_PORT_DEFAULT);
+                String pw = r.path("oneTimePassword").asText("");
+                launchVncViewer(pc, port, pw);
+            } catch (Exception ex) {
+                Platform.runLater(() -> showAlert("원격 제어 실패",
+                        remoteName(pc) + ": " + ex.getMessage(), Alert.AlertType.ERROR));
+            }
+        }, "remote-control-" + pc.getMacAddress());
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** 명령 결과(stdout)를 timeoutSec 동안 1초 간격 폴링. */
+    @SuppressWarnings("unchecked")
+    private String pollCommandStdout(long taskId, int timeoutSec) throws Exception {
+        for (int i = 0; i < timeoutSec; i++) {
+            Thread.sleep(1000);
+            Map<String, Object> row = apiClient.getJson("/commands?taskId=" + taskId,
+                    new TypeReference<Map<String, Object>>() {}).join();
+            String status = String.valueOf(row.getOrDefault("status", ""));
+            if ("COMPLETED".equalsIgnoreCase(status)) {
+                return row.get("stdout") instanceof String s ? s : "";
+            }
+            if ("FAILED".equalsIgnoreCase(status)) {
+                throw new IllegalStateException(row.get("stderr") instanceof String s ? s : "원격 제어 시작 실패");
+            }
+        }
+        throw new IllegalStateException("원격 제어 시작 타임아웃 (30초). PC가 온라인인지 확인하세요.");
+    }
+
+    private void launchVncViewer(PcStatusDto pc, int port, String password) {
+        Path viewer = resolveVncViewerPath();
+        if (viewer == null) {
+            Platform.runLater(() -> showAlert("뷰어 없음",
+                    "vncviewer.exe를 찾을 수 없습니다.\nUltraVNC 뷰어 번들(앱폴더\\vnc\\vncviewer.exe) 또는 설치가 필요합니다.",
+                    Alert.AlertType.ERROR));
+            return;
+        }
+        String host = pc.getIpAddress();
+        if (host == null || host.isBlank()) {
+            Platform.runLater(() -> showAlert("주소 없음",
+                    remoteName(pc) + "의 IP 주소를 확인할 수 없습니다.", Alert.AlertType.WARNING));
+            return;
+        }
+        ensureVncViewerIni();
+        try {
+            Process vp = new ProcessBuilder(viewer.toString(), host + "::" + port, "-password", password).start();
+            // 뷰어 종료 시 원격 세션 중지 명령 발행 (VNC 서버 끔)
+            Thread waiter = new Thread(() -> {
+                try { vp.waitFor(); } catch (InterruptedException ignored) { return; }
+                sendRemoteControlStop(pc);
+            }, "remote-stop-" + pc.getMacAddress());
+            waiter.setDaemon(true);
+            waiter.start();
+        } catch (IOException ex) {
+            Platform.runLater(() -> showAlert("뷰어 실행 실패", ex.getMessage(), Alert.AlertType.ERROR));
+        }
+    }
+
+    private void sendRemoteControlStop(PcStatusDto pc) {
+        try {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("scope", "SINGLE");
+            body.put("macAddress", pc.getMacAddress());
+            body.put("type", "REMOTE_CONTROL_STOP");
+            apiClient.postJson("/commands", body).join();
+        } catch (Exception ex) {
+            log.debug("원격 제어 중지 명령 실패 {}: {}", pc.getMacAddress(), ex.getMessage());
+        }
+    }
+
+    /**
+     * UltraVNC vncviewer는 ultravnc.ini를 C:\ProgramData\UltraVNC\ 에서 읽는다
+     * (실행파일 옆 ini는 무시됨). 없으면 최소 내용으로 생성한다.
+     */
+    private void ensureVncViewerIni() {
+        try {
+            String programData = System.getenv("ProgramData");
+            if (programData == null || programData.isBlank()) programData = "C:\\ProgramData";
+            Path ini = Path.of(programData, "UltraVNC", "ultravnc.ini");
+            if (!Files.exists(ini)) {
+                Files.createDirectories(ini.getParent());
+                Files.writeString(ini, "[ultravnc]\n", java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            log.warn("ultravnc.ini 생성 실패: {}", e.getMessage());
+        }
+    }
+
+    /** UltraVNC vncviewer.exe 경로 (JAR 위치 기준 → user.dir → 시스템 설치). */
+    private Path resolveVncViewerPath() {
+        // 1) fat JAR 실행 위치 기준: JAR이 dist/frontend/ 에 있어도 찾을 수 있도록
+        //    최대 4단계 상위 디렉터리까지 vnc/ 탐색
+        try {
+            java.net.URL loc = getClass().getProtectionDomain().getCodeSource().getLocation();
+            Path base = Path.of(loc.toURI());
+            if (!Files.isDirectory(base)) base = base.getParent();
+            for (int i = 0; i < 4 && base != null; i++, base = base.getParent()) {
+                Path c = base.resolve("vnc").resolve("vncviewer.exe");
+                if (Files.exists(c)) return c.toAbsolutePath().normalize();
+            }
+        } catch (Exception ignored) {}
+        // 2) gradlew run 시: workingDir = rootProject.projectDir
+        try {
+            Path base = Path.of(System.getProperty("user.dir", "."));
+            for (Path dir : new Path[]{base, base.getParent()}) {
+                if (dir == null) continue;
+                Path c = dir.resolve("vnc").resolve("vncviewer.exe");
+                if (Files.exists(c)) return c.toAbsolutePath().normalize();
+            }
+        } catch (Exception ignored) {}
+        // 3) 시스템 설치 경로 폴백
+        for (String c : new String[]{
+                "C:\\Program Files\\uvnc bvba\\UltraVNC\\vncviewer.exe",
+                "C:\\Program Files\\UltraVNC\\vncviewer.exe",
+                "C:\\Program Files (x86)\\uvnc bvba\\UltraVNC\\vncviewer.exe"}) {
+            Path p = Path.of(c);
+            if (Files.exists(p)) return p;
+        }
+        return null;
+    }
+
+    private String remoteName(PcStatusDto pc) {
+        String n = pc.getPcName();
+        return (n == null || n.isBlank()) ? pc.getMacAddress() : n;
+    }
+
     private void prepareSidePanel(String title, String confirmText, String cancelText, double targetWidth) {
         disposeSidePanelResources();
         if (sendPanel == null) {
@@ -1242,6 +1438,10 @@ public class DashboardPcManagementModule {
                 return;
             }
             // 단순 명령(재시작/종료/PCON) 및 레거시 transferSource 케이스
+            // 전원 관련 명령(종료/재시작/켜기)은 수업 중 오작동 방지를 위해 한 번 더 확인받는다.
+            if (isPowerCommand(commandType) && !confirmPowerCommand(commandType, onlineCount)) {
+                return;
+            }
             ScriptExecutionOptions scriptOptions = (scriptCommand || transferCommand)
                 ? new ScriptExecutionOptions(
                     transferSource == null || transferSource.path() == null ? null : transferSource.path().toString(),
@@ -2970,12 +3170,39 @@ public class DashboardPcManagementModule {
         return (int) detail.chars().filter(c -> c == '\n').count() + 1;
     }
 
+    private boolean isPowerCommand(String commandType) {
+        return "SHUTDOWN".equals(commandType) || "REBOOT".equals(commandType) || "PCON".equals(commandType);
+    }
+
+    /** 전원 관련 명령 실행 전 수업 종료 여부를 재확인한다. 확인 시 true. */
+    private boolean confirmPowerCommand(String commandType, long onlineCount) {
+        Window owner = (sendPanel != null && sendPanel.getScene() != null)
+                ? sendPanel.getScene().getWindow() : null;
+        return switch (commandType) {
+            case "SHUTDOWN" -> Dialogs.confirmDanger(owner, "PC 종료 확인",
+                    "수업이 끝났는지 확인하세요",
+                    "온라인 " + onlineCount + "대를 종료합니다.\n"
+                    + "진행 중인 수업이 있으면 학생 PC가 꺼져 작업 내용이 사라질 수 있습니다.\n\n정말 종료할까요?",
+                    "종료");
+            case "REBOOT" -> Dialogs.confirmDanger(owner, "PC 재시작 확인",
+                    "수업이 끝났는지 확인하세요",
+                    "온라인 " + onlineCount + "대를 재시작합니다.\n"
+                    + "진행 중인 수업이 있으면 작업 내용이 사라질 수 있습니다.\n\n정말 재시작할까요?",
+                    "재시작");
+            default -> Dialogs.confirm(owner, "PC 켜기 확인",
+                    "선택한 PC를 켭니다",
+                    "대상 PC에 켜기 신호(WOL)를 전송합니다.\n진행할까요?");
+        };
+    }
+
     private void showAlert(String title, String content, Alert.AlertType type) {
-        Alert alert = new Alert(type);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(content);
-        alert.showAndWait();
+        Window owner = (sendPanel != null && sendPanel.getScene() != null)
+                ? sendPanel.getScene().getWindow() : null;
+        switch (type) {
+            case ERROR -> Dialogs.error(owner, title, title, content);
+            case WARNING -> Dialogs.warning(owner, title, title, content);
+            default -> Dialogs.info(owner, title, title, content);
+        }
     }
 
     /** 탭 선택 시 호출 */

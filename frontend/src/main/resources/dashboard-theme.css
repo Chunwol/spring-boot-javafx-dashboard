@@ -968,7 +968,6 @@
     -fx-background-radius: 12;
     -fx-border-color: #eef2f6;
     -fx-border-radius: 12;
-    -fx-max-width: 380;
     -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.04), 10, 0, 0, 2);
 }
 .pcmgmt-side-panel-wide { -fx-max-width: 560; }
@@ -1844,9 +1843,25 @@
 }
 .cmd-step-connector-done { -fx-background-color: #22c55e; }
 .cmd-detail-status {
-    -fx-font-size: 15px;
+    -fx-font-size: 14px;
     -fx-font-weight: 800;
     -fx-text-fill: #0f172a;
+    -fx-background-color: -fx-bg-subtle;
+    -fx-background-radius: 8;
+    -fx-padding: 9 13;
+}
+/* 명령 상세 패널 섹션 헤더 (진행 상태 / 명령 정보 / 실행 출력) */
+.cmd-section-label {
+    -fx-font-size: 11px;
+    -fx-font-weight: 800;
+    -fx-text-fill: -fx-text-muted;
+    -fx-padding: 4 0 1 0;
+}
+/* 명령 정보 메타 행: key(고정폭) + value, 행 구분선 */
+.cmd-meta-row {
+    -fx-padding: 7 0 7 0;
+    -fx-border-color: transparent transparent #eef2f6 transparent;
+    -fx-border-width: 0 0 1 0;
 }
 .cmd-detail-scroll {
     -fx-background-color: transparent;
@@ -2292,6 +2307,87 @@
     -fx-border-color: -fx-border-default;
     -fx-border-radius: 8;
     -fx-background-radius: 8;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   App Dialog (Dialogs.java) — 전역 Alert/Confirm 통일 디자인
+   ═══════════════════════════════════════════════════════════════════ */
+
+.app-dialog.dialog-pane {
+    -fx-background-color: -fx-bg-white;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 1;
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-padding: 0;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.20), 30, 0, 0, 10);
+}
+
+/* 헤더: 옅은 배경 + 굵은 제목 */
+.app-dialog .header-panel {
+    -fx-background-color: -fx-bg-light;
+    -fx-background-radius: 14 14 0 0;
+    -fx-padding: 18 24 16 24;
+    -fx-border-color: -fx-border-light;
+    -fx-border-width: 0 0 1 0;
+}
+.app-dialog .header-panel .label {
+    -fx-font-size: 17px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-text-heading;
+    -fx-wrap-text: true;
+}
+
+/* 본문 */
+.app-dialog > .content {
+    -fx-padding: 22 24 10 24;
+}
+.app-dialog .content .label {
+    -fx-font-size: 14.5px;
+    -fx-text-fill: -fx-text-body;
+    -fx-wrap-text: true;
+}
+
+/* 버튼 영역 */
+.app-dialog .button-bar {
+    -fx-padding: 6 20 18 20;
+}
+.app-dialog .button-bar .button {
+    -fx-min-width: 92;
+    -fx-padding: 9 20;
+    -fx-background-radius: 9;
+    -fx-border-radius: 9;
+    -fx-font-size: 14px;
+    -fx-cursor: hand;
+    -fx-background-color: -fx-bg-input;
+    -fx-text-fill: -fx-text-body;
+}
+.app-dialog .button-bar .button:hover {
+    -fx-background-color: -fx-border-default;
+}
+.app-dialog .button-bar .button:default {
+    -fx-background-color: -fx-primary;
+    -fx-text-fill: white;
+}
+.app-dialog .button-bar .button:default:hover {
+    -fx-background-color: -fx-primary-hover;
+}
+
+/* variant별 헤더 강조 색상 */
+.app-dialog-confirm .header-panel .label { -fx-text-fill: -fx-primary; }
+.app-dialog-info    .header-panel .label { -fx-text-fill: -fx-primary; }
+.app-dialog-warning .header-panel .label { -fx-text-fill: -fx-warning; }
+.app-dialog-error   .header-panel .label,
+.app-dialog-danger  .header-panel .label { -fx-text-fill: -fx-danger; }
+
+/* 위험 작업(종료/삭제)용 확인 버튼 — 빨간 강조 */
+.app-dialog-danger .button-bar .button:default,
+.app-dialog-error  .button-bar .button:default {
+    -fx-background-color: -fx-danger;
+}
+.app-dialog-danger .button-bar .button:default:hover,
+.app-dialog-error  .button-bar .button:default:hover {
+    -fx-background-color: -fx-danger-hover;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

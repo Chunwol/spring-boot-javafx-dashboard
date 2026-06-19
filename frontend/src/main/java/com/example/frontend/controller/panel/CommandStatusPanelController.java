@@ -2,6 +2,7 @@ package com.example.frontend.controller.panel;
 
 import com.example.frontend.service.ApiClient;
 import com.example.frontend.util.ApiUrlUtil;
+import com.example.frontend.util.Dialogs;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -822,11 +823,16 @@ public class CommandStatusPanelController {
         for (String key : keys) {
             Label k = new Label(key);
             k.getStyleClass().add("meta-key");
+            k.setMinWidth(78);
+            k.setPrefWidth(78);
             Label v = new Label("-");
             v.getStyleClass().add("meta-value");
             v.setWrapText(true);
+            HBox.setHgrow(v, Priority.ALWAYS);
             metaValueLabels.put(key, v);
-            VBox row = new VBox(2, k, v);
+            HBox row = new HBox(10, k, v);
+            row.getStyleClass().add("cmd-meta-row");
+            row.setAlignment(javafx.geometry.Pos.TOP_LEFT);
             detailMetaBox.getChildren().add(row);
         }
     }
@@ -834,9 +840,32 @@ public class CommandStatusPanelController {
     /** 행 클릭/버튼 → 우측 패널에 표시하고 슬라이드 인. */
     private void showDetailInPanel(Map<String, Object> row) {
         if (row == null) return;
-        selectedKey = keyOf(row);
+        String newKey = keyOf(row);
+        // 이미 다른 항목이 열려 있으면, 이전 패널을 닫았다가 새 항목으로 다시 연다.
+        if (detailPanel.isVisible() && selectedKey != null && !selectedKey.equals(newKey)) {
+            selectedKey = newKey;
+            slideOutThenIn(() -> renderDetail(row));
+            return;
+        }
+        selectedKey = newKey;
         renderDetail(row);
         slideIn();
+    }
+
+    /** 현재 패널을 빠르게 닫은 뒤 내용 갱신 + 다시 연다 (다른 항목 선택 시 전환 효과). */
+    private void slideOutThenIn(Runnable contentUpdate) {
+        if (panelAnim != null) panelAnim.stop();
+        detailPanel.setVisible(true);
+        detailPanel.setManaged(true);
+        panelAnim = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
+                javafx.util.Duration.millis(130),
+                new javafx.animation.KeyValue(detailPanel.prefWidthProperty(), 0),
+                new javafx.animation.KeyValue(detailPanel.minWidthProperty(), 0)));
+        panelAnim.setOnFinished(e -> {
+            contentUpdate.run();
+            slideIn();
+        });
+        panelAnim.play();
     }
 
     /** 패널 내용 갱신 (선택 시 + 폴링 시 호출). */
@@ -1016,11 +1045,8 @@ public class CommandStatusPanelController {
         }
         String requestPath = normalizeDownloadRequestPath(downloadUrl);
         if (requestPath.isBlank()) {
-            Alert err = new Alert(Alert.AlertType.ERROR);
-            err.setTitle("다운로드 실패");
-            err.setHeaderText(null);
-            err.setContentText("다운로드 URL 형식이 올바르지 않습니다: " + downloadUrl);
-            err.showAndWait();
+            Dialogs.error(null, "다운로드 실패", "다운로드 실패",
+                    "다운로드 URL 형식이 올바르지 않습니다: " + downloadUrl);
             return;
         }
         FileChooser chooser = new FileChooser();
@@ -1037,19 +1063,12 @@ public class CommandStatusPanelController {
                 byte[] data = apiClient.getBytes(requestPath).join();
                 Files.write(target.toPath(), data);
                 Platform.runLater(() -> {
-                    Alert ok = new Alert(Alert.AlertType.INFORMATION);
-                    ok.setTitle("다운로드 완료");
-                    ok.setHeaderText(null);
-                    ok.setContentText("저장 완료: " + target.getAbsolutePath());
-                    ok.showAndWait();
+                    Dialogs.info(null, "다운로드 완료", "다운로드 완료",
+                            "저장 완료: " + target.getAbsolutePath());
                 });
             } catch (Exception ex) {
                 Platform.runLater(() -> {
-                    Alert err = new Alert(Alert.AlertType.ERROR);
-                    err.setTitle("다운로드 실패");
-                    err.setHeaderText(null);
-                    err.setContentText(ex.getMessage());
-                    err.showAndWait();
+                    Dialogs.error(null, "다운로드 실패", "다운로드 실패", ex.getMessage());
                 });
             }
         }, "cmd-detail-download");

@@ -20,25 +20,34 @@
     <children>
         <Label text="고장 PC" styleClass="tab-title" />
 
-        <HBox fx:id="brokenForm" spacing="10.0" alignment="CENTER_LEFT" styleClass="pcmgmt-section-divider">
+        <VBox fx:id="brokenForm" spacing="8.0" styleClass="pcmgmt-section-divider">
             <children>
-                <Label text="보기:" styleClass="pcmgmt-label-title" />
-                <ComboBox fx:id="brokenGroupCombo" promptText="강의실" prefWidth="140.0" styleClass="filter-combo" />
-                <ComboBox fx:id="brokenStatusCombo" promptText="상태" prefWidth="120.0" styleClass="filter-combo" />
-                <TextField fx:id="brokenSearchField" promptText="검색: IP, MAC, 사유" prefWidth="200.0" />
-                <Region HBox.hgrow="ALWAYS" />
-                <TextField fx:id="brokenIpField" promptText="* IP 주소" prefWidth="140.0">
-                    <tooltip><Tooltip text="필수 — 고장 PC의 IP 주소 (예: 192.168.1.10)" /></tooltip>
-                </TextField>
-                <TextField fx:id="brokenMacField" promptText="MAC 주소 (선택)" prefWidth="150.0">
-                    <tooltip><Tooltip text="선택 — 알고 있으면 입력 (예: AA:BB:CC:DD:EE:FF)" /></tooltip>
-                </TextField>
-                <TextField fx:id="brokenNoteField" promptText="* 고장 사유" prefWidth="220.0">
-                    <tooltip><Tooltip text="필수 — 고장 증상이나 사유를 입력하세요" /></tooltip>
-                </TextField>
-                <Button fx:id="brokenRegisterBtn" text="고장 등록" styleClass="btn-warning,btn-sm" />
+                <!-- 필터 줄 -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <children>
+                        <Label text="보기:" styleClass="pcmgmt-label-title" />
+                        <ComboBox fx:id="brokenGroupCombo" promptText="강의실" prefWidth="140.0" styleClass="filter-combo" />
+                        <ComboBox fx:id="brokenStatusCombo" promptText="상태" prefWidth="120.0" styleClass="filter-combo" />
+                        <TextField fx:id="brokenSearchField" promptText="검색: IP, MAC, 사유" prefWidth="200.0" />
+                    </children>
+                </HBox>
+                <!-- 등록 줄 -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <children>
+                        <TextField fx:id="brokenIpField" promptText="* IP 주소" prefWidth="140.0">
+                            <tooltip><Tooltip text="필수 — 고장 PC의 IP 주소 (예: 192.168.1.10)" /></tooltip>
+                        </TextField>
+                        <TextField fx:id="brokenMacField" promptText="MAC 주소 (선택)" prefWidth="150.0">
+                            <tooltip><Tooltip text="선택 — 알고 있으면 입력 (예: AA:BB:CC:DD:EE:FF)" /></tooltip>
+                        </TextField>
+                        <TextField fx:id="brokenNoteField" promptText="* 고장 사유" prefWidth="220.0" maxWidth="Infinity" HBox.hgrow="ALWAYS">
+                            <tooltip><Tooltip text="필수 — 고장 증상이나 사유를 입력하세요" /></tooltip>
+                        </TextField>
+                        <Button fx:id="brokenRegisterBtn" text="고장 등록" styleClass="btn-warning,btn-sm" />
+                    </children>
+                </HBox>
             </children>
-        </HBox>
+        </VBox>
 
         <TableView fx:id="brokenPcTable" styleClass="app-table" VBox.vgrow="ALWAYS">
             <columnResizePolicy><TableView fx:constant="CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN" /></columnResizePolicy>

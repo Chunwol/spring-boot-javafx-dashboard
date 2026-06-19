@@ -37,6 +37,7 @@ import com.example.frontend.service.DashboardLayoutService;
 import com.example.frontend.service.DashboardPanelManager;
 import com.example.frontend.service.DashboardService;
 import com.example.frontend.util.AccessibilityHelper;
+import com.example.frontend.util.Dialogs;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -799,42 +800,35 @@ public class DashboardController {
             dashboardUIService.showToast("대시보드는 최소 1개 이상 존재해야 합니다.", true);
             return;
         }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
+        boolean confirmed = Dialogs.confirmDanger(null, "대시보드 삭제",
+                "대시보드를 삭제할까요?",
                 "정말로 대시보드 [" + selected.getName() + "]을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
-                ButtonType.YES, ButtonType.NO);
-        confirm.setTitle("대시보드 삭제");
-        confirm.showAndWait().ifPresent(type -> {
-            if (type == ButtonType.YES) {
-                dashboardService.deleteDashboardAsync(selected.getId())
-                        .thenAccept(resp -> Platform.runLater(() -> {
-                            dashboardUIService.showToast("대시보드가 삭제되었습니다.", false);
-                            loadDashboards();
-                        }))
-                        .exceptionally(ex -> {
-                            Platform.runLater(() -> dashboardUIService.showToast(
-                                    "대시보드 삭제 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
-                                    true));
-                            return null;
-                        });
-            }
-        });
+                "삭제");
+        if (confirmed) {
+            dashboardService.deleteDashboardAsync(selected.getId())
+                    .thenAccept(resp -> Platform.runLater(() -> {
+                        dashboardUIService.showToast("대시보드가 삭제되었습니다.", false);
+                        loadDashboards();
+                    }))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> dashboardUIService.showToast(
+                                "대시보드 삭제 실패: " + ApiClient.userFacingErrorMessage(ex, "요청을 처리하지 못했습니다."),
+                                true));
+                        return null;
+                    });
+        }
     }
 
     private void handleLogout() {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                "로그아웃 하시겠습니까?",
-                javafx.scene.control.ButtonType.YES,
-                javafx.scene.control.ButtonType.NO);
-        confirm.showAndWait().ifPresent(type -> {
-            if (type != javafx.scene.control.ButtonType.YES) {
-                return;
-            }
-            try {
-                moveToLoginScreen(null, true);
-            } catch (Exception ex) {
-                dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
-            }
-        });
+        if (!Dialogs.confirm(null, "로그아웃", "로그아웃 하시겠습니까?",
+                "현재 세션을 종료하고 로그인 화면으로 돌아갑니다.")) {
+            return;
+        }
+        try {
+            moveToLoginScreen(null, true);
+        } catch (Exception ex) {
+            dashboardUIService.showToast("로그아웃 처리 실패: " + ex.getMessage(), true);
+        }
     }
 
     /**
@@ -3386,13 +3380,7 @@ public class DashboardController {
     }
 
     private void showAlert(String title, String msg) {
-        Platform.runLater(() -> {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(title);
-            alert.setHeaderText(null);
-            alert.setContentText(msg);
-            alert.showAndWait();
-        });
+        Platform.runLater(() -> Dialogs.error(null, title, title, msg));
     }
 
     public void shutdown() {

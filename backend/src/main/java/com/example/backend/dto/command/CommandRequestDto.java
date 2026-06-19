@@ -16,8 +16,8 @@ public class CommandRequestDto {
     private String role;  // TEACHER, STUDENT, ALL
 
     @NotBlank(message = "type은 필수입니다.")
-    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL|PCON|COLLECT_FILES|LIST_FILES|AGENT_UPDATE)$", message = "type 값이 올바르지 않습니다.")
-    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL, PCON, COLLECT_FILES, LIST_FILES, AGENT_UPDATE
+    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL|PCON|COLLECT_FILES|LIST_FILES|AGENT_UPDATE|REMOTE_CONTROL_START|REMOTE_CONTROL_STOP)$", message = "type 값이 올바르지 않습니다.")
+    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL, PCON, COLLECT_FILES, LIST_FILES, AGENT_UPDATE, REMOTE_CONTROL_START, REMOTE_CONTROL_STOP
 
     @Pattern(regexp = "^$|^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$", message = "macAddress 형식이 올바르지 않습니다.")
     private String macAddress;

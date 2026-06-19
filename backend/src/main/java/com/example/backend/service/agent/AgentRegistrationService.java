@@ -9,30 +9,28 @@ import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.UserSettingRepository;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.IntStream;
 
 /**
  * 에이전트 최초 등록 서비스.
  * <p>
  * 설치키 검증 → PC 레코드 upsert → 에이전트 인증 토큰 발급 순서로 처리한다.
- * 동일 MAC에 대한 동시 등록 요청은 Stripe 기반 내부 Lock으로 직렬화하고,
- * 분산 환경에서 UNIQUE 충돌이 발생하면 낙관적 재시도(saveTokenResilient)로 처리한다.
+ * 동일 MAC에 대한 동시 등록 요청은 PostgreSQL 트랜잭션 advisory lock(pg_advisory_xact_lock)으로
+ * 직렬화하여 UNIQUE(mac_address) 충돌을 방지한다.
  * </p>
  */
 @Service
 public class AgentRegistrationService {
-
-    private static final int LOCK_STRIPE_COUNT = 512;
 
     /** user_settings 테이블에서 등록 허용 여부를 관리하는 키 */
     static final String SETTING_KEY_REGISTRATION_ENABLED = "agent.registration.enabled";
@@ -42,14 +40,9 @@ public class AgentRegistrationService {
     private final AgentTokenService agentTokenService;
     private final AgentInstallKeyService agentInstallKeyService;
     private final UserSettingRepository userSettingRepository;
-    /**
-     * Stripe Lock: MAC 해시 기반으로 512개의 독립 잠금 슬롯을 사용.
-     * 모든 등록 요청을 단일 lock으로 직렬화하면 성능 병목이 발생하므로,
-     * MAC별로 같은 슬롯에만 경합이 생기도록 분산한다.
-     */
-    private final Object[] registrationLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
-            .mapToObj(i -> new Object())
-            .toArray();
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public AgentRegistrationService(PcMasterRepository pcMasterRepository,
                                     AgentAuthTokenRepository agentAuthTokenRepository,
@@ -101,17 +94,18 @@ public class AgentRegistrationService {
         validateRequest(request);
 
         String mac = request.getMacAddress().trim().toUpperCase();
-        synchronized (lockForMac(mac)) {
-            return registerAgentUnderLock(mac, request);
-        }
-    }
-
-    private Object lockForMac(String mac) {
-        int idx = Math.floorMod(mac.hashCode(), LOCK_STRIPE_COUNT);
-        return registrationLockStripes[idx];
+        return registerAgentUnderLock(mac, request);
     }
 
     private AgentRegisterResponse registerAgentUnderLock(String mac, AgentRegisterRequest request) {
+        // 동일 MAC에 대한 동시 등록을 직렬화한다.
+        // 트랜잭션 commit까지 잠금이 유지되므로(advisory lock은 트랜잭션 종료 시 자동 해제),
+        // 이후 findAllByMacAddress가 직전 트랜잭션의 커밋 결과를 반드시 보게 되어
+        // UNIQUE(mac_address) 충돌(및 그로 인한 Hibernate AssertionFailure)을 방지한다.
+        entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(hashtext(?1)::bigint)")
+                .setParameter(1, mac)
+                .getSingleResult();
+
         PcMaster pc = pcMasterRepository.findById(mac).orElseGet(PcMaster::new);
         pc.setMacAddress(mac);
         pc.setPcName(request.getHostname());
@@ -132,7 +126,7 @@ public class AgentRegistrationService {
         AgentAuthToken authToken = existingTokens.stream()
                 .reduce(this::preferredToken)
                 .orElseGet(AgentAuthToken::new);
-        authToken = saveTokenResilient(mac, tokenHash, authToken);
+        authToken = persistToken(mac, tokenHash, authToken);
 
         // 중복 토큰 정리: 최신 1개만 남기고 나머지는 제거
         for (AgentAuthToken token : existingTokens) {
@@ -146,32 +140,18 @@ public class AgentRegistrationService {
     }
 
     /**
-     * 토큰 저장 시 UNIQUE 제약 충돌이 발생하면 기존 레코드를 다시 읽어 업데이트로 전환한다.
-     * 멀티 인스턴스 환경에서 동시 등록이 발생해도 데이터 정합성을 보장한다.
+     * 토큰을 저장(insert 또는 update)한다.
+     * pg_advisory_xact_lock으로 동일 MAC에 대한 호출이 직렬화되므로
+     * UNIQUE(mac_address) 충돌은 발생하지 않는다.
      */
-    private AgentAuthToken saveTokenResilient(String mac, String tokenHash, AgentAuthToken candidate) {
+    private AgentAuthToken persistToken(String mac, String tokenHash, AgentAuthToken candidate) {
         LocalDateTime now = LocalDateTime.now();
         candidate.setMacAddress(mac);
         candidate.setTokenHash(tokenHash);
         candidate.setIssuedAt(now);
         candidate.setLastUsedAt(now);
         candidate.setRevoked(false);
-
-        try {
-            return agentAuthTokenRepository.saveAndFlush(candidate);
-        } catch (DataIntegrityViolationException ex) {
-            // 멀티 인스턴스 동시 등록 시 UNIQUE(mac_address) 충돌 가능.
-            // 최신 레코드를 다시 읽어 업데이트로 전환한다.
-            AgentAuthToken fallback = agentAuthTokenRepository.findAllByMacAddress(mac).stream()
-                    .reduce(this::preferredToken)
-                    .orElse(candidate);
-            fallback.setMacAddress(mac);
-            fallback.setTokenHash(tokenHash);
-            fallback.setIssuedAt(now);
-            fallback.setLastUsedAt(now);
-            fallback.setRevoked(false);
-            return agentAuthTokenRepository.saveAndFlush(fallback);
-        }
+        return agentAuthTokenRepository.saveAndFlush(candidate);
     }
 
     private AgentAuthToken preferredToken(AgentAuthToken a, AgentAuthToken b) {

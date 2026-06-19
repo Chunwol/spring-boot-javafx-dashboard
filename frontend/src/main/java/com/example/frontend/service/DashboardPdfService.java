@@ -1,5 +1,6 @@
 package com.example.frontend.service;
 
+import com.example.frontend.util.Dialogs;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.control.*;
@@ -146,19 +147,11 @@ public class DashboardPdfService {
     }
 
     private static void showError(String title, String msg) {
-        Alert a = new Alert(Alert.AlertType.ERROR);
-        a.setTitle(title);
-        a.setHeaderText(null);
-        a.setContentText(msg);
-        a.showAndWait();
+        Dialogs.error(null, title, title, msg);
     }
 
     private static void showInfo(String title, String msg) {
-        Alert a = new Alert(Alert.AlertType.INFORMATION);
-        a.setTitle(title);
-        a.setHeaderText(null);
-        a.setContentText(msg);
-        a.showAndWait();
+        Dialogs.info(null, title, title, msg);
     }
 
     private static <T> T requireNode(FXMLLoader loader, String key, Class<T> type) {

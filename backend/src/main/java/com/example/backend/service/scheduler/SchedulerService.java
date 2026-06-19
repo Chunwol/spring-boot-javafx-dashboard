@@ -245,6 +245,13 @@ public class SchedulerService {
     public void reconcileStaleCommandsNow() {
         LocalDateTime threshold = LocalDateTime.now().minusSeconds(commandTimeoutSeconds);
 
+        // QUEUED 상태에서 에이전트가 폴링하지 않아 장기 미전달된 명령 (5분 기준)
+        // DELIVERED/ACKED 타임아웃보다 여유 있게 설정 (오프라인 에이전트 복구 여지)
+        LocalDateTime queuedThreshold = LocalDateTime.now().minusMinutes(5);
+        List<CommandQueue> staleQueued = commandQueueRepository
+            .findTop200ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc("QUEUED", queuedThreshold);
+        staleQueued.forEach(this::handleRetryOrFail);
+
         // DELIVERED 상태에서 ACK 누락된 명령
         List<CommandQueue> staleDelivered = commandQueueRepository
             .findTop200ByStatusAndDeliveredAtBeforeOrderByDeliveredAtAsc("DELIVERED", threshold);

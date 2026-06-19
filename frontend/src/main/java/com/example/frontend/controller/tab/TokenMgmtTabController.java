@@ -1,6 +1,7 @@
 package com.example.frontend.controller.tab;
 
 import com.example.frontend.service.ApiClient;
+import com.example.frontend.util.Dialogs;
 import com.fasterxml.jackson.core.type.TypeReference;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -301,46 +302,41 @@ public class TokenMgmtTabController {
     private void toggleRegistration() {
         boolean next = !registrationEnabled;
         String msg = next ? "에이전트 신규 등록을 허용하시겠습니까?" : "에이전트 신규 등록을 차단하시겠습니까?";
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, msg, ButtonType.OK, ButtonType.CANCEL);
-        confirm.setTitle("등록 상태 변경");
-        confirm.showAndWait().ifPresent(bt -> {
-            if (bt != ButtonType.OK) return;
-            toggleRegistrationBtn.setDisable(true);
-            api.putJson("/agent/registration-status", Map.of("enabled", next))
-                    .thenRun(() -> Platform.runLater(this::loadRegistrationStatus))
-                    .exceptionally(ex -> {
-                        log.warn("등록 토글 실패: {}", ex.getMessage());
-                        Platform.runLater(() -> toggleRegistrationBtn.setDisable(false));
-                        return null;
-                    });
-        });
+        if (!Dialogs.confirm(null, "등록 상태 변경", next ? "등록 허용" : "등록 차단", msg)) {
+            return;
+        }
+        toggleRegistrationBtn.setDisable(true);
+        api.putJson("/agent/registration-status", Map.of("enabled", next))
+                .thenRun(() -> Platform.runLater(this::loadRegistrationStatus))
+                .exceptionally(ex -> {
+                    log.warn("등록 토글 실패: {}", ex.getMessage());
+                    Platform.runLater(() -> toggleRegistrationBtn.setDisable(false));
+                    return null;
+                });
     }
 
     private void rotateInstallKey() {
-        ButtonType change = new ButtonType("변경", ButtonBar.ButtonData.OK_DONE);
-        Alert confirm = new Alert(Alert.AlertType.WARNING,
+        if (!Dialogs.confirmDanger(null, "설치키 변경",
+                "기존 설치키가 즉시 무효화됩니다.",
                 "설치키를 변경하면 기존 설정 파일의 설치키로는 신규 등록 또는 토큰 재발급이 실패합니다.\n계속 진행하시겠습니까?",
-                change, ButtonType.CANCEL);
-        confirm.setTitle("설치키 변경");
-        confirm.setHeaderText("기존 설치키가 즉시 무효화됩니다.");
-        confirm.showAndWait().ifPresent(bt -> {
-            if (bt != change) return;
-            refreshKeyBtn.setDisable(true);
-            api.putJson("/admin/install-key", Map.of(), Map.class)
-                    .thenAccept(resp -> Platform.runLater(() -> {
-                        applyInstallKey(resp);
+                "변경")) {
+            return;
+        }
+        refreshKeyBtn.setDisable(true);
+        api.putJson("/admin/install-key", Map.of(), Map.class)
+                .thenAccept(resp -> Platform.runLater(() -> {
+                    applyInstallKey(resp);
+                    refreshKeyBtn.setDisable(false);
+                    Dialogs.info(null, "설치키 변경", "변경 완료", "설치키가 변경되었습니다. 새 설정 파일을 배포해 주세요.");
+                }))
+                .exceptionally(ex -> {
+                    log.warn("설치키 변경 실패: {}", ex.getMessage());
+                    Platform.runLater(() -> {
                         refreshKeyBtn.setDisable(false);
-                        new Alert(Alert.AlertType.INFORMATION, "설치키가 변경되었습니다. 새 설정 파일을 배포해 주세요.").show();
-                    }))
-                    .exceptionally(ex -> {
-                        log.warn("설치키 변경 실패: {}", ex.getMessage());
-                        Platform.runLater(() -> {
-                            refreshKeyBtn.setDisable(false);
-                            new Alert(Alert.AlertType.ERROR, "설치키 변경 실패: " + ApiClient.userFacingErrorMessage(ex, "서버 오류")).show();
-                        });
-                        return null;
+                        Dialogs.error(null, "설치키 변경 실패", "설치키 변경 실패", ApiClient.userFacingErrorMessage(ex, "서버 오류"));
                     });
-        });
+                    return null;
+                });
     }
 
     private void applyInstallKey(Map<?, ?> resp) {
@@ -374,42 +370,36 @@ public class TokenMgmtTabController {
     private void revokeSelected() {
         List<Map<String, Object>> selected = getCheckedItems();
         if (selected.isEmpty()) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                selected.size() + "개 에이전트의 토큰을 폐기하시겠습니까?",
-                ButtonType.OK, ButtonType.CANCEL);
-        confirm.setTitle("토큰 폐기");
-        confirm.showAndWait().ifPresent(bt -> {
-            if (bt != ButtonType.OK) return;
-            for (Map<String, Object> row : selected) {
-                String mac = str(row.get("macAddress"));
-                api.putJson("/admin/agents/" + mac + "/revoke", Map.of())
-                        .exceptionally(ex -> { log.warn("토큰 폐기 실패 {}: {}", mac, ex.getMessage()); return null; });
-            }
-            // 모두 요청 후 목록 갱신
-            javafx.animation.PauseTransition t = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
-            t.setOnFinished(e -> Platform.runLater(this::loadAgents));
-            t.play();
-        });
+        if (!Dialogs.confirmDanger(null, "토큰 폐기", "토큰 폐기",
+                selected.size() + "개 에이전트의 토큰을 폐기하시겠습니까?", "폐기")) {
+            return;
+        }
+        for (Map<String, Object> row : selected) {
+            String mac = str(row.get("macAddress"));
+            api.putJson("/admin/agents/" + mac + "/revoke", Map.of())
+                    .exceptionally(ex -> { log.warn("토큰 폐기 실패 {}: {}", mac, ex.getMessage()); return null; });
+        }
+        // 모두 요청 후 목록 갱신
+        javafx.animation.PauseTransition t = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
+        t.setOnFinished(e -> Platform.runLater(this::loadAgents));
+        t.play();
     }
 
     private void deleteSelected() {
         List<Map<String, Object>> selected = getCheckedItems();
         if (selected.isEmpty()) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                selected.size() + "개 에이전트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
-                ButtonType.OK, ButtonType.CANCEL);
-        confirm.setTitle("에이전트 삭제");
-        confirm.showAndWait().ifPresent(bt -> {
-            if (bt != ButtonType.OK) return;
-            for (Map<String, Object> row : selected) {
-                String mac = str(row.get("macAddress"));
-                api.delete("/admin/agents/" + mac)
-                        .exceptionally(ex -> { log.warn("에이전트 삭제 실패 {}: {}", mac, ex.getMessage()); return null; });
-            }
-            javafx.animation.PauseTransition t = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
-            t.setOnFinished(e -> Platform.runLater(this::loadAgents));
-            t.play();
-        });
+        if (!Dialogs.confirmDanger(null, "에이전트 삭제", "에이전트 삭제",
+                selected.size() + "개 에이전트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.", "삭제")) {
+            return;
+        }
+        for (Map<String, Object> row : selected) {
+            String mac = str(row.get("macAddress"));
+            api.delete("/admin/agents/" + mac)
+                    .exceptionally(ex -> { log.warn("에이전트 삭제 실패 {}: {}", mac, ex.getMessage()); return null; });
+        }
+        javafx.animation.PauseTransition t = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
+        t.setOnFinished(e -> Platform.runLater(this::loadAgents));
+        t.play();
     }
 
     private void downloadConfig() {
@@ -423,15 +413,15 @@ public class TokenMgmtTabController {
                     if (file == null) return;
                     try {
                         java.nio.file.Files.write(file.toPath(), bytes);
-                        new Alert(Alert.AlertType.INFORMATION, "설정 파일 저장 완료").show();
+                        Dialogs.info(null, "설정 파일", "저장 완료", "설정 파일 저장 완료");
                     } catch (Exception ex) {
-                        new Alert(Alert.AlertType.ERROR, "파일 저장 실패: " + ex.getMessage()).show();
+                        Dialogs.error(null, "파일 저장 실패", "파일 저장 실패", ex.getMessage());
                     }
                 }))
                 .exceptionally(ex -> {
                     log.warn("설정파일 다운로드 실패: {}", ex.getMessage());
                     Platform.runLater(() ->
-                            new Alert(Alert.AlertType.ERROR, "다운로드 실패: " + ex.getMessage()).show());
+                            Dialogs.error(null, "다운로드 실패", "다운로드 실패", ex.getMessage()));
                     return null;
                 });
     }

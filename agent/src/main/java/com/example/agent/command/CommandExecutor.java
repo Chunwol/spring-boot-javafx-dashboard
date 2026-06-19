@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -60,6 +61,10 @@ public class CommandExecutor {
     private static final int COLLECT_UPLOAD_MAX_RETRY = 3;
     private static final long COLLECT_UPLOAD_RETRY_BACKOFF_MS = 350L;
     private static final long AGENT_UPDATE_EXIT_DELAY_MS = 4_000L;
+    /** 무중단 업데이트 후 새 버전이 heartbeat 성공을 보여야 하는 검증 마감(ms). 초과 시 워치독이 롤백. */
+    private static final long AGENT_UPDATE_VERIFY_DEADLINE_MS = 90_000L;
+    /** 원격 제어(VNC) 서버 포트 */
+    private static final int REMOTE_VNC_PORT = 5900;
     private static final int AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE = 64 * 1024;
     private static final long AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE = 8L * 1024 * 1024;
     private static final int AGENT_UPDATE_DOWNLOAD_MAX_RETRY = 3;
@@ -139,6 +144,8 @@ public class CommandExecutor {
                 case "COLLECT_FILES" -> executeCollectFiles(taskId, payload);
                 case "LIST_FILES" -> executeListFiles(payload);
                 case "AGENT_UPDATE" -> executeAgentUpdate(taskId, payload);
+                case "REMOTE_CONTROL_START" -> executeRemoteControlStart(taskId, payload);
+                case "REMOTE_CONTROL_STOP" -> executeRemoteControlStop(taskId, payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
             // LIST_FILES JSON은 4KB 제한 대신 2MB 허용
@@ -1054,65 +1061,66 @@ public class CommandExecutor {
             candidateSet.add(resolveRemoteScriptUrl(downloadUrl.trim()));
             List<String> candidates = new ArrayList<>(candidateSet);
 
-            Path selfPath = resolveAgentBinaryPath();
-            if (selfPath == null || !Files.exists(selfPath)) {
-                return new CommandResult(1, "", "현재 실행 중인 에이전트 바이너리 경로를 확인할 수 없습니다.");
+            // 무중단 교체 대상: 현재 실행 중인 agent.jar (jpackage app\agent.jar)
+            // jar만 교체하면 새 버전 — exe 런처/번들 JRE는 그대로 둔다.
+            Path targetJar = resolveAgentJarPath();
+            if (targetJar == null || !Files.exists(targetJar)) {
+                return new CommandResult(1, "",
+                        "현재 실행 중인 agent.jar 경로를 확인할 수 없습니다. (무중단 업데이트는 jar 실행 구성에서만 지원)");
             }
-            Path parentDir = selfPath.getParent() != null
-                    ? selfPath.getParent()
+            Path appDir = targetJar.getParent() != null
+                    ? targetJar.getParent()
                     : Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
-            Path updateDir = Files.createDirectories(parentDir.resolve("agent-update"));
+            Path updateDir = Files.createDirectories(appDir.resolve("agent-update"));
 
-            // 파일 확장자는 downloadUrl 기준 결정 (.msi 우선 → jpackage 산출물).
-            // 현재 셀프 바이너리 경로 확장자는 jpackage 런처 EXE라 .msi와 무관.
-            String urlLower = downloadUrl.toLowerCase(Locale.ROOT);
-            boolean isMsi = urlLower.endsWith(".msi");
-            String ext;
-            if (isMsi) {
-                ext = ".msi";
-            } else {
-                String fileName = selfPath.getFileName() == null ? "pcagent.jar" : selfPath.getFileName().toString();
-                ext = fileName.toLowerCase(Locale.ROOT).endsWith(".exe") ? ".exe" : ".jar";
-            }
             long now = System.currentTimeMillis();
-            Path stagedFile = updateDir.resolve("agent-next-" + taskId + "-" + now + ext);
-            Path backupFile = updateDir.resolve("agent-backup-" + taskId + "-" + now + ext);
+            Path stagedJar = updateDir.resolve("agent-next-" + taskId + "-" + now + ".jar");
+            Path previousJar = updateDir.resolve("agent-previous.jar");
 
-            downloadAgentUpdateArtifact(candidates, stagedFile, peerToken);
-            String actualSha256 = sha256(stagedFile);
-
-            if (expectedSha256 != null && !expectedSha256.isBlank()) {
-                if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
-                    Files.deleteIfExists(stagedFile);
-                    return new CommandResult(1, "", "업데이트 파일 무결성 검증 실패");
-                }
+            // 1) 새 jar 다운로드 + 무결성 검증
+            downloadAgentUpdateArtifact(candidates, stagedJar, peerToken);
+            String actualSha256 = sha256(stagedJar);
+            if (expectedSha256 != null && !expectedSha256.isBlank()
+                    && !expectedSha256.equalsIgnoreCase(actualSha256)) {
+                Files.deleteIfExists(stagedJar);
+                return new CommandResult(1, "", "업데이트 파일 무결성 검증 실패");
             }
 
+            // 2) P2P 캐시 등록 (다른 에이전트가 이 PC에서 받아갈 수 있도록 on-demand)
             if (updateCacheServer != null) {
                 try {
-                    // 첫 AGENT_UPDATE 명령 수신 시 캐시 서버 on-demand 시작
-                    // (평소엔 꺼두고 필요할 때만 켜서 CPU 스파이크 방지)
                     updateCacheServer.start();
                     String cacheToken = peerToken == null ? "" : peerToken;
-                    updateCacheServer.registerArtifact(actualSha256, stagedFile, cacheToken);
+                    updateCacheServer.registerArtifact(actualSha256, stagedJar, cacheToken);
                 } catch (Exception cacheEx) {
                     log.warn("업데이트 캐시 등록 실패 taskId={}: {}", taskId, cacheEx.getMessage());
                 }
             }
 
-            if (isMsi) {
-                // MSI 흐름: msiexec가 파일 교체/롤백 자동 처리 → swap 스크립트 불필요
-                if (!scheduleMsiInstall(stagedFile)) {
-                    return new CommandResult(1, "", "MSI 설치 프로세스 시작 실패");
-                }
-            } else {
-                // 레거시 jar/exe 흐름 (백업 후 swap)
-                Files.copy(selfPath, backupFile, StandardCopyOption.REPLACE_EXISTING);
-                if (!scheduleAgentBinarySwap(selfPath, stagedFile, backupFile)) {
-                    return new CommandResult(1, "", "업데이트 교체 프로세스 시작 실패");
-                }
-            }
+            // 3) 현재 jar → previous 백업 (롤백용, 1개만 보관)
+            Files.copy(targetJar, previousJar, StandardCopyOption.REPLACE_EXISTING);
 
+            // 4) update-pending 마커 기록 — 실제 jar 교체/검증/롤백은 워치독이 수행한다.
+            //    실행 중인 jar는 JVM이 잠그므로, 에이전트 종료 후 워치독이 교체해야 안전하다.
+            Path markerDir = configLoader.getConfigPath().getParent();
+            Map<String, Object> pending = new java.util.LinkedHashMap<>();
+            pending.put("stagedJar", stagedJar.toAbsolutePath().toString());
+            pending.put("previousJar", previousJar.toAbsolutePath().toString());
+            pending.put("targetJar", targetJar.toAbsolutePath().toString());
+            pending.put("targetVersion", targetVersion);
+            pending.put("sha256", actualSha256);
+            pending.put("taskId", taskId);
+            pending.put("createdEpochMs", now);
+            pending.put("verifyDeadlineEpochMs", now + AGENT_UPDATE_VERIFY_DEADLINE_MS);
+            pending.put("applied", false);
+            Files.writeString(markerDir.resolve("update-pending.json"),
+                    mapper.writeValueAsString(pending), StandardCharsets.UTF_8);
+
+            // 5) 이전 heartbeat-ok 마커 삭제 — 새 버전이 새로 성공해야 커밋된다.
+            Files.deleteIfExists(markerDir.resolve("heartbeat-ok"));
+
+            // 6) self-exit → 워치독이 jar 교체 후 새 버전 실행 (OS 재부팅 없음)
+            //    에이전트는 절대 reboot를 호출하지 않는다.
             scheduleSelfExit(AGENT_UPDATE_EXIT_DELAY_MS);
 
             Map<String, Object> result = new java.util.LinkedHashMap<>();
@@ -1123,12 +1131,139 @@ public class CommandExecutor {
             result.put("downloadCandidates", candidates.size());
             result.put("sha256", actualSha256);
             result.put("peerCacheEnabled", updateCacheServer != null);
-            result.put("rebootRequired", true);
-            result.put("message", "업데이트 교체를 예약했습니다. 작업 저장 후 재부팅하여 버전 반영을 확인하세요.");
+            result.put("rebootRequired", false);
+            result.put("mode", "hot-swap-jar");
+            result.put("message", "무중단 업데이트 교체를 예약했습니다. 워치독이 jar를 교체해 새 버전을 실행하며, "
+                    + (AGENT_UPDATE_VERIFY_DEADLINE_MS / 1000) + "초 내 정상 동작하지 않으면 이전 버전으로 자동 롤백합니다.");
             return new CommandResult(0, mapper.writeValueAsString(result), "");
         } catch (Exception e) {
             return new CommandResult(1, "", "AGENT_UPDATE 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
         }
+    }
+
+    // ─────────────────────────────────────────
+    // 원격 제어 (VNC 콘솔 미러) — 교사 PC 단일/전체
+    // ─────────────────────────────────────────
+
+    /**
+     * UltraVNC 서버를 1회용 비밀번호로 시작한다.
+     * 결과(포트, 1회용 비번)는 백엔드를 거쳐 대시보드에 전달되어 vncviewer 접속에 사용된다.
+     * 보안: 매 세션 새 비번, 종료 시 즉시 중지(REMOTE_CONTROL_STOP).
+     */
+    private CommandResult executeRemoteControlStart(long taskId, String payloadJson) {
+        try {
+            Path vncServer = resolveVncServerPath();
+            if (vncServer == null) {
+                return new CommandResult(1, "",
+                        "VNC 서버(winvnc.exe)를 찾을 수 없습니다. UltraVNC 번들(설치폴더\\vnc\\winvnc.exe) 또는 설치가 필요합니다.");
+            }
+            Path createPasswd = vncServer.getParent() != null
+                    ? vncServer.getParent().resolve("createpassword.exe") : null;
+            if (createPasswd == null || !Files.exists(createPasswd)) {
+                return new CommandResult(1, "",
+                        "createpassword.exe를 찾을 수 없습니다. UltraVNC 번들(winvnc.exe 옆)에 createpassword.exe가 필요합니다.");
+            }
+            // VNC 인증은 8자까지만 유효
+            String oneTimePassword = generateOneTimePassword(8);
+            // UltraVNC 1.8.x는 ultravnc.ini를 C:\ProgramData\UltraVNC\ 에서 읽는다 (실행파일 옆 ini 무시).
+            // passwd는 버전별 자체 형식(9바이트 등)이라 표준 DES로는 거부되므로 번들 createpassword.exe로 생성한다.
+            String programData = System.getenv("ProgramData");
+            if (programData == null || programData.isBlank()) programData = "C:\\ProgramData";
+            Path ini = Path.of(programData, "UltraVNC", "ultravnc.ini");
+            Files.createDirectories(ini.getParent());
+            // 기본 설정(포트/인증) 먼저 기록 — createpassword는 passwd만 갱신하고 나머지는 보존
+            Files.writeString(ini, "[ultravnc]\n"
+                    + "PortNumber=" + REMOTE_VNC_PORT + "\n"
+                    + "AuthRequired=1\n"
+                    + "FileTransferEnabled=0\n", StandardCharsets.UTF_8);
+            // createpassword.exe <비번> → ini의 passwd 설정 (UltraVNC 버전 호환 보장)
+            Process cp = new ProcessBuilder(createPasswd.toString(), oneTimePassword)
+                    .directory(ini.getParent().toFile()).start();
+            cp.waitFor(10, TimeUnit.SECONDS);
+
+            stopVncServer(vncServer);
+            new ProcessBuilder(vncServer.toString(), "-run").start();
+
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("status", "started");
+            result.put("port", REMOTE_VNC_PORT);
+            result.put("oneTimePassword", oneTimePassword);
+            result.put("taskId", taskId);
+            log.info("원격 제어(VNC) 시작 taskId={} port={}", taskId, REMOTE_VNC_PORT);
+            return new CommandResult(0, mapper.writeValueAsString(result), "");
+        } catch (Exception e) {
+            return new CommandResult(1, "",
+                    "원격 제어 시작 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    /** UltraVNC 서버를 중지한다 (원격 세션 종료). */
+    private CommandResult executeRemoteControlStop(long taskId, String payloadJson) {
+        try {
+            Path vncServer = resolveVncServerPath();
+            if (vncServer != null) {
+                stopVncServer(vncServer);
+            } else {
+                new ProcessBuilder("taskkill", "/F", "/IM", "winvnc.exe").start();
+            }
+            log.info("원격 제어(VNC) 중지 taskId={}", taskId);
+            return new CommandResult(0, "{\"status\":\"stopped\"}", "");
+        } catch (Exception e) {
+            return new CommandResult(1, "",
+                    "원격 제어 중지 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    private void stopVncServer(Path vncServer) {
+        try {
+            Process p = new ProcessBuilder(vncServer.toString(), "-kill").start();
+            p.waitFor(5, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+        }
+        try {
+            new ProcessBuilder("taskkill", "/F", "/IM", "winvnc.exe").start();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** UltraVNC winvnc.exe 경로 해석 (dev user.dir → 번들 → 표준 설치 경로). */
+    private Path resolveVncServerPath() {
+        // 개발 실행(gradlew run): 프로젝트 루트의 vnc\winvnc.exe
+        try {
+            Path devVnc = Path.of(System.getProperty("user.dir", ".")).resolve("vnc").resolve("winvnc.exe");
+            if (Files.exists(devVnc)) return devVnc.toAbsolutePath().normalize();
+        } catch (Exception ignored) {
+        }
+        Path self = resolveAgentJarPath();
+        if (self != null && self.getParent() != null) {
+            Path appDir = self.getParent();
+            Path[] candidates = {
+                    appDir.resolve("vnc").resolve("winvnc.exe"),
+                    appDir.getParent() != null ? appDir.getParent().resolve("vnc").resolve("winvnc.exe") : null
+            };
+            for (Path c : candidates) {
+                if (c != null && Files.exists(c)) return c.toAbsolutePath().normalize();
+            }
+        }
+        for (String c : new String[]{
+                "C:\\Program Files\\uvnc bvba\\UltraVNC\\winvnc.exe",
+                "C:\\Program Files\\UltraVNC\\winvnc.exe",
+                "C:\\Program Files (x86)\\uvnc bvba\\UltraVNC\\winvnc.exe"}) {
+            Path p = Path.of(c);
+            if (Files.exists(p)) return p;
+        }
+        return null;
+    }
+
+    /** 혼동되는 문자(0/O, 1/l/I)를 제외한 1회용 비밀번호 생성. */
+    private String generateOneTimePassword(int length) {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        SecureRandom rnd = new SecureRandom();
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(chars.charAt(rnd.nextInt(chars.length())));
+        }
+        return sb.toString();
     }
 
     private void downloadAgentUpdateArtifact(List<String> candidates, Path destination, String peerToken) throws IOException {
@@ -1337,6 +1472,43 @@ public class CommandExecutor {
         }
     }
 
+    /**
+     * 무중단 교체 대상인 현재 실행 중 agent.jar 경로를 해석한다.
+     * jpackage app-image는 PCAgent.exe + app\agent.jar 구조이므로 jar만 교체하면 새 버전이 된다.
+     */
+    private Path resolveAgentJarPath() {
+        // 1순위: 실행 중 코드 소스(jar)
+        try {
+            Path codeSource = Path.of(CommandExecutor.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            if (!Files.isDirectory(codeSource)
+                    && codeSource.toString().toLowerCase(Locale.ROOT).endsWith(".jar")) {
+                return codeSource.toAbsolutePath().normalize();
+            }
+        } catch (Exception ignored) {
+        }
+        // 2순위: 셀프 바이너리(런처/jar) 인접의 agent.jar
+        Path self = resolveAgentBinaryPath();
+        if (self != null && self.getParent() != null) {
+            Path parent = self.getParent();
+            for (Path c : new Path[]{parent.resolve("agent.jar"), parent.resolve("app").resolve("agent.jar")}) {
+                if (Files.exists(c)) {
+                    return c.toAbsolutePath().normalize();
+                }
+            }
+        }
+        // 3순위: 표준 설치 경로
+        for (String c : new String[]{
+                "C:\\Program Files\\PCAgent\\app\\agent.jar",
+                "C:\\Program Files\\PCAgent\\agent.jar",
+                "C:\\Program Files (x86)\\PCAgent\\app\\agent.jar"}) {
+            Path p = Path.of(c);
+            if (Files.exists(p)) {
+                return p.toAbsolutePath().normalize();
+            }
+        }
+        return null;
+    }
+
     private Path resolveAgentBinaryPath() {
         try {
             Path codeSource = Path.of(CommandExecutor.class.getProtectionDomain().getCodeSource().getLocation().toURI());
@@ -1356,153 +1528,6 @@ public class CommandExecutor {
             }
         }
         return null;
-    }
-
-    /**
-     * MSI 파일을 detached PowerShell로 설치한다.
-     * 현재 프로세스가 종료되면 msiexec가 --win-upgrade-uuid 기반으로 자동 업그레이드 수행 →
-     * 완료 후 schtasks /Run으로 새 에이전트 실행.
-     */
-    private boolean scheduleMsiInstall(Path msiFile) {
-        try {
-            Path script = Files.createTempFile("pcagent-msi-install-", ".ps1");
-            String body = """
-                    param([Parameter(Mandatory=$true)][string]$Msi)
-                    Start-Sleep -Seconds 6
-                    $p = Start-Process msiexec.exe -ArgumentList '/i', $Msi, '/quiet', '/norestart' -PassThru -Wait
-                    if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
-                      Start-Process schtasks.exe -ArgumentList '/Run', '/TN', 'PCAgent' -Wait
-                    }
-                    Remove-Item -LiteralPath $Msi -ErrorAction SilentlyContinue
-                    """;
-            Files.writeString(script, body, StandardCharsets.UTF_8);
-            script.toFile().deleteOnExit();
-            new ProcessBuilder(
-                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-WindowStyle", "Hidden",
-                    "-File", script.toAbsolutePath().toString(),
-                    msiFile.toAbsolutePath().toString()
-            ).start();
-            return true;
-        } catch (Exception ex) {
-            log.warn("MSI 설치 프로세스 시작 실패: {}", ex.getMessage());
-            return false;
-        }
-    }
-
-    private boolean scheduleAgentBinarySwap(Path targetBinary, Path stagedBinary, Path backupBinary) {
-                try {
-                        String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-                        ProcessBuilder pb;
-                        if (osName.contains("win")) {
-                                Path script = Files.createTempFile("pcagent-update-swap-", ".ps1");
-                                String body = """
-                                                param(
-                                                    [string]$Target,
-                                                    [string]$Next,
-                                                    [string]$Backup,
-                                                    [int]$VerifySeconds = 30
-                                                )
-
-                                                Start-Sleep -Seconds 8
-
-                                                try {
-                                                    Copy-Item -LiteralPath $Next -Destination $Target -Force
-                                                } catch {
-                                                    Write-Output \"COPY_FAILED: $_\"
-                                                    exit 2
-                                                }
-
-                                                $java = $null
-                                                if ($Target.ToLower().EndsWith('.jar')) {
-                                                    try { $java = (Get-Command java -ErrorAction SilentlyContinue).Source } catch {}
-                                                    if (-not $java) { Write-Output 'JAVA_NOT_FOUND'; exit 3 }
-                                                }
-
-                                                try {
-                                                    if ($Target.ToLower().EndsWith('.jar')) {
-                                                        $proc = Start-Process -FilePath $java -ArgumentList '-jar', $Target -WorkingDirectory (Split-Path $Target) -PassThru
-                                                    } else {
-                                                        $proc = Start-Process -FilePath $Target -WorkingDirectory (Split-Path $Target) -PassThru
-                                                    }
-                                                } catch {
-                                                    Write-Output \"START_FAILED: $_\"
-                                                }
-
-                                                Start-Sleep -Seconds $VerifySeconds
-
-                                                if ($proc -eq $null -or $proc.HasExited) {
-                                                    Write-Output 'NEW_PROCESS_FAILED'
-                                                    try { Copy-Item -LiteralPath $Backup -Destination $Target -Force } catch { Write-Output 'RESTORE_FAILED: ' + $_ }
-                                                    try {
-                                                        if ($Target.ToLower().EndsWith('.jar')) {
-                                                            Start-Process -FilePath $java -ArgumentList '-jar', $Target -WorkingDirectory (Split-Path $Target) -PassThru
-                                                        } else {
-                                                            Start-Process -FilePath $Target -WorkingDirectory (Split-Path $Target) -PassThru
-                                                        }
-                                                    } catch {}
-                                                    exit 1
-                                                }
-
-                                                Remove-Item -LiteralPath $Next -Force -ErrorAction SilentlyContinue
-                                                Write-Output 'UPDATE_SUCCESS'
-                                                exit 0
-                                                """;
-
-                                Files.writeString(script, body, StandardCharsets.UTF_8);
-                                script.toFile().deleteOnExit();
-
-                                pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                                                script.toAbsolutePath().toString(),
-                                                targetBinary.toAbsolutePath().toString(),
-                                                stagedBinary.toAbsolutePath().toString(),
-                                                backupBinary.toAbsolutePath().toString(),
-                                                "30");
-                        } else {
-                                Path script = Files.createTempFile("pcagent-update-swap-", ".sh");
-                                String body = "#!/bin/sh\n"
-                                                + "sleep 8\n"
-                                                + "cp -f \"$2\" \"$1\" || { echo \"copy_failed\"; exit 2; }\n"
-                                                + "if echo \"$1\" | grep -qi '\\ .jar$' ; then\n"
-                                                + "  JAVA=$(command -v java || true)\n"
-                                                + "  if [ -z \"$JAVA\" ]; then echo 'JAVA_NOT_FOUND'; exit 3; fi\n"
-                                                + "  \"$JAVA\" -jar \"$1\" &\n"
-                                                + "  PID=$!\n"
-                                                + "else\n"
-                                                + "  \"$1\" &\n"
-                                                + "  PID=$!\n"
-                                                + "fi\n"
-                                                + "sleep 30\n"
-                                                + "if ! kill -0 $PID 2>/dev/null; then\n"
-                                                + "  echo 'new_process_failed'\n"
-                                                + "  cp -f \"$3\" \"$1\" || echo 'restore_failed'\n"
-                                                + "  if echo \"$1\" | grep -qi '\\ .jar$' ; then\n"
-                                                + "    \"$JAVA\" -jar \"$1\" &\n"
-                                                + "  else\n"
-                                                + "    \"$1\" &\n"
-                                                + "  fi\n"
-                                                + "  exit 1\n"
-                                                + "fi\n"
-                                                + "rm -f \"$2\"\n"
-                                                + "echo 'update_success'\n"
-                                                + "exit 0\n";
-
-                                Files.writeString(script, body, StandardCharsets.UTF_8);
-                                try {
-                                        script.toFile().setExecutable(true);
-                                } catch (Exception ignored) {}
-                                pb = new ProcessBuilder("sh", script.toAbsolutePath().toString(),
-                                                targetBinary.toAbsolutePath().toString(),
-                                                stagedBinary.toAbsolutePath().toString(),
-                                                backupBinary.toAbsolutePath().toString(),
-                                                "30");
-                        }
-                        pb.start();
-                        return true;
-                } catch (Exception ex) {
-                        log.warn("업데이트 교체 프로세스 시작 실패: {}", ex.getMessage());
-                        return false;
-                }
     }
 
     private String escapeForPowerShell(String value) {
