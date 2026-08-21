@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { PropsWithChildren } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api, setApiAccessToken, setApiAccessTokenRefresher } from '../api/client'
+import { ApiError, api, setApiAccessToken, setApiAccessTokenRefresher } from '../api/client'
 import type { AuthUser, LoginResponse, StoredSession, UserRole } from './types'
 
 const SESSION_KEY = 'classroom-dashboard.session'
@@ -95,9 +95,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setApiAccessToken(nextSession.token)
       setSession(nextSession)
       return nextSession.token
-    } catch {
-      clearSession()
-      return null
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        clearSession()
+        return null
+      }
+      throw error
     }
   }, [clearSession])
 
@@ -106,7 +109,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (session) {
       setIsRestoring(false)
     } else {
-      void refreshSession().finally(() => setIsRestoring(false))
+      void refreshSession().catch(() => null).finally(() => setIsRestoring(false))
     }
     return () => setApiAccessTokenRefresher(null)
     // Restore from the cookie once when the provider is mounted.
@@ -118,7 +121,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const expiresAt = tokenExpiresAt(session.token)
     if (expiresAt === null) return
     const refreshDelay = Math.max(0, expiresAt - Date.now() - 60_000)
-    const timer = window.setTimeout(() => { void refreshSession() }, refreshDelay)
+    const timer = window.setTimeout(() => { void refreshSession().catch(() => null) }, refreshDelay)
     return () => window.clearTimeout(timer)
   }, [session, refreshSession])
 

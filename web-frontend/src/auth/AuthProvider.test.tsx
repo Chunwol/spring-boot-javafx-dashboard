@@ -60,4 +60,16 @@ describe('AuthProvider session restoration', () => {
     expect(init?.credentials).toBe('include')
     expect(new Headers(init?.headers).has('Authorization')).toBe(false)
   })
+
+  it('keeps the current browser session when refresh fails transiently', async () => {
+    const token = jwt(Math.floor(Date.now() / 1000) + 1)
+    sessionStorage.setItem('classroom-dashboard.session', JSON.stringify({ username: 'admin', role: 'ADMIN', token }))
+    vi.spyOn(window, 'fetch').mockRejectedValue(new TypeError('network unavailable'))
+
+    render(<QueryClientProvider client={new QueryClient()}><AuthProvider><SessionProbe /></AuthProvider></QueryClientProvider>)
+
+    await screen.findByText('admin')
+    await new Promise((resolve) => window.setTimeout(resolve, 10))
+    expect(sessionStorage.getItem('classroom-dashboard.session')).toContain('admin')
+  })
 })
