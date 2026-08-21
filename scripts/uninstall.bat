@@ -4,8 +4,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "INSTALL_DIR=C:\Program Files\PCAgent"
 set "APPDATA_DIR=%APPDATA%\PCAgent"
 set "OLD_SERVICE=PCAgent"
-set "TASK_PATH=\PCAgent\"
-set "TASK_NAME=Main"
+set "TASK_PATH=\"
+set "TASK_NAME=PCAgentWatchdog"
 
 net session >nul 2>&1
 if errorlevel 1 (
@@ -33,10 +33,13 @@ if /I not "%CONFIRM%"=="Y" (
 echo.
 echo [1/7] Removing scheduled task...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { Stop-ScheduledTask -TaskName 'PCAgentWatchdog' -ErrorAction SilentlyContinue } catch {};" ^
+    "try { Stop-ScheduledTask -TaskName 'PCAgent' -ErrorAction SilentlyContinue } catch {};" ^
     "try { Stop-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -ErrorAction SilentlyContinue } catch {};" ^
     "Start-Sleep -Seconds 2;" ^
-    "try { Unregister-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
+    "try { Unregister-ScheduledTask -TaskName 'PCAgentWatchdog' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
     "try { Unregister-ScheduledTask -TaskName 'PCAgent' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
+    "try { Unregister-ScheduledTask -TaskPath '\PCAgent\' -TaskName 'Main' -Confirm:$false -ErrorAction SilentlyContinue } catch {};" ^
     "Write-Host '[OK] Scheduled task remove requested'"
 
 echo [2/7] Removing legacy Windows service if present...

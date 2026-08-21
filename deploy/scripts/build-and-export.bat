@@ -4,6 +4,7 @@ setlocal
 SET IMAGE_NAME=classroom-dashboard
 SET IMAGE_TAG=latest
 SET OUTPUT_FILE=deploy\classroom-dashboard.tar
+SET IMAGE_CONTEXT=deploy\image-context
 
 SET PROJECT_ROOT=%~dp0..\..
 cd /d "%PROJECT_ROOT%"
@@ -33,8 +34,41 @@ if %ERRORLEVEL% neq 0 (
 echo [OK] Docker is running.
 echo.
 
-echo [1/3] Building JAR with Gradle...
-call gradlew.bat --project-dir "%CD%" :backend:bootJar -x test --no-daemon
+echo [1/5] Installing and testing web frontend...
+call npm --prefix web-frontend ci
+if %ERRORLEVEL% neq 0 (
+    echo [FAILED] npm install failed.
+    pause
+    exit /b 1
+)
+call npm --prefix web-frontend run build
+if %ERRORLEVEL% neq 0 (
+    echo [FAILED] Web frontend build failed.
+    pause
+    exit /b 1
+)
+echo.
+
+call npm --prefix web-frontend test
+if %ERRORLEVEL% neq 0 (
+    echo [FAILED] Web frontend tests failed.
+    pause
+    exit /b 1
+)
+echo.
+
+echo [2/5] Running backend tests...
+call gradlew.bat --project-dir "%CD%" :backend:test -PskipWebFrontendBuild --no-daemon
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [FAILED] Backend tests failed.
+    pause
+    exit /b 1
+)
+echo.
+
+echo [3/5] Building JAR with Gradle...
+call gradlew.bat --project-dir "%CD%" :backend:bootJar -PskipWebFrontendBuild --no-daemon
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [FAILED] Gradle build failed.
@@ -43,17 +77,25 @@ if %ERRORLEVEL% neq 0 (
 )
 echo.
 
-echo [2/3] Building Docker image...
-docker build -f deploy\Dockerfile -t %IMAGE_NAME%:%IMAGE_TAG% .
+echo [4/5] Building Docker image...
+copy /Y backend\build\libs\backend-0.0.1-SNAPSHOT.jar %IMAGE_CONTEXT%\app.jar >nul
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [FAILED] Unable to stage backend JAR for Docker build.
+    pause
+    exit /b 1
+)
+docker build -t %IMAGE_NAME%:%IMAGE_TAG% %IMAGE_CONTEXT%
 if %ERRORLEVEL% neq 0 (
     echo.
     echo [FAILED] Docker build failed.
     pause
     exit /b 1
 )
+del /Q %IMAGE_CONTEXT%\app.jar >nul 2>&1
 echo.
 
-echo [3/3] Saving image to file...
+echo [5/5] Saving image to file...
 docker save -o %OUTPUT_FILE% %IMAGE_NAME%:%IMAGE_TAG%
 if %ERRORLEVEL% neq 0 (
     echo.

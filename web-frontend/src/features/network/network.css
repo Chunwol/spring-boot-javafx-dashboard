@@ -1,0 +1,235 @@
+.network-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.network-page.network-fullscreen {
+  padding: 20px;
+  overflow: auto;
+  background: var(--page-bg, #f4f7fa);
+  border: 0;
+  border-radius: 0;
+}
+
+.network-page-header { margin-bottom: 0; }
+.network-page-actions { flex-wrap: nowrap; }
+.network-refresh-state { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+.network-partial-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #8a5b08;
+  background: #fff8e7;
+  border: 1px solid #f0d38a;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.network-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.network-metric {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 82px;
+  padding: 13px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.network-metric-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  border-radius: 6px;
+}
+
+.network-metric-label,
+.network-metric-value,
+.network-metric-hint { display: block; }
+.network-metric-label { margin-bottom: 3px; color: var(--muted); font-size: 10px; }
+.network-metric-value { overflow: hidden; font-size: 17px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.network-metric-hint { margin-top: 4px; color: var(--muted); font-size: 9px; }
+
+.network-chart-section,
+.network-detail-section {
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+}
+
+.network-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.network-section-heading h2 { margin: 0; font-size: 14px; }
+.network-section-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+.network-classroom-heading { margin-bottom: -8px; padding-top: 2px; border-top: 1px solid var(--border); }
+
+.network-chart {
+  width: 100%;
+  height: 250px;
+  min-width: 0;
+  padding: 8px 8px 0;
+  background: #fbfcfe;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.network-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #276c56;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.network-status::before {
+  width: 7px;
+  height: 7px;
+  background: var(--green);
+  border-radius: 50%;
+  content: '';
+}
+
+.network-status.warning { color: #91630d; }
+.network-status.warning::before { background: var(--amber); }
+.network-status.critical { color: #a9323f; }
+.network-status.critical::before { background: var(--red); }
+.network-status.unknown { color: var(--muted); }
+.network-status.unknown::before { background: #a8b4c3; }
+
+.network-filter {
+  display: inline-flex;
+  height: 34px;
+  padding: 2px;
+  background: #eef2f6;
+  border-radius: 6px;
+}
+
+.network-filter button {
+  min-width: 52px;
+  padding: 0 10px;
+  color: #627187;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.network-filter button.active {
+  color: #27364b;
+  background: white;
+  box-shadow: 0 1px 3px rgba(32, 48, 69, 0.14);
+  font-weight: 700;
+}
+
+.network-classroom-table-wrap { min-height: 180px; max-height: 340px; }
+.network-classroom-table tbody tr.selected { background: var(--blue-soft); }
+.network-classroom-table tbody tr.selected:hover { background: #e7efff; }
+
+.network-load {
+  display: grid;
+  grid-template-columns: minmax(68px, 110px) 48px;
+  align-items: center;
+  gap: 7px;
+}
+
+.network-load-track {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  background: #e7ecf2;
+  border-radius: 4px;
+}
+
+.network-load-fill { display: block; height: 100%; background: var(--green); }
+.network-load-fill.warning { background: var(--amber); }
+.network-load-fill.critical { background: var(--red); }
+.network-load strong { color: #526277; font-size: 9px; font-variant-numeric: tabular-nums; }
+.network-unavailable { color: var(--muted); font-size: 10px; }
+.network-detail-total { color: #526277; font-size: 10px; white-space: nowrap; }
+.network-pc-table tbody tr { cursor: default; }
+.network-mac { color: var(--muted); font-size: 9px; }
+
+.network-pc-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.network-pc-state::before {
+  width: 7px;
+  height: 7px;
+  background: #a8b4c3;
+  border-radius: 50%;
+  content: '';
+}
+
+.network-pc-state.online { color: #276c56; }
+.network-pc-state.online::before { background: var(--green); }
+
+.network-threshold-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 10px 12px;
+  color: #5c6d83;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.network-threshold-note svg { color: var(--blue); }
+.network-threshold-note small { margin-left: auto; color: var(--muted); }
+
+@media (max-width: 1100px) {
+  .network-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .network-page { gap: 14px; }
+  .network-page-header { align-items: flex-start; }
+  .network-page-actions { width: 100%; justify-content: flex-start; }
+  .network-refresh-state { margin-right: auto; }
+  .network-summary-grid { grid-template-columns: 1fr; }
+  .network-chart { height: 220px; }
+  .network-section-heading { align-items: flex-start; flex-direction: column; }
+  .network-filter { width: 100%; }
+  .network-filter button { flex: 1; }
+  .network-detail-section .toolbar-actions { width: 100%; }
+  .network-threshold-note small { width: 100%; margin-left: 0; }
+}
+
+@media print {
+  .network-page-actions,
+  .network-filter,
+  .network-detail-section { display: none !important; }
+  .network-page { overflow: visible; border: 0; box-shadow: none; }
+  .network-classroom-table-wrap { max-height: none; overflow: visible; }
+  .network-chart { break-inside: avoid; }
+}

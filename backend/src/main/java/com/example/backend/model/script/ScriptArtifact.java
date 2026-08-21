@@ -53,9 +53,21 @@ public class ScriptArtifact {
     @Column(name = "content_type")
     private String contentType;
 
+    /** ADMIN_UPLOAD 또는 AGENT_COLLECTION. */
+    @Column(name = "artifact_kind", nullable = false)
+    private String artifactKind = "ADMIN_UPLOAD";
+
+    /** 수집 파일을 업로드한 에이전트 MAC. 관리자 업로드는 null. */
+    @Column(name = "owner_mac")
+    private String ownerMac;
+
     /** 업로드 일시 */
     @Schema(description = "업로드 일시")
     @Column(name = "created_at")
     @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime createdAt;
+
+    public boolean isAgentCollection() {
+        return "AGENT_COLLECTION".equalsIgnoreCase(artifactKind);
+    }
 }

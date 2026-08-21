@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CommandWolRoutingIntegrationTest {
 
     private static final Long GROUP_ID = 9101L;
+    private static final Long OTHER_GROUP_ID = 9102L;
     private static final String JWT_SECRET = "command-wol-routing-integration-secret-2026";
     private static final Path DB_PATH = Path.of("build", "tmp", "wol-routing-it-" + System.currentTimeMillis() + ".db")
             .toAbsolutePath()
@@ -93,6 +94,8 @@ class CommandWolRoutingIntegrationTest {
         var result = commandLifecycleService.enqueue(req);
 
         assertThat(result.get("queued")).isEqualTo(2);
+        assertThat(result.get("acceptedTargets")).isEqualTo(2);
+        assertThat(result.get("failedTargets")).isEqualTo(0);
         List<CommandQueue> commands = commandQueueRepository.findAll();
         assertThat(commands).hasSize(2);
 
@@ -113,12 +116,137 @@ class CommandWolRoutingIntegrationTest {
         assertThat(payloadB.get("targetMacs").asText()).contains(targetB.getMacAddress());
     }
 
+    @Test
+    void groupWol_withoutExplicitTargets_skipsOnlinePcsAndDeduplicatesRepeatRequest() throws Exception {
+        PcMaster relay = savePc("AA:BB:CC:91:03:01", "10.91.3.10", "ONLINE");
+        PcMaster offlineTarget = savePc("AA:BB:CC:91:03:20", "10.91.3.20", "OFFLINE");
+
+        CommandRequestDto req = new CommandRequestDto();
+        req.setScope("GROUP");
+        req.setGroupId(GROUP_ID);
+        req.setType("WOL");
+        req.setRole("ALL");
+
+        var first = commandLifecycleService.enqueue(req);
+        var repeated = commandLifecycleService.enqueue(req);
+
+        assertThat(first.get("queued")).isEqualTo(1);
+        assertThat(first.get("acceptedTargets")).isEqualTo(1);
+        assertThat(repeated.get("queued")).isEqualTo(0);
+        assertThat(repeated.get("duplicateSkipped")).isEqualTo(1);
+        assertThat(repeated.get("duplicateTargets")).isEqualTo(1);
+
+        List<CommandQueue> commands = commandQueueRepository.findAll();
+        assertThat(commands).hasSize(1);
+        CommandQueue command = commands.getFirst();
+        assertThat(command.getMacAddress()).isEqualToIgnoringCase(relay.getMacAddress());
+        JsonNode payload = objectMapper.readTree(command.getPayloadJson());
+        assertThat(payload.get("targetMacs").asText()).contains(offlineTarget.getMacAddress());
+        assertThat(payload.get("targetMacs").asText()).doesNotContain(relay.getMacAddress());
+    }
+
+    @Test
+    void groupWol_usesOnlineRelayFromAnotherGroupInSameSlash24() throws Exception {
+        PcMaster target = savePc("AA:BB:CC:91:04:20", "10.91.4.20", "OFFLINE", GROUP_ID);
+        PcMaster crossGroupRelay = savePc("AA:BB:CC:91:04:01", "10.91.4.200", "ONLINE", OTHER_GROUP_ID);
+
+        CommandRequestDto req = new CommandRequestDto();
+        req.setScope("GROUP");
+        req.setGroupId(GROUP_ID);
+        req.setType("WOL");
+        req.setTargetMacs(List.of(target.getMacAddress()));
+
+        var result = commandLifecycleService.enqueue(req);
+
+        assertThat(result.get("queued")).isEqualTo(1);
+        assertThat(result.get("acceptedTargets")).isEqualTo(1);
+        CommandQueue command = commandQueueRepository.findAll().getFirst();
+        assertThat(command.getMacAddress()).isEqualToIgnoringCase(crossGroupRelay.getMacAddress());
+        assertThat(objectMapper.readTree(command.getPayloadJson()).get("broadcastIp").asText())
+                .isEqualTo("10.91.4.255");
+    }
+
+    @Test
+    void singleWol_prefersSameGroupRelayOverCrossGroupRelay() {
+        PcMaster target = savePc("AA:BB:CC:91:05:20", "10.91.5.20", "OFFLINE", GROUP_ID);
+        savePc("AA:BB:CC:91:05:01", "10.91.5.200", "ONLINE", OTHER_GROUP_ID);
+        PcMaster sameGroupRelay = savePc("AA:BB:CC:91:05:02", "10.91.5.10", "ONLINE", GROUP_ID);
+
+        CommandRequestDto req = new CommandRequestDto();
+        req.setScope("SINGLE");
+        req.setMacAddress(target.getMacAddress());
+        req.setType("WOL");
+
+        var result = commandLifecycleService.enqueue(req);
+
+        assertThat(result.get("queued")).isEqualTo(1);
+        assertThat(result.get("leaderMac")).isEqualTo(sameGroupRelay.getMacAddress());
+    }
+
+    @Test
+    void singleWol_withAdditionalPayload_alwaysIncludesTargetAndBroadcast() throws Exception {
+        PcMaster target = savePc("AA:BB:CC:91:05:30", "10.91.5.30", "OFFLINE", GROUP_ID);
+        PcMaster relay = savePc("AA:BB:CC:91:05:03", "10.91.5.11", "ONLINE", GROUP_ID);
+
+        CommandRequestDto req = new CommandRequestDto();
+        req.setScope("SINGLE");
+        req.setMacAddress(target.getMacAddress());
+        req.setType("WOL");
+        req.setPayloadJson("{\"port\":9,\"targetMacs\":\"\",\"broadcastIp\":\"255.255.255.255\"}");
+
+        var result = commandLifecycleService.enqueue(req);
+
+        assertThat(result.get("queued")).isEqualTo(1);
+        CommandQueue command = commandQueueRepository.findAll().getFirst();
+        assertThat(command.getMacAddress()).isEqualToIgnoringCase(relay.getMacAddress());
+        JsonNode payload = objectMapper.readTree(command.getPayloadJson());
+        assertThat(payload.get("port").asInt()).isEqualTo(9);
+        assertThat(payload.get("targetMacs").asText()).isEqualTo(target.getMacAddress());
+        assertThat(payload.get("broadcastIp").asText()).isEqualTo("10.91.5.255");
+    }
+
+    @Test
+    void enqueueToIpWol_usesOnlineRelayFromAnotherGroupInSameSlash24() {
+        PcMaster target = savePc("AA:BB:CC:91:08:20", "10.91.8.20", "OFFLINE", GROUP_ID);
+        PcMaster crossGroupRelay = savePc("AA:BB:CC:91:08:01", "10.91.8.200", "ONLINE", OTHER_GROUP_ID);
+
+        var result = commandLifecycleService.enqueueToIp(
+                target.getIpAddress(), "WOL", null, null, null);
+
+        assertThat(result.get("queued")).isEqualTo(1);
+        assertThat(result.get("macAddress")).isEqualTo(crossGroupRelay.getMacAddress());
+        assertThat(result.get("broadcastIp")).isEqualTo("10.91.8.255");
+    }
+
+    @Test
+    void groupWol_doesNotUseRelayFromAnotherSlash24() {
+        PcMaster target = savePc("AA:BB:CC:91:06:20", "10.91.6.20", "OFFLINE", GROUP_ID);
+        savePc("AA:BB:CC:91:07:01", "10.91.7.10", "ONLINE", OTHER_GROUP_ID);
+
+        CommandRequestDto req = new CommandRequestDto();
+        req.setScope("GROUP");
+        req.setGroupId(GROUP_ID);
+        req.setType("WOL");
+        req.setTargetMacs(List.of(target.getMacAddress()));
+
+        var result = commandLifecycleService.enqueue(req);
+
+        assertThat(result.get("queued")).isEqualTo(0);
+        assertThat(result.get("failedTargets")).isEqualTo(1);
+        assertThat(result.get("message")).isEqualTo("no-online-agent-in-target-subnet");
+        assertThat(commandQueueRepository.findAll()).isEmpty();
+    }
+
     private PcMaster savePc(String mac, String ip, String status) {
+        return savePc(mac, ip, status, GROUP_ID);
+    }
+
+    private PcMaster savePc(String mac, String ip, String status, Long groupId) {
         PcMaster pc = new PcMaster();
         pc.setMacAddress(mac);
         pc.setPcName("WOL-" + mac.substring(mac.length() - 2));
         pc.setIpAddress(ip);
-        pc.setGroupId(GROUP_ID);
+        pc.setGroupId(groupId);
         pc.setStatus(status);
         pc.setRole("STUDENT");
         pc.setLastSeen(LocalDateTime.now());

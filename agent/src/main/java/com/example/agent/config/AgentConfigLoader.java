@@ -29,9 +29,12 @@ public class AgentConfigLoader {
     private final Object configLock = new Object();
 
     public AgentConfigLoader() {
-        // -Dpcagent.config.dir=<path> 시스템 속성으로 경로 재정의 가능
+        // -Dpcagent.config.dir=<path> 또는 PCAGENT_CONFIG_DIR 환경변수로 경로 재정의 가능
         // (Task Scheduler로 SYSTEM 계정 실행 시 %APPDATA% 경로 문제 방지)
-        String configDirProp = System.getProperty("pcagent.config.dir");
+        String configDirProp = firstNonBlank(
+                System.getProperty("pcagent.config.dir"),
+                System.getenv("PCAGENT_CONFIG_DIR"),
+                System.getenv("AGENT_CONFIG_DIR"));
         Path baseDir;
         if (configDirProp != null && !configDirProp.isBlank()) {
             baseDir = Path.of(configDirProp);
@@ -76,6 +79,12 @@ public class AgentConfigLoader {
                 log.error("config.json 파싱 실패: {}", e.getMessage());
                 config = new AgentConfig();
             }
+        }
+        String migratedServerUrl = migrateLegacyProductionServerUrl(config.getServerUrl());
+        if (!java.util.Objects.equals(config.getServerUrl(), migratedServerUrl)) {
+            config.setServerUrl(migratedServerUrl);
+            save(config);
+            log.info("구형 운영 서버 주소를 HTTPS 주소로 마이그레이션했습니다.");
         }
         applyEnvOverrides(config);
         return config;
@@ -131,8 +140,28 @@ public class AgentConfigLoader {
         return homeDir != null ? homeDir.resolve(".pcagent") : Path.of(".pcagent");
     }
 
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
     private static boolean hasConfig(Path baseDir) {
         return baseDir != null && Files.exists(baseDir.resolve(CONFIG_FILE_NAME));
+    }
+
+    static String migrateLegacyProductionServerUrl(String serverUrl) {
+        if (serverUrl == null) return null;
+        String normalized = serverUrl.trim().replaceAll("/+$", "");
+        if (normalized.equalsIgnoreCase("http://223.194.166.251:8080")
+                || normalized.equalsIgnoreCase("http://pelmon.kro.kr")
+                || normalized.equalsIgnoreCase("http://pelmon.kro.kr:80")) {
+            return "https://pelmon.kro.kr";
+        }
+        return serverUrl;
     }
 
     private Path resolveProgramDataDirectory() {

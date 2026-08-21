@@ -2,8 +2,10 @@ package com.example.agent.command;
 
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
+import com.example.agent.scmate.ScmateController;
 import com.example.agent.update.UpdateCacheServer;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
 import org.slf4j.Logger;
@@ -29,21 +31,28 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import javax.swing.filechooser.FileSystemView;
 
 /**
  * 서버에서 전달받은 명령을 실행한다.
- * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY, COLLECT_FILES, LIST_FILES, AGENT_UPDATE
+ * 지원 명령: SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL_RELAY, COLLECT_FILES, LIST_FILES,
+ * AGENT_UPDATE, AGENT_BUNDLE_UPDATE
  */
 public class CommandExecutor {
 
@@ -65,9 +74,15 @@ public class CommandExecutor {
     private static final long AGENT_UPDATE_VERIFY_DEADLINE_MS = 90_000L;
     /** 원격 제어(VNC) 서버 포트 */
     private static final int REMOTE_VNC_PORT = 5900;
+    private static final String REMOTE_VNC_FIREWALL_RULE = "PCAgent Remote Control";
+    private static final String REMOTE_VNC_SERVICE = "uvnc_service";
+    private static final long REMOTE_VNC_MAX_SESSION_MS = TimeUnit.MINUTES.toMillis(35);
     private static final int AGENT_UPDATE_DOWNLOAD_BUFFER_SIZE = 64 * 1024;
     private static final long AGENT_UPDATE_DOWNLOAD_CHUNK_SIZE = 8L * 1024 * 1024;
     private static final int AGENT_UPDATE_DOWNLOAD_MAX_RETRY = 3;
+    private static final long AGENT_BUNDLE_MAX_ENTRY_SIZE = 256L * 1024 * 1024;
+    private static final long AGENT_BUNDLE_MAX_TOTAL_SIZE = 512L * 1024 * 1024;
+    private static final int AGENT_BUNDLE_MAX_ENTRY_COUNT = 2_000;
 
     private final AgentConfig config;
     private final AgentConfigLoader configLoader;
@@ -76,6 +91,10 @@ public class CommandExecutor {
     private final ObjectMapper mapper;
     private final PendingCommandResultStore pendingResultStore;
     private final UpdateCacheServer updateCacheServer;
+    private final Consumer<Map<String, Object>> scmateStatusObserver;
+    private final AtomicLong remoteControlGeneration = new AtomicLong();
+    private final Object remoteControlLock = new Object();
+    private String activeRemoteControlSessionId;
 
     public CommandExecutor(AgentConfig config,
                            AgentConfigLoader configLoader,
@@ -91,6 +110,16 @@ public class CommandExecutor {
                            ObjectMapper mapper,
                            PendingCommandResultStore pendingResultStore,
                            UpdateCacheServer updateCacheServer) {
+        this(config, configLoader, httpClient, mapper, pendingResultStore, updateCacheServer, ignored -> { });
+    }
+
+    public CommandExecutor(AgentConfig config,
+                           AgentConfigLoader configLoader,
+                           OkHttpClient httpClient,
+                           ObjectMapper mapper,
+                           PendingCommandResultStore pendingResultStore,
+                           UpdateCacheServer updateCacheServer,
+                           Consumer<Map<String, Object>> scmateStatusObserver) {
         this.config = config;
         this.configLoader = configLoader;
         this.httpClient = httpClient;
@@ -101,6 +130,7 @@ public class CommandExecutor {
         this.mapper = mapper;
         this.pendingResultStore = pendingResultStore;
         this.updateCacheServer = updateCacheServer;
+        this.scmateStatusObserver = scmateStatusObserver == null ? ignored -> { } : scmateStatusObserver;
     }
 
     /**
@@ -116,8 +146,8 @@ public class CommandExecutor {
             log.warn("명령에 type 필드 없음. 무시.");
             return;
         }
-        String payload = cmdNode.has("payload") && !cmdNode.get("payload").isNull()
-                ? cmdNode.get("payload").asText() : "{}";
+        JsonNode payloadNode = cmdNode.get("payload");
+        String payload = serializePayload(payloadNode);
         String scriptUrl = cmdNode.has("scriptUrl") && !cmdNode.get("scriptUrl").isNull()
                 ? cmdNode.get("scriptUrl").asText() : null;
 
@@ -126,8 +156,8 @@ public class CommandExecutor {
 
         try {
             CommandResult result = switch (type) {
-                case "SHUTDOWN"   -> executeShell("shutdown /s /t 10 /c \"원격 종료 명령\"");
-                case "REBOOT"     -> executeShell("shutdown /r /t 10");
+                case "SHUTDOWN"   -> executeShell(systemShutdownCommand());
+                case "REBOOT"     -> executeShell(systemRebootCommand());
                 case "RUN_CMD"    -> {
                     JsonNode p = mapper.readTree(payload);
                     String cmd = p.has("cmd") ? p.get("cmd").asText() : payload;
@@ -144,8 +174,10 @@ public class CommandExecutor {
                 case "COLLECT_FILES" -> executeCollectFiles(taskId, payload);
                 case "LIST_FILES" -> executeListFiles(payload);
                 case "AGENT_UPDATE" -> executeAgentUpdate(taskId, payload);
+                case "AGENT_BUNDLE_UPDATE" -> executeAgentBundleUpdate(taskId, payload);
                 case "REMOTE_CONTROL_START" -> executeRemoteControlStart(taskId, payload);
                 case "REMOTE_CONTROL_STOP" -> executeRemoteControlStop(taskId, payload);
+                case "SCMATE_CONTROL" -> executeScmateControl(cmdNode, payload);
                 default -> new CommandResult(0, "지원하지 않는 명령: " + type, "");
             };
             // LIST_FILES JSON은 4KB 제한 대신 2MB 허용
@@ -159,8 +191,84 @@ public class CommandExecutor {
             if (maskedMsg == null || maskedMsg.isBlank()) {
                 maskedMsg = t.getClass().getSimpleName();
             }
-            log.error("명령 실행 실패 taskId={} type={}: {} ({})", taskId, type, maskedMsg, t.getClass().getName(), t);
+            if ("SCMATE_CONTROL".equals(type)) {
+                log.error("SCMATE 명령 실행 실패 taskId={}: {} ({})", taskId, maskedMsg, t.getClass().getName());
+            } else {
+                log.error("명령 실행 실패 taskId={} type={}: {} ({})", taskId, type, maskedMsg, t.getClass().getName(), t);
+            }
             persistAndSendResult(taskId, new CommandResult(1, "", maskedMsg));
+        }
+    }
+
+    static String systemShutdownCommand() {
+        return "shutdown.exe /s /f /t 0";
+    }
+
+    static String systemRebootCommand() {
+        return "shutdown.exe /r /f /t 0";
+    }
+
+    static String serializePayload(JsonNode payloadNode) {
+        if (payloadNode == null || payloadNode.isNull()) return "{}";
+        return payloadNode.isTextual() ? payloadNode.asText() : payloadNode.toString();
+    }
+
+    private CommandResult executeScmateControl(JsonNode command, String payloadJson) throws Exception {
+        if (config.getServerUrl() == null
+                || !config.getServerUrl().trim().toLowerCase(java.util.Locale.ROOT).startsWith("https://")) {
+            return new CommandResult(1, "", "SCMATE_HTTPS_REQUIRED");
+        }
+        JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+        JsonNode credential = command.path("scmateCredential");
+        String action = payload.path("action").asText("STATUS");
+        String username = credential.path("username").asText("");
+        String password = credential.path("password").asText("");
+        if (command instanceof ObjectNode objectNode) {
+            objectNode.remove("scmateCredential");
+        }
+        ScmateController.Result result = ScmateController.execute(
+                action, payload, username, password, mapper);
+        notifyConfirmedScmateStatus(action, result);
+        return new CommandResult(result.exitCode(), result.stdout(), result.stderr());
+    }
+
+    private void notifyConfirmedScmateStatus(String action, ScmateController.Result result) {
+        Map<String, Object> confirmed = confirmedScmateStatus(action, result, mapper);
+        if (confirmed.isEmpty()) {
+            return;
+        }
+        try {
+            scmateStatusObserver.accept(confirmed);
+        } catch (RuntimeException error) {
+            log.warn("SCMATE 확정 상태 반영 실패: {}", error.getMessage());
+        }
+    }
+
+    static Map<String, Object> confirmedScmateStatus(String action,
+                                                     ScmateController.Result result,
+                                                     ObjectMapper mapper) {
+        if (result == null || result.exitCode() != 0 || action == null
+                || !("REQUEST_OPERATOR".equalsIgnoreCase(action)
+                || "REQUEST_PROTECTED".equalsIgnoreCase(action))) {
+            return Map.of();
+        }
+        try {
+            JsonNode after = mapper.readTree(result.stdout()).path("after");
+            if (!after.isObject()) {
+                return Map.of();
+            }
+            Map<String, Object> status = new LinkedHashMap<>();
+            status.put("scmateAvailable", after.path("available").asBoolean(true));
+            status.put("scmateMode", after.path("mode").asText("UNKNOWN"));
+            status.put("scmateTransitionPending", after.path("transitionPending").asBoolean(false));
+            status.put("scmateRawState", after.path("raw").asLong(0L));
+            status.put("scmateSchedule", after.path("schedule").asText("UNKNOWN"));
+            status.put("scmateSelectedPoint", after.path("selectedPoint").asText("UNKNOWN"));
+            status.put("scmateAvailabilityReason", after.path("availabilityReason").asText("ACTIVE"));
+            status.put("scmateError", null);
+            return status;
+        } catch (Exception error) {
+            return Map.of();
         }
     }
 
@@ -303,6 +411,7 @@ public class CommandExecutor {
         String displayNameFromPayload = p.has("displayName") ? p.get("displayName").asText("") : "";
         String destinationMode = p.has("destinationMode") ? p.get("destinationMode").asText("DOWNLOADS") : "DOWNLOADS";
         String destinationPath = p.has("destinationPath") ? p.get("destinationPath").asText("") : "";
+        String conflictPolicy = p.has("conflictPolicy") ? p.get("conflictPolicy").asText("REPLACE") : "REPLACE";
 
         String source = scriptUrl.trim();
         String ext = (source.toLowerCase().endsWith(".zip") || archiveTransfer) ? ".zip" : ".ps1";
@@ -422,6 +531,9 @@ public class CommandExecutor {
 
                 String targetName = sanitizeName(displayName == null || displayName.isBlank() ? tmpFile.getFileName().toString() : displayName);
                 Path targetFile = targetBaseDir.resolve(targetName);
+                if ("RENAME".equalsIgnoreCase(conflictPolicy)) {
+                    targetFile = resolveNonConflictingPath(targetFile);
+                }
                 Files.copy(tmpFile, targetFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
                 if (runAfterTransfer) {
@@ -1141,6 +1253,307 @@ public class CommandExecutor {
         }
     }
 
+    private CommandResult executeAgentBundleUpdate(long taskId, String payloadJson) {
+        try {
+            JsonNode payload = mapper.readTree(payloadJson == null ? "{}" : payloadJson);
+            String sourceMode = payload.has("sourceMode") ? payload.get("sourceMode").asText("SERVER_ONLY") : "SERVER_ONLY";
+            String targetVersion = payload.has("targetVersion") ? payload.get("targetVersion").asText("").trim() : "";
+            String expectedSha256 = payload.has("sha256") ? payload.get("sha256").asText("").trim() : "";
+            String peerToken = payload.has("peerToken") ? payload.get("peerToken").asText("") : "";
+            String downloadUrl = payload.has("downloadUrl") ? payload.get("downloadUrl").asText("") : "";
+            if (downloadUrl.isBlank() || targetVersion.isBlank()) {
+                return new CommandResult(1, "", "AGENT_BUNDLE_UPDATE payload missing downloadUrl or targetVersion");
+            }
+            if (!expectedSha256.matches("(?i)^[0-9a-f]{64}$")) {
+                return new CommandResult(1, "", "AGENT_BUNDLE_UPDATE payload has invalid sha256");
+            }
+
+            Set<String> candidateSet = new LinkedHashSet<>();
+            if ("HYBRID_PEER".equalsIgnoreCase(sourceMode)
+                    && payload.has("peerCandidates") && payload.get("peerCandidates").isArray()) {
+                for (JsonNode candidate : payload.get("peerCandidates")) {
+                    if (candidate != null && candidate.has("url")) {
+                        String url = candidate.get("url").asText("").trim();
+                        if (!url.isBlank()) candidateSet.add(url);
+                    }
+                }
+            }
+            candidateSet.add(resolveRemoteScriptUrl(downloadUrl.trim()));
+            List<String> candidates = new ArrayList<>(candidateSet);
+
+            Path targetJar = resolveAgentJarPath();
+            if (targetJar == null || !Files.isRegularFile(targetJar)) {
+                return new CommandResult(1, "", "현재 실행 중인 agent.jar 경로를 확인할 수 없습니다.");
+            }
+            Path installDir = resolveInstallDirectory(targetJar);
+            Path programDataDir = configLoader.getConfigPath().getParent();
+            if (installDir == null || programDataDir == null) {
+                return new CommandResult(1, "", "에이전트 설치 또는 ProgramData 경로를 확인할 수 없습니다.");
+            }
+
+            long now = System.currentTimeMillis();
+            Path updateRoot = Files.createDirectories(programDataDir.resolve("bundle-updates"));
+            Path workDir = updateRoot.resolve("task-" + taskId + "-" + now);
+            Path payloadDir = workDir.resolve("payload");
+            Files.createDirectories(payloadDir);
+            Path stagedZip = workDir.resolve("PCAgent-" + targetVersion + "-update-bundle.zip");
+
+            downloadAgentUpdateArtifact(candidates, stagedZip, peerToken);
+            String actualSha256 = sha256(stagedZip);
+            if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
+                deleteRecursively(workDir);
+                return new CommandResult(1, "", "전체 업데이트 ZIP 무결성 검증 실패");
+            }
+
+            BundleManifest manifest = validateAndExtractBundle(stagedZip, payloadDir, mapper, targetVersion);
+            if (updateCacheServer != null) {
+                try {
+                    updateCacheServer.start();
+                    updateCacheServer.registerArtifact(actualSha256, stagedZip, peerToken);
+                } catch (Exception cacheEx) {
+                    log.warn("전체 업데이트 캐시 등록 실패 taskId={}: {}", taskId, cacheEx.getMessage());
+                }
+            }
+
+            String updaterTaskName = "PCAgentBundleUpdate-" + taskId;
+            launchBundleUpdaterTask(
+                    payloadDir.resolve("agent-bundle-updater.ps1"),
+                    payloadDir,
+                    installDir,
+                    targetJar,
+                    programDataDir,
+                    targetVersion,
+                    taskId,
+                    updaterTaskName
+            );
+            scheduleSelfExit(AGENT_UPDATE_EXIT_DELAY_MS);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("status", "staged");
+            result.put("taskId", taskId);
+            result.put("targetVersion", targetVersion);
+            result.put("sourceMode", sourceMode);
+            result.put("sha256", actualSha256);
+            result.put("bundleFiles", manifest.fileCount());
+            result.put("bundleBytes", manifest.totalBytes());
+            result.put("rebootRequired", false);
+            result.put("mode", "transactional-full-bundle");
+            result.put("message", "전체 번들 교체를 예약했습니다. 별도 SYSTEM 업데이트 작업이 JRE, VNC, 워치독과 JAR을 교체하고 실패 시 전체 롤백합니다.");
+            return new CommandResult(0, mapper.writeValueAsString(result), "");
+        } catch (Exception e) {
+            return new CommandResult(1, "", "AGENT_BUNDLE_UPDATE 실패: "
+                    + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    static BundleManifest validateAndExtractBundle(Path zipFile,
+                                                   Path targetDir,
+                                                   ObjectMapper mapper,
+                                                   String expectedVersion) throws Exception {
+        Files.createDirectories(targetDir);
+        Path normalizedTarget = targetDir.toAbsolutePath().normalize();
+        int entryCount = 0;
+        long totalBytes = 0L;
+        Set<String> extractedFiles = new LinkedHashSet<>();
+
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(zipFile))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[64 * 1024];
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entryCount > AGENT_BUNDLE_MAX_ENTRY_COUNT) {
+                    throw new IOException("Bundle entry count exceeds limit");
+                }
+                String relative = normalizeBundlePath(entry.getName());
+                if (relative.isBlank()) continue;
+                if (!isAllowedBundlePath(relative)) {
+                    throw new IOException("Bundle contains an unsupported path: " + relative);
+                }
+                Path destination = normalizedTarget.resolve(relative.replace('/', File.separatorChar)).normalize();
+                if (!destination.startsWith(normalizedTarget)) {
+                    throw new IOException("Bundle entry escapes target directory: " + relative);
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(destination);
+                    continue;
+                }
+                if (!extractedFiles.add(relative)) {
+                    throw new IOException("Bundle contains a duplicate path: " + relative);
+                }
+                Files.createDirectories(destination.getParent());
+                long entryBytes = 0L;
+                try (OutputStream out = Files.newOutputStream(destination,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    int read;
+                    while ((read = zip.read(buffer)) > 0) {
+                        entryBytes += read;
+                        totalBytes += read;
+                        if (entryBytes > AGENT_BUNDLE_MAX_ENTRY_SIZE || totalBytes > AGENT_BUNDLE_MAX_TOTAL_SIZE) {
+                            throw new IOException("Bundle extracted size exceeds limit");
+                        }
+                        out.write(buffer, 0, read);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            deleteRecursively(targetDir);
+            throw ex;
+        }
+
+        Path manifestPath = normalizedTarget.resolve("bundle-manifest.json");
+        if (!Files.isRegularFile(manifestPath)) {
+            throw new IOException("Bundle manifest is missing");
+        }
+        JsonNode manifest = mapper.readTree(manifestPath.toFile());
+        if (manifest.path("schemaVersion").asInt(-1) != 1) {
+            throw new IOException("Unsupported bundle manifest schema");
+        }
+        String bundleVersion = manifest.path("bundleVersion").asText("").trim();
+        if (bundleVersion.isBlank() || !bundleVersion.equals(expectedVersion)) {
+            throw new IOException("Bundle manifest version mismatch");
+        }
+        JsonNode files = manifest.get("files");
+        if (files == null || !files.isArray() || files.isEmpty()) {
+            throw new IOException("Bundle manifest files are missing");
+        }
+
+        Set<String> manifestFiles = new LinkedHashSet<>();
+        for (JsonNode row : files) {
+            String relative = normalizeBundlePath(row.path("path").asText(""));
+            String expectedSha = row.path("sha256").asText("").trim();
+            long expectedSize = row.path("size").asLong(-1L);
+            if (!isAllowedBundlePayloadPath(relative) || !manifestFiles.add(relative)
+                    || !expectedSha.matches("(?i)^[0-9a-f]{64}$") || expectedSize < 0) {
+                throw new IOException("Invalid bundle manifest entry: " + relative);
+            }
+            Path file = normalizedTarget.resolve(relative.replace('/', File.separatorChar)).normalize();
+            if (!file.startsWith(normalizedTarget) || !Files.isRegularFile(file)
+                    || Files.size(file) != expectedSize
+                    || !sha256Static(file).equalsIgnoreCase(expectedSha)) {
+                throw new IOException("Bundle manifest verification failed: " + relative);
+            }
+        }
+
+        Set<String> actualPayloadFiles = new LinkedHashSet<>(extractedFiles);
+        actualPayloadFiles.remove("bundle-manifest.json");
+        if (!actualPayloadFiles.equals(manifestFiles)) {
+            throw new IOException("Bundle contains unlisted or missing payload files");
+        }
+        for (String required : List.of(
+                "agent.jar", "agent-watchdog.ps1", "install-helper.ps1", "agent-bundle-updater.ps1",
+                "jre/bin/java.exe", "jre/lib/modules", "vnc/winvnc.exe", "vnc/createpassword.exe")) {
+            if (!manifestFiles.contains(required)) {
+                throw new IOException("Required bundle file is missing: " + required);
+            }
+        }
+        return new BundleManifest(bundleVersion, manifestFiles.size(), totalBytes);
+    }
+
+    private static String normalizeBundlePath(String value) throws IOException {
+        String normalized = value == null ? "" : value.replace('\\', '/').trim();
+        while (normalized.startsWith("./")) normalized = normalized.substring(2);
+        if (normalized.startsWith("/") || normalized.matches("^[A-Za-z]:.*")
+                || Arrays.asList(normalized.split("/")).contains("..")) {
+            throw new IOException("Unsafe bundle path");
+        }
+        return normalized;
+    }
+
+    private static boolean isAllowedBundlePath(String path) {
+        return "bundle-manifest.json".equals(path) || isAllowedBundlePayloadPath(path);
+    }
+
+    private static boolean isAllowedBundlePayloadPath(String path) {
+        return "agent.jar".equals(path)
+                || "agent-watchdog.ps1".equals(path)
+                || "install-helper.ps1".equals(path)
+                || "agent-bundle-updater.ps1".equals(path)
+                || path.startsWith("jre/")
+                || path.startsWith("vnc/");
+    }
+
+    private void launchBundleUpdaterTask(Path updaterScript,
+                                         Path stageDir,
+                                         Path installDir,
+                                         Path targetJar,
+                                         Path programDataDir,
+                                         String targetVersion,
+                                         long taskId,
+                                         String updaterTaskName) throws Exception {
+        String updaterCommand = "& '" + escapeForPowerShell(updaterScript.toAbsolutePath().toString()) + "'"
+                + " -StageDir '" + escapeForPowerShell(stageDir.toAbsolutePath().toString()) + "'"
+                + " -InstallDir '" + escapeForPowerShell(installDir.toAbsolutePath().toString()) + "'"
+                + " -TargetJar '" + escapeForPowerShell(targetJar.toAbsolutePath().toString()) + "'"
+                + " -ProgramDataDir '" + escapeForPowerShell(programDataDir.toAbsolutePath().toString()) + "'"
+                + " -TargetVersion '" + escapeForPowerShell(targetVersion) + "'"
+                + " -TaskId " + taskId
+                + " -AgentPid " + ProcessHandle.current().pid()
+                + " -UpdaterTaskName '" + escapeForPowerShell(updaterTaskName) + "'";
+        String updaterEncoded = Base64.getEncoder().encodeToString(updaterCommand.getBytes(StandardCharsets.UTF_16LE));
+        String actionArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand " + updaterEncoded;
+        String registration = "$ErrorActionPreference='Stop'; "
+                + "$name='" + escapeForPowerShell(updaterTaskName) + "'; "
+                + "$action=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '"
+                + escapeForPowerShell(actionArgs) + "'; "
+                + "$trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1); "
+                + "$settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)"
+                + " -MultipleInstances IgnoreNew -Hidden -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "
+                + "$principal=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; "
+                + "Register-ScheduledTask -TaskPath '\\' -TaskName $name -Action $action -Trigger $trigger"
+                + " -Settings $settings -Principal $principal -Force | Out-Null; "
+                + "$task=Get-ScheduledTask -TaskPath '\\' -TaskName $name -ErrorAction Stop; "
+                + "if([string]$task.Principal.UserId -notmatch '^(SYSTEM|S-1-5-18)$'){throw 'Updater task principal is not SYSTEM'}; "
+                + "Start-ScheduledTask -TaskPath '\\' -TaskName $name";
+        String registrationEncoded = Base64.getEncoder().encodeToString(registration.getBytes(StandardCharsets.UTF_16LE));
+        Process process = new ProcessBuilder(
+                "powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
+                "-EncodedCommand", registrationEncoded)
+                .redirectErrorStream(true)
+                .start();
+        ProcessOutputReader output = new ProcessOutputReader(process.getInputStream(), OUTPUT_LIMIT);
+        output.start();
+        boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+        output.waitForCompletion(1_000);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new IOException("전체 업데이트 SYSTEM 작업 등록 시간 초과");
+        }
+        if (process.exitValue() != 0) {
+            throw new IOException("전체 업데이트 SYSTEM 작업 등록 실패: " + output.getOutput());
+        }
+    }
+
+    private Path resolveInstallDirectory(Path targetJar) {
+        if (targetJar == null || targetJar.getParent() == null) return null;
+        Path parent = targetJar.toAbsolutePath().normalize().getParent();
+        if (parent.getFileName() != null && "app".equalsIgnoreCase(parent.getFileName().toString())
+                && parent.getParent() != null) {
+            return parent.getParent();
+        }
+        return parent;
+    }
+
+    private static String sha256Static(Path file) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) > 0) md.update(buffer, 0, read);
+        }
+        return HexFormat.of().formatHex(md.digest());
+    }
+
+    private static void deleteRecursively(Path root) {
+        if (root == null || !Files.exists(root)) return;
+        try (var paths = Files.walk(root)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) {}
+            });
+        } catch (IOException ignored) {
+        }
+    }
+
+    record BundleManifest(String version, int fileCount, long totalBytes) {}
+
     // ─────────────────────────────────────────
     // 원격 제어 (VNC 콘솔 미러) — 교사 PC 단일/전체
     // ─────────────────────────────────────────
@@ -1151,7 +1564,14 @@ public class CommandExecutor {
      * 보안: 매 세션 새 비번, 종료 시 즉시 중지(REMOTE_CONTROL_STOP).
      */
     private CommandResult executeRemoteControlStart(long taskId, String payloadJson) {
+        synchronized (remoteControlLock) {
+            return executeRemoteControlStartLocked(taskId, payloadJson);
+        }
+    }
+
+    private CommandResult executeRemoteControlStartLocked(long taskId, String payloadJson) {
         try {
+            String sessionId = remoteControlSessionId(payloadJson);
             Path vncServer = resolveVncServerPath();
             if (vncServer == null) {
                 return new CommandResult(1, "",
@@ -1171,18 +1591,41 @@ public class CommandExecutor {
             if (programData == null || programData.isBlank()) programData = "C:\\ProgramData";
             Path ini = Path.of(programData, "UltraVNC", "ultravnc.ini");
             Files.createDirectories(ini.getParent());
-            // 기본 설정(포트/인증) 먼저 기록 — createpassword는 passwd만 갱신하고 나머지는 보존
-            Files.writeString(ini, "[ultravnc]\n"
-                    + "PortNumber=" + REMOTE_VNC_PORT + "\n"
-                    + "AuthRequired=1\n"
-                    + "FileTransferEnabled=0\n", StandardCharsets.UTF_8);
+            // createpassword는 [ultravnc]의 passwd만 갱신한다. 리슨/권한 설정은 [admin]에 있어야 한다.
+            Files.writeString(ini, buildUltraVncIni(), StandardCharsets.UTF_8);
             // createpassword.exe <비번> → ini의 passwd 설정 (UltraVNC 버전 호환 보장)
             Process cp = new ProcessBuilder(createPasswd.toString(), oneTimePassword)
                     .directory(ini.getParent().toFile()).start();
-            cp.waitFor(10, TimeUnit.SECONDS);
+            if (!cp.waitFor(10, TimeUnit.SECONDS)) {
+                cp.destroyForcibly();
+                return new CommandResult(1, "", "VNC 일회용 비밀번호 생성 시간이 초과되었습니다.");
+            }
+            if (cp.exitValue() != 0) {
+                return new CommandResult(1, "", "VNC 일회용 비밀번호 생성에 실패했습니다. 종료 코드=" + cp.exitValue());
+            }
 
+            long generation = remoteControlGeneration.incrementAndGet();
+            activeRemoteControlSessionId = null;
             stopVncServer(vncServer);
-            new ProcessBuilder(vncServer.toString(), "-run").start();
+            if (!ensureRemoteControlFirewallRule()) {
+                return new CommandResult(1, "", "VNC 방화벽 규칙을 등록하지 못했습니다.");
+            }
+            if (!startVncServer(vncServer)) {
+                stopVncServer(vncServer);
+                removeRemoteControlFirewallRule();
+                return new CommandResult(1, "", "VNC 서비스가 사용자 화면 세션에서 포트를 열지 못했습니다.");
+            }
+            activeRemoteControlSessionId = sessionId;
+            CompletableFuture.runAsync(() -> {
+                synchronized (remoteControlLock) {
+                    if (remoteControlGeneration.compareAndSet(generation, generation + 1)) {
+                        log.warn("원격 제어 최대 실행 시간을 초과해 VNC를 자동 중지합니다. taskId={}", taskId);
+                        stopVncServer(vncServer);
+                        removeRemoteControlFirewallRule();
+                        activeRemoteControlSessionId = null;
+                    }
+                }
+            }, CompletableFuture.delayedExecutor(REMOTE_VNC_MAX_SESSION_MS, TimeUnit.MILLISECONDS));
 
             Map<String, Object> result = new java.util.LinkedHashMap<>();
             result.put("status", "started");
@@ -1199,31 +1642,213 @@ public class CommandExecutor {
 
     /** UltraVNC 서버를 중지한다 (원격 세션 종료). */
     private CommandResult executeRemoteControlStop(long taskId, String payloadJson) {
-        try {
-            Path vncServer = resolveVncServerPath();
-            if (vncServer != null) {
-                stopVncServer(vncServer);
-            } else {
-                new ProcessBuilder("taskkill", "/F", "/IM", "winvnc.exe").start();
+        synchronized (remoteControlLock) {
+            try {
+                String requestedSessionId = remoteControlSessionId(payloadJson);
+                if (requestedSessionId != null && activeRemoteControlSessionId != null
+                        && !requestedSessionId.equals(activeRemoteControlSessionId)) {
+                    log.info("이전 원격 세션의 지연된 중지 명령을 무시합니다. taskId={} sessionId={}",
+                            taskId, requestedSessionId);
+                    return new CommandResult(0, "{\"status\":\"ignored\",\"reason\":\"newer-session-active\"}", "");
+                }
+                remoteControlGeneration.incrementAndGet();
+                Path vncServer = resolveVncServerPath();
+                if (vncServer != null) {
+                    stopVncServer(vncServer);
+                } else {
+                    killWinVncProcesses();
+                }
+                removeRemoteControlFirewallRule();
+                activeRemoteControlSessionId = null;
+                log.info("원격 제어(VNC) 중지 taskId={}", taskId);
+                return new CommandResult(0, "{\"status\":\"stopped\"}", "");
+            } catch (Exception e) {
+                return new CommandResult(1, "",
+                        "원격 제어 중지 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
             }
-            log.info("원격 제어(VNC) 중지 taskId={}", taskId);
-            return new CommandResult(0, "{\"status\":\"stopped\"}", "");
-        } catch (Exception e) {
-            return new CommandResult(1, "",
-                    "원격 제어 중지 실패: " + SensitiveDataMasker.maskExceptionMessage(e.getMessage()));
+        }
+    }
+
+    static String buildUltraVncIni() {
+        return "[ultravnc]\r\n"
+                + "[admin]\r\n"
+                + "UseRegistry=0\r\n"
+                + "SocketConnect=1\r\n"
+                + "AutoPortSelect=0\r\n"
+                + "PortNumber=" + REMOTE_VNC_PORT + "\r\n"
+                + "HTTPConnect=0\r\n"
+                + "LoopbackOnly=0\r\n"
+                + "AllowLoopback=1\r\n"
+                + "AuthRequired=1\r\n"
+                + "FileTransferEnabled=1\r\n"
+                + "InputsEnabled=1\r\n"
+                + "QuerySetting=0\r\n"
+                + "DisableTrayIcon=1\r\n"
+                + "RemoveWallpaper=0\r\n"
+                + "RemoveAero=0\r\n"
+                + "RemoveEffects=0\r\n"
+                + "RemoveFontSmoothing=0\r\n"
+                + "MaxCpu=100\r\n"
+                + "sendbuffer=8192\r\n"
+                + "primary=1\r\n"
+                + "secondary=1\r\n"
+                + "[poll]\r\n"
+                + "TurboMode=1\r\n"
+                + "PollFullScreen=1\r\n"
+                + "OnlyPollOnEvent=0\r\n"
+                + "EnableHook=1\r\n"
+                + "EnableDriver=0\r\n";
+    }
+
+    private String remoteControlSessionId(String payloadJson) {
+        if (payloadJson == null || payloadJson.isBlank()) return null;
+        try {
+            String value = mapper.readTree(payloadJson).path("sessionId").asText("").trim();
+            return value.isEmpty() ? null : value;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean startVncServer(Path vncServer) {
+        if (!isWindows()) {
+            try {
+                Process process = new ProcessBuilder(vncServer.toString(), "-run").start();
+                return waitForVncReady(process, REMOTE_VNC_PORT, 10_000L);
+            } catch (IOException exception) {
+                log.warn("VNC 서버 실행 실패: {}", exception.getMessage());
+                return false;
+            }
+        }
+
+        // The agent runs as SYSTEM in session 0. UltraVNC app mode can authenticate there,
+        // but it cannot attach to the interactive user's desktop. Service mode starts a
+        // helper in the active console session and is therefore required for screen capture.
+        if (!runAndWait(15, vncServer.toString(), "-install")) {
+            log.warn("UltraVNC 서비스 설치/갱신 실패");
+            return false;
+        }
+        if (!runAndWait(10, "sc", "config", REMOTE_VNC_SERVICE, "start=", "demand")) {
+            log.warn("UltraVNC 서비스 시작 유형을 수동으로 설정하지 못했습니다.");
+            return false;
+        }
+        if (!runAndWait(15, vncServer.toString(), "-startservice")) {
+            runAndWait(15, "sc", "start", REMOTE_VNC_SERVICE);
+        }
+        return waitForVncReady(null, REMOTE_VNC_PORT, 15_000L);
+    }
+
+    private boolean waitForVncReady(Process process, int port, long timeoutMs) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            if (process != null && !process.isAlive()) return false;
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 500);
+                Thread.sleep(500L);
+                if (process != null && !process.isAlive()) return false;
+                try (Socket verification = new Socket()) {
+                    verification.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 500);
+                    return process == null || process.isAlive();
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return false;
+            } catch (IOException ignored) {
+                try {
+                    Thread.sleep(200L);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean ensureRemoteControlFirewallRule() {
+        if (!isWindows()) return true;
+        String remoteAddresses;
+        try {
+            URI serverUri = URI.create(config.getServerUrl());
+            String host = serverUri.getHost();
+            if (host == null || host.isBlank()) return false;
+            remoteAddresses = Arrays.stream(InetAddress.getAllByName(host))
+                    .map(InetAddress::getHostAddress)
+                    .distinct()
+                    .reduce((left, right) -> left + "," + right)
+                    .orElse("");
+        } catch (Exception exception) {
+            log.warn("VNC 방화벽 허용 서버 주소를 확인하지 못했습니다: {}", exception.getMessage());
+            return false;
+        }
+        if (remoteAddresses.isBlank()) return false;
+        removeRemoteControlFirewallRule();
+        return runAndWait(10, "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=" + REMOTE_VNC_FIREWALL_RULE, "dir=in", "action=allow", "protocol=TCP",
+                "localport=" + REMOTE_VNC_PORT, "remoteip=" + remoteAddresses, "profile=any");
+    }
+
+    private void removeRemoteControlFirewallRule() {
+        if (!isWindows()) return;
+        runAndWait(10, "netsh", "advfirewall", "firewall", "delete", "rule",
+                "name=" + REMOTE_VNC_FIREWALL_RULE);
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private boolean runAndWait(long timeoutSeconds, String... command) {
+        try {
+            Process process = new ProcessBuilder(command)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (Exception exception) {
+            log.warn("프로세스 실행 실패: {}", exception.getMessage());
+            return false;
         }
     }
 
     private void stopVncServer(Path vncServer) {
+        if (isWindows()) {
+            runAndWait(10, vncServer.toString(), "-stopservice");
+            runAndWait(10, "sc", "stop", REMOTE_VNC_SERVICE);
+            waitForVncStopped(5_000L);
+            killWinVncProcesses();
+            return;
+        }
         try {
             Process p = new ProcessBuilder(vncServer.toString(), "-kill").start();
             p.waitFor(5, TimeUnit.SECONDS);
         } catch (Exception ignored) {
         }
-        try {
-            new ProcessBuilder("taskkill", "/F", "/IM", "winvnc.exe").start();
-        } catch (Exception ignored) {
+        killWinVncProcesses();
+    }
+
+    private boolean waitForVncStopped(long timeoutMs) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), REMOTE_VNC_PORT), 300);
+                Thread.sleep(200L);
+            } catch (IOException exception) {
+                return true;
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
         }
+        return false;
+    }
+
+    private void killWinVncProcesses() {
+        runAndWait(5, "taskkill", "/F", "/IM", "winvnc.exe");
     }
 
     /** UltraVNC winvnc.exe 경로 해석 (dev user.dir → 번들 → 표준 설치 경로). */
@@ -1875,6 +2500,25 @@ public class CommandExecutor {
         };
     }
 
+    static Path resolveNonConflictingPath(Path requested) {
+        if (requested == null || !Files.exists(requested)) {
+            return requested;
+        }
+        Path parent = requested.getParent();
+        String fileName = requested.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+        String extension = dot > 0 ? fileName.substring(dot) : "";
+        for (int suffix = 2; suffix <= 10_000; suffix += 1) {
+            Path candidate = (parent == null ? Path.of("") : parent)
+                    .resolve(base + " (" + suffix + ")" + extension);
+            if (!Files.exists(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("같은 이름의 파일이 너무 많아 새 이름을 만들 수 없습니다: " + fileName);
+    }
+
     /**
      * SYSTEM/Session-0 환경에서 실제 로그인 사용자의 홈 디렉토리를 반환한다.
      * 로그인 사용자를 찾지 못하면 java.home 기반 fallback을 사용한다.
@@ -1899,32 +2543,16 @@ public class CommandExecutor {
     private static String resolveInteractiveUserHome() {
         String javaHome = System.getProperty("user.home", ".");
 
-        // SYSTEM 계정이 아니면 그대로 반환
-        String userName = System.getProperty("user.name", "");
-        if (!"SYSTEM".equalsIgnoreCase(userName)) {
-            return javaHome;
-        }
-
-        // Windows: 로그인된 사용자 목록에서 첫 번째 일반 사용자 홈 탐색
+        // 서비스가 SYSTEM이 아닌 컴퓨터 계정(예: 214_T$)으로 실행될 수도 있으므로
+        // user.name/user.home보다 실제 콘솔 로그인 세션을 항상 우선한다.
         try {
             Process proc = new ProcessBuilder("query", "user").redirectErrorStream(true).start();
             if (proc.waitFor(5, TimeUnit.SECONDS)) {
                 String output = new String(proc.getInputStream().readAllBytes(),
                         java.nio.charset.StandardCharsets.UTF_8);
-                for (String line : output.split("\\R")) {
-                    String trimmed = line.trim();
-                    if (trimmed.startsWith(">") || trimmed.startsWith("USERNAME")) continue;
-                    // 첫 컬럼이 사용자명
-                    String[] parts = trimmed.split("\\s+");
-                    if (parts.length > 0) {
-                        String user = parts[0].replaceAll("[^\\w]", "");
-                        if (!user.isBlank()) {
-                            Path candidate = Path.of("C:\\Users", user);
-                            if (Files.isDirectory(candidate)) {
-                                return candidate.toString();
-                            }
-                        }
-                    }
+                Path resolved = resolveUserHomeFromQueryOutput(output, Path.of("C:\\Users"));
+                if (resolved != null) {
+                    return resolved.toString();
                 }
             }
         } catch (Exception ignored) {
@@ -1953,6 +2581,34 @@ public class CommandExecutor {
         } catch (Exception ignored) {
         }
         return javaHome;
+    }
+
+    static Path resolveUserHomeFromQueryOutput(String output, Path usersRoot) {
+        if (output == null || output.isBlank() || usersRoot == null) {
+            return null;
+        }
+        Path normalizedRoot = usersRoot.toAbsolutePath().normalize();
+        for (String line : output.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(">")) {
+                trimmed = trimmed.substring(1).trim();
+            }
+            if (trimmed.isBlank()) {
+                continue;
+            }
+            String[] parts = trimmed.split("\\s+");
+            String user = parts.length == 0 ? "" : parts[0].trim();
+            if (user.isBlank() || user.contains("\\") || user.contains("/") || user.contains(":")) {
+                continue;
+            }
+            Path candidate = normalizedRoot.resolve(user).normalize();
+            if (candidate.getParent() != null
+                    && candidate.getParent().equals(normalizedRoot)
+                    && Files.isDirectory(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static String sanitizeName(String name) {

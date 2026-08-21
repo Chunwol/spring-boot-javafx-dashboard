@@ -51,11 +51,11 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8888:8888"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8888}:8888"
     environment:
       TZ: ${APP_TIME_ZONE:-Asia/Seoul}
       SERVER_PORT: 8888
-      JAVA_OPTS: -Duser.timezone=${APP_TIME_ZONE:-Asia/Seoul} -Xmx512m -Xms256m
+      JAVA_OPTS: -Duser.timezone=${APP_TIME_ZONE:-Asia/Seoul} -Xms${JAVA_HEAP_MIN:-512m} -Xmx${JAVA_HEAP_MAX:-1g}
       SERVER_FORWARD_HEADERS_STRATEGY: NATIVE
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dashboard_db}
       DB_DRIVER: org.postgresql.Driver
@@ -65,8 +65,13 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       FLYWAY_LOCATIONS: classpath:db/pgmigration
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://${DOMAIN:-pelmon.kro.kr}}
+      APP_REMOTE_CONTROL_ALLOWED_CIDRS: ${REMOTE_CONTROL_ALLOWED_CIDRS:-223.194.166.0/23,223.194.168.0/23,172.16.13.0/24,172.16.204.0/24}
+      APP_REMOTE_CONTROL_MAX_SESSIONS: ${REMOTE_CONTROL_MAX_SESSIONS:-64}
+      DB_BACKUP_DIR: /app/backups/postgres
     volumes:
       - ./data/uploads:/app/uploads
+      - ./data/backups/postgres:/app/backups/postgres
     depends_on:
       postgres:
         condition: service_healthy

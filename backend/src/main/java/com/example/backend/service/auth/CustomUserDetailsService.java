@@ -47,7 +47,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                         .builder()
                         .username(user.getUsername())
                         .password(user.getPassword())
-                        .roles(resolveSpringRoles(user.getUsername()))
+                        .roles(resolveSpringRoles(user))
                         .build()
                 )
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
@@ -60,8 +60,8 @@ public class CustomUserDetailsService implements UserDetailsService {
      * @param username 사용자 이름
      * @return Spring Security roles 배열
      */
-    private String[] resolveSpringRoles(String username) {
-        String role = userRoleResolver.resolveRole(username);
+    private String[] resolveSpringRoles(com.example.backend.model.user.User user) {
+        String role = userRoleResolver.resolveRole(user);
         return switch (role) {
             case "ADMIN" -> new String[]{"ADMIN", "USER"};
             case "VIEWER" -> new String[]{"VIEWER"};

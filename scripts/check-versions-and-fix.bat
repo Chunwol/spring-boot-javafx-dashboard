@@ -7,8 +7,8 @@ REM ====================================================
 REM 맞춰야 하는 버전 (Required versions)
 REM   Java  : 25 LTS  (openjdk 25.0.x)
 REM   Gradle: 8.14.4  (gradlew wrapper 포함, 별도 설치 불필요)
-REM   JavaFX: 25.0.2  (frontend/build.gradle openjfx 플러그인 고정값)
-REM   Spring Boot: 3.4.0 (backend/build.gradle 고정값, Java 25 최고 호환)
+REM   Node  : 24.x 이상 (web-frontend)
+REM   Spring Boot: 4.x (backend/build.gradle)
 REM ====================================================
 REM
 REM Usage:

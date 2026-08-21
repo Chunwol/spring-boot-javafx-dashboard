@@ -85,6 +85,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 예외를 전파하지 않고 SecurityContext만 초기화 — 이후 필터/핸들러가 403/401 반환
             log.debug("JWT 인증 실패: {}", ex.getMessage());
             SecurityContextHolder.clearContext();
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json");
+            response.getWriter().write("{\"error\":\"Invalid or expired token\"}");
+            return;
         }
 
         filterChain.doFilter(request, response);

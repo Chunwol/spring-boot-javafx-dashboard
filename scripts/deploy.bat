@@ -31,13 +31,22 @@ if not exist ".env" (
         copy .env.example .env
         echo ✓ .env created from .env.example
         echo.
-        echo WARNING: Please update .env with your configuration
+        echo.
+        echo *** Edit .env and replace every CHANGE_ME value before deployment ***
+        exit /b 1
     ) else (
         echo *** .env.example not found ***
         exit /b 1
     )
 ) else (
     echo ✓ .env file exists
+)
+
+findstr /C:"CHANGE_ME" ".env" >nul
+if !errorlevel! equ 0 (
+    echo *** .env still contains CHANGE_ME placeholders ***
+    echo Update the secrets and run deploy.bat again.
+    exit /b 1
 )
 
 echo.
@@ -88,7 +97,7 @@ echo Useful commands:
 echo   • View logs:    docker-compose logs -f [SERVICE_NAME]
 echo   • Stop stack:   docker-compose down
 echo   • Restart:      docker-compose restart [SERVICE_NAME]
-echo   • Remove all:   docker-compose down -v
+echo   • Remove all data ^(DANGEROUS^): run cleanup-runtime.ps1 with -IncludeDocker -RemoveDockerVolumes
 echo.
 
 endlocal

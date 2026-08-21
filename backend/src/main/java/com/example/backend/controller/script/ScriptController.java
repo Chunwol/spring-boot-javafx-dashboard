@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import jakarta.annotation.PostConstruct;
@@ -81,12 +83,18 @@ public class ScriptController {
     private static final int LOCK_STRIPE_COUNT = 1024;
     /** 에이전트 수집 파일 총량 기본 제한: 30GB */
     private static final long DEFAULT_COLLECT_MAX_BYTES = 30L * 1024 * 1024 * 1024;
+    private static final String ADMIN_UPLOAD = "ADMIN_UPLOAD";
+    private static final String AGENT_COLLECTION = "AGENT_COLLECTION";
+    private static final long DEFAULT_CHUNK_MAX_BYTES = 16L * 1024 * 1024;
+    private static final long DEFAULT_CHUNK_STAGING_MAX_BYTES = 60L * 1024 * 1024 * 1024;
+    private static final long DEFAULT_CHUNK_TTL_MILLIS = 24L * 60 * 60 * 1000;
 
     private final ScriptArtifactService scriptArtifactService;
     private final ObjectMapper objectMapper;
     private final Object[] uploadLockStripes = IntStream.range(0, LOCK_STRIPE_COUNT)
             .mapToObj(i -> new Object())
             .toArray();
+    private final AtomicLong stagedChunkBytes = new AtomicLong();
 
     // 청크 메타데이터/매니페스트는 파일 기반(meta.json, _chunk-manifests/*.json)으로 유지한다.
 
@@ -95,6 +103,15 @@ public class ScriptController {
 
     @Value("${app.collect.max-total-bytes:" + DEFAULT_COLLECT_MAX_BYTES + "}")
     private long collectMaxTotalBytes;
+
+    @Value("${app.scripts.chunk-max-bytes:" + DEFAULT_CHUNK_MAX_BYTES + "}")
+    private long chunkMaxBytes;
+
+    @Value("${app.scripts.chunk-staging-max-bytes:" + DEFAULT_CHUNK_STAGING_MAX_BYTES + "}")
+    private long chunkStagingMaxBytes;
+
+    @Value("${app.scripts.chunk-ttl-ms:" + DEFAULT_CHUNK_TTL_MILLIS + "}")
+    private long chunkTtlMillis;
 
     /**
      * true이면 Nginx X-Accel-Redirect로 파일 서빙을 Nginx에 위임한다.
@@ -119,6 +136,8 @@ public class ScriptController {
     public void init() {
         try {
             Path base = Path.of(scriptsDir).toAbsolutePath().normalize();
+            Files.createDirectories(base);
+            stagedChunkBytes.set(stagedPayloadSize(base.resolve("_chunks")));
             log.info("ScriptController initialized, app.scripts.dir={}", base);
         } catch (Exception ex) {
             log.warn("Failed to resolve app.scripts.dir='{}' : {}", scriptsDir, ex.toString());
@@ -163,7 +182,7 @@ public class ScriptController {
         String sha256 = HexFormat.of().formatHex(md.digest());
 
         // de-dup by sha256 (optional)
-        ScriptArtifact existing = scriptArtifactService.findBySha256(sha256);
+        ScriptArtifact existing = scriptArtifactService.findBySha256AndKind(sha256, ADMIN_UPLOAD);
         if (existing != null) {
             // keep existing artifact, remove newly written file
             Files.deleteIfExists(target);
@@ -180,6 +199,7 @@ public class ScriptController {
         a.setSha256(sha256);
         a.setSizeBytes(file.getSize());
         a.setContentType(file.getContentType());
+        a.setArtifactKind(ADMIN_UPLOAD);
         a.setCreatedAt(LocalDateTime.now());
         ScriptArtifact saved;
         try {
@@ -209,7 +229,8 @@ public class ScriptController {
     public ResponseEntity<?> uploadFromAgent(
             @RequestPart("file") MultipartFile file,
             @RequestParam(value = "originalFilename", required = false) String originalFilename,
-            @RequestParam(value = "taskId", required = false) Long taskId) throws Exception {
+            @RequestParam(value = "taskId", required = false) Long taskId,
+            HttpServletRequest request) throws Exception {
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("message", "file required"));
         }
@@ -239,7 +260,7 @@ public class ScriptController {
         }
         String sha256 = HexFormat.of().formatHex(md.digest());
 
-        ScriptArtifact existing = scriptArtifactService.findBySha256(sha256);
+        ScriptArtifact existing = scriptArtifactService.findBySha256AndKind(sha256, AGENT_COLLECTION);
         if (existing != null) {
             Files.deleteIfExists(target);
             return ResponseEntity.ok(Map.of(
@@ -256,6 +277,8 @@ public class ScriptController {
         a.setSha256(sha256);
         a.setSizeBytes(file.getSize());
         a.setContentType(file.getContentType());
+        a.setArtifactKind(AGENT_COLLECTION);
+        a.setOwnerMac(agentMac(request));
         a.setCreatedAt(LocalDateTime.now());
         ScriptArtifact saved;
         try {
@@ -308,6 +331,11 @@ public class ScriptController {
         if (chunkFile == null || chunkFile.isEmpty()) {
             return chunkError(HttpStatus.BAD_REQUEST, "EMPTY_CHUNK", "file required", false);
         }
+        if (chunkFile.getSize() > Math.max(1, chunkMaxBytes)) {
+            return chunkError(HttpStatus.PAYLOAD_TOO_LARGE, "CHUNK_TOO_LARGE",
+                    "청크 크기가 서버 한도를 초과합니다.", false,
+                    Map.of("maxBytes", chunkMaxBytes, "receivedBytes", chunkFile.getSize()));
+        }
 
         synchronized (lockForUploadId(uploadId)) {
                 Path uploadDir = resolveChunkUploadDir(uploadId, true);
@@ -336,6 +364,13 @@ public class ScriptController {
                         && knownSize == chunkFile.getSize()) {
                     resumed = true;
                 } else {
+                    long previousSize = Files.exists(chunkPath) ? Files.size(chunkPath) : 0L;
+                    if (!reserveStagingBytes(chunkFile.getSize())) {
+                        return chunkError(HttpStatus.INSUFFICIENT_STORAGE, "CHUNK_STAGING_LIMIT_EXCEEDED",
+                                "임시 청크 저장 공간이 가득 찼습니다. 잠시 후 다시 시도하세요.", true,
+                                Map.of("maxBytes", chunkStagingMaxBytes));
+                    }
+                    boolean committed = false;
                     Path tempChunk = Files.createTempFile(uploadDir, "chunk-" + chunkIndex + "-", ".tmp");
                     try {
                         String actualHash = saveChunkWithSha256(chunkFile, tempChunk);
@@ -348,8 +383,11 @@ public class ScriptController {
                             ));
                         }
                         Files.move(tempChunk, chunkPath, StandardCopyOption.REPLACE_EXISTING);
+                        stagedChunkBytes.addAndGet(-previousSize);
+                        committed = true;
                     } finally {
                         Files.deleteIfExists(tempChunk);
+                        if (!committed) stagedChunkBytes.addAndGet(-chunkFile.getSize());
                     }
                 }
 
@@ -408,6 +446,15 @@ public class ScriptController {
             @RequestParam("uploadId") String uploadId,
             @RequestParam("originalFilename") String originalFilename,
             @RequestParam("totalChunks") int totalChunks) throws Exception {
+        return assembleChunksInternal(uploadId, originalFilename, totalChunks, ADMIN_UPLOAD, null);
+    }
+
+    private ResponseEntity<?> assembleChunksInternal(
+            String uploadId,
+            String originalFilename,
+            int totalChunks,
+            String artifactKind,
+            String ownerMac) throws Exception {
         if (!isValidUploadId(uploadId)) {
             return chunkError(HttpStatus.BAD_REQUEST, "INVALID_UPLOAD_ID", "uploadId 형식이 올바르지 않습니다.", false);
         }
@@ -473,7 +520,7 @@ public class ScriptController {
                 }
                 finalSha256 = HexFormat.of().formatHex(md.digest());
 
-                ScriptArtifact existing = scriptArtifactService.findBySha256(finalSha256);
+                ScriptArtifact existing = scriptArtifactService.findBySha256AndKind(finalSha256, artifactKind);
                 if (existing != null) {
                     Files.deleteIfExists(assembledTemp);
                     writeManifest(uploadId, metadata, effectiveTotalChunks, finalSha256, assembledSizeBytes, existing.getId(), existing.getStoredFilename(), true);
@@ -503,6 +550,8 @@ public class ScriptController {
                 a.setSha256(finalSha256);
                 a.setSizeBytes(assembledSizeBytes);
                 a.setContentType("application/octet-stream");
+                a.setArtifactKind(artifactKind);
+                a.setOwnerMac(ownerMac);
                 a.setCreatedAt(LocalDateTime.now());
                 ScriptArtifact saved;
                 try {
@@ -539,13 +588,15 @@ public class ScriptController {
             @RequestParam("uploadId") String uploadId,
             @RequestParam("originalFilename") String originalFilename,
             @RequestParam("totalChunks") int totalChunks,
-            @RequestParam(value = "taskId", required = false) Long taskId) throws Exception {
+            @RequestParam(value = "taskId", required = false) Long taskId,
+            HttpServletRequest request) throws Exception {
         // 청크 총합 크기로 용량 사전 확인
         long estimatedSize = estimateChunksDirSize(uploadId);
         ResponseEntity<?> capacityError = checkCollectCapacity(estimatedSize);
         if (capacityError != null) return capacityError;
 
-        ResponseEntity<?> baseResponse = assembleChunks(uploadId, originalFilename, totalChunks);
+        ResponseEntity<?> baseResponse = assembleChunksInternal(
+                uploadId, originalFilename, totalChunks, AGENT_COLLECTION, agentMac(request));
         return remapAsAgentDownload(baseResponse, taskId);
     }
 
@@ -555,6 +606,10 @@ public class ScriptController {
         Optional<ScriptArtifact> opt = scriptArtifactService.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
+
+        if (a.isAgentCollection()) {
+            return ResponseEntity.notFound().build();
+        }
 
         // Path traversal 방지: resolve 후 반드시 scripts 디렉터리 내부인지 검증
         Path baseDir = Path.of(scriptsDir).toAbsolutePath().normalize();
@@ -578,6 +633,7 @@ public class ScriptController {
         Optional<ScriptArtifact> opt = scriptArtifactService.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         ScriptArtifact a = opt.get();
+        if (!a.isAgentCollection()) return ResponseEntity.notFound().build();
 
         Path baseDir = Path.of(scriptsDir).toAbsolutePath().normalize();
         Path file = baseDir.resolve(a.getStoredFilename()).normalize();
@@ -923,6 +979,7 @@ public class ScriptController {
         if (uploadDir == null || !Files.exists(uploadDir)) {
             return;
         }
+        long releasedBytes = stagedPayloadSize(uploadDir);
         try (var walk = Files.walk(uploadDir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(path -> {
                 try {
@@ -931,8 +988,72 @@ public class ScriptController {
                     log.debug("chunk temp cleanup skip: {}", path, e);
                 }
             });
+            stagedChunkBytes.updateAndGet(current -> Math.max(0L, current - releasedBytes));
         } catch (IOException e) {
             log.debug("chunk upload dir cleanup failed: {}", uploadDir, e);
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${app.scripts.chunk-cleanup-interval-ms:3600000}")
+    public void cleanupStaleChunkUploads() {
+        Path root = Path.of(scriptsDir, "_chunks").toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) return;
+        long cutoff = System.currentTimeMillis() - Math.max(60_000L, chunkTtlMillis);
+        try (DirectoryStream<Path> uploads = Files.newDirectoryStream(root)) {
+            for (Path uploadDir : uploads) {
+                if (!Files.isDirectory(uploadDir)) continue;
+                ChunkUploadMetadata metadata = readMetadata(uploadDir.resolve("meta.json"));
+                long updatedAt = metadata == null ? Files.getLastModifiedTime(uploadDir).toMillis()
+                        : Math.max(metadata.createdAtEpochMs, metadata.updatedAtEpochMs);
+                if (updatedAt >= cutoff) continue;
+                synchronized (lockForUploadId(uploadDir.getFileName().toString())) {
+                    cleanupUploadDir(uploadDir);
+                }
+            }
+        } catch (Exception exception) {
+            log.warn("stale chunk cleanup failed: {}", exception.getMessage());
+        }
+    }
+
+    private boolean reserveStagingBytes(long bytes) {
+        long requested = Math.max(0L, bytes);
+        while (true) {
+            long current = stagedChunkBytes.get();
+            long limit = Math.max(DEFAULT_CHUNK_MAX_BYTES, chunkStagingMaxBytes);
+            if (requested > limit - current) return false;
+            if (stagedChunkBytes.compareAndSet(current, current + requested)) return true;
+        }
+    }
+
+    private long directorySize(Path directory) {
+        if (directory == null || !Files.exists(directory)) return 0L;
+        try (var walk = Files.walk(directory)) {
+            return walk.filter(Files::isRegularFile)
+                    .mapToLong(path -> {
+                        try { return Files.size(path); }
+                        catch (IOException ignored) { return 0L; }
+                    })
+                    .sum();
+        } catch (IOException ignored) {
+            return 0L;
+        }
+    }
+
+    private long stagedPayloadSize(Path directory) {
+        if (directory == null || !Files.exists(directory)) return 0L;
+        try (var walk = Files.walk(directory)) {
+            return walk.filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.endsWith(".part") || name.endsWith(".tmp");
+                    })
+                    .mapToLong(path -> {
+                        try { return Files.size(path); }
+                        catch (IOException ignored) { return 0L; }
+                    })
+                    .sum();
+        } catch (IOException ignored) {
+            return 0L;
         }
     }
 
@@ -984,6 +1105,11 @@ public class ScriptController {
             mapped.put("taskId", taskId);
         }
         return ResponseEntity.status(response.getStatusCode()).body(mapped);
+    }
+
+    private String agentMac(HttpServletRequest request) {
+        Object value = request == null ? null : request.getAttribute("agentMac");
+        return value == null ? null : String.valueOf(value);
     }
 
     /**

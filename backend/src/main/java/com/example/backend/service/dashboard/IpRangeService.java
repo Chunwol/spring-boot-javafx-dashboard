@@ -217,9 +217,15 @@ public class IpRangeService {
 
     private void normalizeTeacherDevice(ClassroomTeacherDevice device) {
         if (device == null) {
-            return;
+            throw new IllegalArgumentException("교사 PC 정보가 필요합니다.");
         }
         device.setIpAddress(DeviceAddressUtil.normalizeIp(device.getIpAddress()));
+        if (device.getGroupId() == null) {
+            throw new IllegalArgumentException("강의실 ID가 필요합니다.");
+        }
+        if (!IpRangeUtil.isIpv4(device.getIpAddress())) {
+            throw new IllegalArgumentException("교사 PC의 올바른 IPv4 주소가 필요합니다.");
+        }
         String normalizedMac = DeviceAddressUtil.normalizeMac(device.getMacAddress());
         device.setMacAddress(formatMacForStorage(normalizedMac));
         if (device.getDescription() != null) {

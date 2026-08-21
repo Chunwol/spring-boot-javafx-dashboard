@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 
 /**
  * OperationalAlert 엔티티 Repository.
@@ -59,6 +60,20 @@ public interface OperationalAlertRepository extends JpaRepository<OperationalAle
            """)
     int acknowledgeAllUnread(@Param("acknowledgedAt") LocalDateTime acknowledgedAt,
                              @Param("acknowledgedBy") String acknowledgedBy);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("""
+           UPDATE OperationalAlert a
+              SET a.acknowledged = true,
+                  a.acknowledgedAt = :acknowledgedAt,
+                  a.acknowledgedBy = :acknowledgedBy
+            WHERE a.acknowledged = false
+              AND a.id IN :ids
+           """)
+    int acknowledgeUnreadByIds(@Param("ids") Collection<Long> ids,
+                               @Param("acknowledgedAt") LocalDateTime acknowledgedAt,
+                               @Param("acknowledgedBy") String acknowledgedBy);
 
     /**
      * 특정 소스(MAC) 및 알림 유형의 미확인 알림을 확인 처리한다.

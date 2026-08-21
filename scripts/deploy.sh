@@ -102,7 +102,7 @@ if compose up -d; then
     echo "  • Backend API:  https://pelmon.kro.kr/api/..."
     echo "  • WebSocket:    wss://pelmon.kro.kr/ws/..."
     echo "  • Health Check: https://pelmon.kro.kr/health"
-    echo "  • Frontend EXE: frontend/build/package/ClassroomDashboard/ClassroomDashboard.exe"
+    echo "  • Web Dashboard: https://pelmon.kro.kr/"
     echo ""
     echo -e "${YELLOW}Useful commands:${NC}"
     echo "  • View logs:    docker-compose logs -f [SERVICE_NAME]"

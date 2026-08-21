@@ -5,10 +5,13 @@ import com.example.backend.model.command.CommandQueue;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.alert.OperationalAlertRepository;
+import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
 import com.example.backend.service.status.OperationalMetricsService;
+import com.example.backend.service.filedist.FileDistributionOrchestrator;
+import com.example.backend.service.realtime.WebSocketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,9 +56,12 @@ public class SchedulerService {
     private final PcMasterRepository pcRepo;
     private final CommandQueueRepository commandQueueRepository;
     private final OperationalAlertRepository operationalAlertRepository;
+    private final ClassroomGroupRepository classroomGroupRepository;
     private final OperationalMetricsService operationalMetricsService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
+    private final FileDistributionOrchestrator fileDistributionOrchestrator;
+    private final WebSocketService webSocketService;
 
     /** application.yml: app.traffic.alert-threshold-mbps (기본 100) */
     @Value("${app.traffic.alert-threshold-mbps:100}")
@@ -68,6 +74,13 @@ public class SchedulerService {
     /** 전달/실행 타임아웃 후 재큐잉까지 대기시간(초) */
     @Value("${app.command.timeout-seconds:45}")
     private long commandTimeoutSeconds;
+
+    /** 전달되지 않은 명령의 절대 대기열 유효시간(초) */
+    @Value("${app.command.queue-ttl-seconds:300}")
+    private long commandQueueTtlSeconds;
+
+    @Value("${app.scmate.restore-timeout-seconds:1200}")
+    private long scmateRestoreTimeoutSeconds;
 
     /** 명령 최대 재시도 횟수 */
     @Value("${app.command.max-retries:3}")
@@ -100,9 +113,6 @@ public class SchedulerService {
     @Value("${app.metrics.alert.result-p95-ms:45000}")
     private double metricsResultP95ThresholdMs;
 
-    @Value("${app.metrics.alert.online-ratio-min:0.70}")
-    private double minOnlineRatioThreshold;
-
     @Value("${app.metrics.alert.window-seconds:300}")
     private int metricsAlertWindowSeconds;
 
@@ -117,27 +127,33 @@ public class SchedulerService {
 
     /** 중복 알림 방지: key(MAC 또는 SYSTEM:rule) → 마지막 알림 시각 */
     private final Map<String, LocalDateTime> lastAlertTime = new ConcurrentHashMap<>();
+    private final Map<Long, Boolean> classroomPowerStates = new ConcurrentHashMap<>();
     private final AtomicBoolean trafficScanRunning = new AtomicBoolean(false);
     private final AtomicBoolean offlineScanRunning = new AtomicBoolean(false);
     private final AtomicBoolean staleCommandRetryRunning = new AtomicBoolean(false);
     private final AtomicBoolean systemPressureMonitorRunning = new AtomicBoolean(false);
     private final AtomicBoolean scmateMonitorRunning = new AtomicBoolean(false);
-    private final AtomicBoolean onlineRatioAlertActive = new AtomicBoolean(false);
 
     public SchedulerService(TrafficLogsRepository trafficRepo,
                             PcMasterRepository pcRepo,
                             CommandQueueRepository commandQueueRepository,
                             OperationalAlertRepository operationalAlertRepository,
+                            ClassroomGroupRepository classroomGroupRepository,
                             OperationalMetricsService operationalMetricsService,
                             ApplicationEventPublisher eventPublisher,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            FileDistributionOrchestrator fileDistributionOrchestrator,
+                            WebSocketService webSocketService) {
         this.trafficRepo = trafficRepo;
         this.pcRepo = pcRepo;
         this.commandQueueRepository = commandQueueRepository;
         this.operationalAlertRepository = operationalAlertRepository;
+        this.classroomGroupRepository = classroomGroupRepository;
         this.operationalMetricsService = operationalMetricsService;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
+        this.fileDistributionOrchestrator = fileDistributionOrchestrator;
+        this.webSocketService = webSocketService;
     }
 
     // ─── 트래픽 이상 감지 (1분 주기) ────────────────────────────────────
@@ -202,6 +218,15 @@ public class SchedulerService {
             //         개별 save()는 커넥션 풀 포화와 DB 스파이크를 유발한다.
             int updated = pcRepo.markOfflineByLastSeenBefore(threshold);
             log.info("[OFFLINE 일괄 전환] {}대 OFFLINE 처리 완료", updated);
+            if (updated > 0) {
+                try {
+                    webSocketService.sendDashboardUpdate(Map.of(
+                            "eventType", "PC_STATUS",
+                            "offlineCount", updated));
+                } catch (Exception e) {
+                    log.debug("WebSocket 오프라인 일괄 갱신 알림 전송 실패 (무시): {}", e.getMessage());
+                }
+            }
 
             // 3) AlertEvent는 미리 읽어둔 목록으로 발행 (DB 재조회 없음)
             for (PcMaster pc : timedOutPcs) {
@@ -245,12 +270,13 @@ public class SchedulerService {
     public void reconcileStaleCommandsNow() {
         LocalDateTime threshold = LocalDateTime.now().minusSeconds(commandTimeoutSeconds);
 
-        // QUEUED 상태에서 에이전트가 폴링하지 않아 장기 미전달된 명령 (5분 기준)
-        // DELIVERED/ACKED 타임아웃보다 여유 있게 설정 (오프라인 에이전트 복구 여지)
-        LocalDateTime queuedThreshold = LocalDateTime.now().minusMinutes(5);
+        // 전달되지 않은 명령은 종류와 관계없이 절대 TTL 후 취소한다.
+        // 재큐잉하지 않으므로 오프라인 PC가 나중에 접속해 과거 명령을 실행하지 않는다.
+        LocalDateTime queuedThreshold = LocalDateTime.now()
+                .minusSeconds(Math.max(1L, commandQueueTtlSeconds));
         List<CommandQueue> staleQueued = commandQueueRepository
             .findTop200ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc("QUEUED", queuedThreshold);
-        staleQueued.forEach(this::handleRetryOrFail);
+        staleQueued.forEach(this::expireQueuedCommand);
 
         // DELIVERED 상태에서 ACK 누락된 명령
         List<CommandQueue> staleDelivered = commandQueueRepository
@@ -265,12 +291,55 @@ public class SchedulerService {
         reconcilePowerStateVerificationNow();
     }
 
+    private void expireQueuedCommand(CommandQueue command) {
+        if (command == null || command.getTaskId() == null) {
+            return;
+        }
+        LocalDateTime expiredAt = LocalDateTime.now();
+        String reason = "command expired before delivery (queue TTL "
+                + Math.max(1L, commandQueueTtlSeconds) + "s)";
+        int updated = commandQueueRepository.cancelQueuedIfPending(
+                command.getTaskId(), expiredAt, reason);
+        if (updated == 0) {
+            return;
+        }
+        command.setStatus("CANCELLED");
+        command.setCompletedAt(expiredAt);
+        command.setIsExecuted(true);
+        command.setStderr(reason);
+        reportExpiredDistributionCommand(command, reason);
+        if (isScmateWorkflowCommand(command)) {
+            pcRepo.findById(command.getMacAddress()).ifPresent(pc -> {
+                pc.setScmateWorkflowStage("CANCELLED");
+                pc.setScmateError(null);
+                pcRepo.save(pc);
+            });
+        }
+        log.info("[CMD EXPIRED] taskId={} mac={} ttlSeconds={}",
+                command.getTaskId(), command.getMacAddress(), commandQueueTtlSeconds);
+    }
+
+    private void reportExpiredDistributionCommand(CommandQueue command, String reason) {
+        if (command.getPayloadJson() == null || command.getPayloadJson().isBlank()) {
+            return;
+        }
+        try {
+            long jobId = objectMapper.readTree(command.getPayloadJson()).path("jobId").asLong(0L);
+            if (jobId > 0L) {
+                fileDistributionOrchestrator.reportAgentResult(
+                        jobId, command.getMacAddress(), false, reason);
+            }
+        } catch (Exception ex) {
+            log.debug("Expired command has no usable distribution job: taskId={}", command.getTaskId());
+        }
+    }
+
     @org.springframework.transaction.annotation.Transactional
     public void reconcilePowerStateVerificationNow() {
         LocalDateTime now = LocalDateTime.now();
         List<CommandQueue> pendingVerifications = commandQueueRepository
                 .findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
-                        List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_REBOOT_CONFIRM"));
+                        List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_AGENT_RESTART", "PENDING_REBOOT_CONFIRM"));
 
         for (CommandQueue cmd : pendingVerifications) {
             PcMaster pc = pcRepo.findById(cmd.getMacAddress()).orElse(null);
@@ -294,14 +363,21 @@ public class SchedulerService {
                 continue;
             }
 
-            if ("PENDING_REBOOT_CONFIRM".equals(cmd.getVerificationStatus())) {
-                if (isAgentUpdateRebootConfirmed(pc, cmd)) {
+            if ("PENDING_AGENT_RESTART".equals(cmd.getVerificationStatus())
+                    || "PENDING_REBOOT_CONFIRM".equals(cmd.getVerificationStatus())) {
+                if (isAgentUpdateRestartConfirmed(pc, cmd)) {
                     cmd.setVerificationStatus("CONFIRMED");
                     cmd.setVerificationCompletedAt(now);
                     commandQueueRepository.save(cmd);
+                    reportUpdateDistributionVerification(cmd, true, null);
                     operationalAlertRepository.acknowledgeUnreadBySourceAndType(
                             cmd.getMacAddress(),
                             "UPDATE_REBOOT_REQUIRED",
+                            now,
+                            "system-auto");
+                    operationalAlertRepository.acknowledgeUnreadBySourceAndType(
+                            cmd.getMacAddress(),
+                            "UPDATE_RESTART_PENDING",
                             now,
                             "system-auto");
                     continue;
@@ -309,9 +385,10 @@ public class SchedulerService {
                 if (isDeadlineExceeded(cmd, now)) {
                     cmd.setVerificationStatus("FAILED");
                     cmd.setVerificationCompletedAt(now);
-                    cmd.setStderr(appendMessage(cmd.getStderr(),
-                            "update reboot/version verification failed: confirmation deadline exceeded"));
+                    String error = "update agent restart/version verification failed: confirmation deadline exceeded";
+                    cmd.setStderr(appendMessage(cmd.getStderr(), error));
                     commandQueueRepository.save(cmd);
+                    reportUpdateDistributionVerification(cmd, false, error);
                 }
                 continue;
             }
@@ -372,7 +449,7 @@ public class SchedulerService {
             }
 
             publishOperationalMetricsAlerts();
-            publishOnlineRatioAlert();
+            publishClassroomPowerStateNotifications();
         } finally {
             systemPressureMonitorRunning.set(false);
         }
@@ -446,12 +523,50 @@ public class SchedulerService {
     }
 
     private void handleRetryOrFail(CommandQueue cmd) {
-        // ACKED 상태(에이전트가 이미 실행 시작)에서 timeout된 전원 제어 명령은
-        // 에이전트가 실행 직후 종료되어 결과를 보고할 수 없으므로 power-state 검증으로 전환
-        if ("ACKED".equals(cmd.getStatus()) && isPowerCommand(cmd.getCommandType())) {
+        if (cmd != null && "SCMATE_CONTROL".equalsIgnoreCase(cmd.getCommandType())) {
+            if (isPendingRestoreWithinDeadline(cmd, LocalDateTime.now())) {
+                return;
+            }
+            cmd.setStatus("FAILED");
+            cmd.setIsExecuted(true);
+            cmd.setCompletedAt(LocalDateTime.now());
+            cmd.setStderr("non-retryable SCMATE command timed out; inspect current mode before continuing");
+            commandQueueRepository.save(cmd);
+            pcRepo.findById(cmd.getMacAddress()).ifPresent(pc -> {
+                pc.setScmateWorkflowStage("FAILED");
+                pc.setScmateError("SCMATE 명령 응답 시간이 초과되었습니다.");
+                pcRepo.save(pc);
+            });
+            log.warn("[CMD SCMATE FAIL-CLOSED] taskId={} mac={}", cmd.getTaskId(), cmd.getMacAddress());
+            return;
+        }
+        if (isScmateWorkflowReboot(cmd) && !"ACKED".equalsIgnoreCase(cmd.getStatus())) {
+            cmd.setStatus("FAILED");
+            cmd.setIsExecuted(true);
+            cmd.setCompletedAt(LocalDateTime.now());
+            cmd.setStderr("non-retryable SCMATE workflow reboot timed out before ACK");
+            commandQueueRepository.save(cmd);
+            pcRepo.findById(cmd.getMacAddress()).ifPresent(pc -> {
+                pc.setScmateWorkflowStage("FAILED");
+                pc.setScmateError("SCMATE 재부팅 명령의 수신 확인 시간이 초과되었습니다.");
+                pcRepo.save(pc);
+            });
+            log.warn("[CMD SCMATE REBOOT FAIL-CLOSED] taskId={} mac={}", cmd.getTaskId(), cmd.getMacAddress());
+            return;
+        }
+
+        // 종료/재시작은 OS 명령 직후 네트워크가 끊겨 RESULT 전송이 유실될 수 있다.
+        // ACK까지 받았다면 재실행하지 않고 완료로 닫은 뒤 실제 전원 상태를 검증한다.
+        if ("ACKED".equals(cmd.getStatus()) && isPowerStateCommand(cmd)) {
             LocalDateTime now = LocalDateTime.now();
             log.info("[CMD POWER-VERIFY] taskId={} mac={} type={} → power-state 검증으로 전환",
                     cmd.getTaskId(), cmd.getMacAddress(), cmd.getCommandType());
+            cmd.setStatus("COMPLETED");
+            cmd.setExitCode(0);
+            cmd.setIsExecuted(true);
+            cmd.setCompletedAt(now);
+            cmd.setStderr(appendMessage(cmd.getStderr(),
+                    "agent result unavailable after power command ACK; verifying device state"));
             armPostExecutionVerification(cmd, now);
             commandQueueRepository.save(cmd);
             return;
@@ -481,13 +596,21 @@ public class SchedulerService {
                 cmd.getTaskId(), cmd.getMacAddress(), cmd.getRetryCount());
     }
 
-    /** 에이전트가 실행 즉시 종료되어 결과 보고가 불가능한 전원 명령 여부. */
-    private boolean isPowerCommand(String type) {
-        if (type == null) return false;
-        return switch (type.toUpperCase()) {
-            case "SHUTDOWN", "REBOOT", "RESTART", "PCON", "LOGOFF", "SLEEP", "HIBERNATE" -> true;
-            default -> false;
-        };
+    private boolean isPendingRestoreWithinDeadline(CommandQueue cmd, LocalDateTime now) {
+        if (!"RESTORE_BASELINE".equalsIgnoreCase(scmateControlAction(cmd))) {
+            return false;
+        }
+        LocalDateTime startedAt = cmd.getAckedAt() != null ? cmd.getAckedAt() : cmd.getDeliveredAt();
+        return startedAt != null && now.isBefore(startedAt.plusSeconds(scmateRestoreTimeoutSeconds));
+    }
+
+    private String scmateControlAction(CommandQueue command) {
+        if (command == null || command.getPayloadJson() == null) return "";
+        try {
+            return objectMapper.readTree(command.getPayloadJson()).path("action").asText("");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private boolean isPowerStateCommand(CommandQueue cmd) {
@@ -496,6 +619,23 @@ public class SchedulerService {
         }
         String type = cmd.getCommandType().trim().toUpperCase(java.util.Locale.ROOT);
         return "SHUTDOWN".equals(type) || "REBOOT".equals(type);
+    }
+
+    private boolean isScmateWorkflowReboot(CommandQueue cmd) {
+        if (cmd == null || !"REBOOT".equalsIgnoreCase(cmd.getCommandType())) {
+            return false;
+        }
+        try {
+            return objectMapper.readTree(cmd.getPayloadJson() == null ? "{}" : cmd.getPayloadJson())
+                    .hasNonNull("scmateWorkflowId");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean isScmateWorkflowCommand(CommandQueue command) {
+        return command != null && ("SCMATE_CONTROL".equalsIgnoreCase(command.getCommandType())
+                || isScmateWorkflowReboot(command));
     }
 
     private boolean isOfflineObserved(PcMaster pc, LocalDateTime now) {
@@ -521,7 +661,7 @@ public class SchedulerService {
         return !pc.getLastSeen().isBefore(threshold);
     }
 
-    private boolean isAgentUpdateRebootConfirmed(PcMaster pc, CommandQueue cmd) {
+    private boolean isAgentUpdateRestartConfirmed(PcMaster pc, CommandQueue cmd) {
         if (pc == null || cmd == null) {
             return false;
         }
@@ -531,6 +671,12 @@ public class SchedulerService {
             String currentVersion = pc.getAgentVersion();
             if (currentVersion == null || !targetVersion.equalsIgnoreCase(currentVersion.trim())) {
                 return false;
+            }
+            if ("AGENT_BUNDLE_UPDATE".equalsIgnoreCase(cmd.getCommandType())) {
+                String bundleVersion = pc.getBundleVersion();
+                if (bundleVersion == null || !targetVersion.equalsIgnoreCase(bundleVersion.trim())) {
+                    return false;
+                }
             }
         }
 
@@ -548,6 +694,22 @@ public class SchedulerService {
                 ? cmd.getCompletedAt()
                 : cmd.getVerificationStartedAt();
         return baseline == null || !pc.getLastSeen().isBefore(baseline);
+    }
+
+    private void reportUpdateDistributionVerification(CommandQueue command, boolean success, String error) {
+        if (command == null || command.getPayloadJson() == null) return;
+        String commandType = command.getCommandType();
+        if (!"AGENT_UPDATE".equalsIgnoreCase(commandType)
+                && !"AGENT_BUNDLE_UPDATE".equalsIgnoreCase(commandType)) return;
+        String jobIdText = extractPayloadText(command.getPayloadJson(), "jobId");
+        if (jobIdText == null) return;
+        try {
+            fileDistributionOrchestrator.reportAgentResult(
+                    Long.parseLong(jobIdText), command.getMacAddress(), success, error);
+        } catch (Exception ex) {
+            log.warn("Failed to report verified update result: taskId={}, jobId={}, mac={}",
+                    command.getTaskId(), jobIdText, command.getMacAddress(), ex);
+        }
     }
 
     private boolean isDeadlineExceeded(CommandQueue cmd, LocalDateTime now) {
@@ -681,29 +843,40 @@ public class SchedulerService {
         }
     }
 
-    private void publishOnlineRatioAlert() {
-        long total = pcRepo.count();
-        long online = pcRepo.countByStatus("ONLINE");
-        if (total <= 0) {
-            onlineRatioAlertActive.set(false);
-            return;
+    void publishClassroomPowerStateNotifications() {
+        List<ClassroomGroupRepository.GroupWithPcStatsProjection> classrooms =
+                classroomGroupRepository.findAllWithPcStats(
+                        LocalDateTime.now().minusMinutes(Math.max(1L, heartbeatTimeoutMinutes)));
+        Map<Long, Boolean> currentStates = new LinkedHashMap<>();
+
+        for (ClassroomGroupRepository.GroupWithPcStatsProjection classroom : classrooms) {
+            long total = classroom.getTotalCount() == null ? 0L : classroom.getTotalCount();
+            if (total <= 0L || classroom.getGroupId() == null) {
+                continue;
+            }
+            long online = classroom.getOnlineCount() == null ? 0L : classroom.getOnlineCount();
+            boolean poweredOn = online > 0L;
+            Long groupId = classroom.getGroupId();
+            currentStates.put(groupId, poweredOn);
+
+            Boolean previous = classroomPowerStates.put(groupId, poweredOn);
+            if (previous == null || previous == poweredOn) {
+                continue;
+            }
+
+            String groupName = classroom.getGroupName() == null || classroom.getGroupName().isBlank()
+                    ? "강의실 " + groupId
+                    : classroom.getGroupName().trim();
+            String stateLabel = poweredOn ? "켜짐" : "꺼짐";
+            eventPublisher.publishEvent(new AlertEvent(
+                    this,
+                    "CLASSROOM:" + groupId,
+                    String.format("%s 강의실 %s (현재 온라인 %d대)", groupName, stateLabel, online),
+                    "INFO",
+                    poweredOn ? "CLASSROOM_POWER_ON" : "CLASSROOM_POWER_OFF"));
         }
 
-        double onlineRatio = (double) online / (double) total;
-        if (onlineRatio >= minOnlineRatioThreshold) {
-            onlineRatioAlertActive.set(false);
-            return;
-        }
-        if (!onlineRatioAlertActive.compareAndSet(false, true)) {
-            return;
-        }
-
-        publishSystemAlert(
-                "metrics-online-ratio",
-                String.format("[운영 메트릭] 온라인 에이전트 비율 저하 %.1f%% (%d/%d, 임계치 %.1f%%)",
-                        onlineRatio * 100.0, online, total, minOnlineRatioThreshold * 100.0),
-                "CRITICAL",
-                "METRICS_ONLINE_RATIO_DROP");
+        classroomPowerStates.keySet().removeIf(groupId -> !currentStates.containsKey(groupId));
     }
 
     private void publishSystemAlert(String dedupeKey,

@@ -183,6 +183,91 @@ class FileDistributionRolloutIntegrationTest {
     }
 
     @Test
+    void explicitRolloutTargetsOnlyRegisteredOnlinePcs() {
+        PcMaster online = saveOnlinePc("AA:BB:CC:DD:25:01", "10.25.0.11", "session-25", "1.0.0");
+        PcMaster offline = saveOnlinePc("AA:BB:CC:DD:25:02", "10.25.0.12", "session-26", "1.0.0");
+        offline.setStatus("OFFLINE");
+        pcMasterRepository.save(offline);
+        ScriptArtifact artifact = saveArtifact("agent-1.1.0.jar", "d".repeat(64));
+
+        FileDistributionJob job = orchestrator.createJob(
+                "explicit-job-" + System.currentTimeMillis(),
+                "agent-1.1.0.jar",
+                1,
+                5,
+                false,
+                null,
+                artifact.getId(),
+                "1.1.0",
+                "SERVER_ONLY",
+                1.0,
+                List.of(online.getMacAddress(), online.getMacAddress(), offline.getMacAddress(), "AA:BB:CC:DD:25:99")
+        );
+
+        List<FileDistributionAgentStatus> statuses =
+                fileDistributionAgentStatusRepository.findByJobIdOrderByWaveAscIdAsc(job.getId());
+        assertThat(statuses).extracting(FileDistributionAgentStatus::getAgentId)
+                .containsExactly(online.getMacAddress());
+    }
+
+    @Test
+    void fullBundleRequiresBootstrapVersionAndQueuesBundleCommandOnlyForReadyPc() throws Exception {
+        PcMaster legacy = saveOnlinePc("AA:BB:CC:DD:26:01", "10.26.0.11", "session-legacy", "1.1.19");
+        PcMaster ready = saveOnlinePc("AA:BB:CC:DD:26:02", "10.26.0.12", "session-ready", "1.1.20");
+        ScriptArtifact artifact = saveArtifact("PCAgent-1.1.20-update-bundle.zip", "e".repeat(64));
+
+        FileDistributionJob legacyJob = orchestrator.createJob(
+                "bundle-legacy-" + System.currentTimeMillis(),
+                artifact.getOriginalFilename(),
+                1,
+                1,
+                true,
+                null,
+                artifact.getId(),
+                "1.1.20",
+                "HYBRID_PEER",
+                1.0,
+                "FULL_BUNDLE",
+                List.of(legacy.getMacAddress())
+        );
+
+        List<FileDistributionAgentStatus> legacyStatuses =
+                fileDistributionAgentStatusRepository.findByJobIdOrderByWaveAscIdAsc(legacyJob.getId());
+        assertThat(legacyStatuses).singleElement().satisfies(status -> {
+            assertThat(status.getStatus()).isEqualTo("FAILED");
+            assertThat(status.getErrorMessage()).contains("bootstrap agent 1.1.20");
+        });
+        assertThat(commandQueueRepository.findAll()).noneMatch(command ->
+                legacyJob.getId().equals(extractPayloadLong(command, "jobId")));
+
+        FileDistributionJob readyJob = orchestrator.createJob(
+                "bundle-ready-" + System.currentTimeMillis(),
+                artifact.getOriginalFilename(),
+                1,
+                1,
+                true,
+                null,
+                artifact.getId(),
+                "1.1.20",
+                "HYBRID_PEER",
+                1.0,
+                "FULL_BUNDLE",
+                List.of(ready.getMacAddress())
+        );
+
+        CommandQueue command = commandQueueRepository.findAll().stream()
+                .filter(candidate -> readyJob.getId().equals(extractPayloadLong(candidate, "jobId")))
+                .findFirst()
+                .orElseThrow();
+        JsonNode payload = objectMapper.readTree(command.getPayloadJson());
+        assertThat(command.getCommandType()).isEqualTo("AGENT_BUNDLE_UPDATE");
+        assertThat(readyJob.getSourceMode()).isEqualTo("SERVER_ONLY");
+        assertThat(readyJob.getUpdatePackageType()).isEqualTo("FULL_BUNDLE");
+        assertThat(payload.get("updatePackageType").asText()).isEqualTo("FULL_BUNDLE");
+        assertThat(payload.get("sourceMode").asText()).isEqualTo("SERVER_ONLY");
+    }
+
+    @Test
     void hybridPeerCandidatesPreferClassroomAndRotatePerTarget() throws Exception {
         PcMaster seed1 = saveOnlinePc("AA:BB:CC:DD:30:01", "10.30.1.11", "session-31", "1.0.0", 301L);
         PcMaster seed2 = saveOnlinePc("AA:BB:CC:DD:30:02", "10.30.1.12", "session-32", "1.0.0", 301L);

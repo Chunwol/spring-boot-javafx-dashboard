@@ -52,8 +52,13 @@ public class AlertListener implements ApplicationListener<AlertEvent> {
     @Override
     @Async
     public void onApplicationEvent(AlertEvent event) {
-        log.warn("[ALERT] source={} severity={} type={} | {}",
-                event.getSourceMac(), event.getSeverity(), event.getAlertType(), event.getMessage());
+        if ("INFO".equals(event.getSeverity())) {
+            log.info("[ALERT] source={} severity={} type={} | {}",
+                    event.getSourceMac(), event.getSeverity(), event.getAlertType(), event.getMessage());
+        } else {
+            log.warn("[ALERT] source={} severity={} type={} | {}",
+                    event.getSourceMac(), event.getSeverity(), event.getAlertType(), event.getMessage());
+        }
 
         OperationalAlert savedAlert = alertCenterService.create(event);
         sendRealtimeAlert(savedAlert);

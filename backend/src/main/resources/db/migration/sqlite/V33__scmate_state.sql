@@ -1,0 +1,9 @@
+ALTER TABLE pc_master ADD COLUMN scmate_available INTEGER;
+ALTER TABLE pc_master ADD COLUMN scmate_mode TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_transition_pending INTEGER;
+ALTER TABLE pc_master ADD COLUMN scmate_raw_state INTEGER;
+ALTER TABLE pc_master ADD COLUMN scmate_observed_at TIMESTAMP;
+ALTER TABLE pc_master ADD COLUMN scmate_error TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_workflow_stage TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_workflow_id TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_workflow_start_session_id TEXT;

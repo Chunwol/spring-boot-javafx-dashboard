@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collection;
 
 @Service
 @RequiredArgsConstructor
@@ -95,6 +96,18 @@ public class AdminService {
         agentAuthTokenRepository.findAllByMacAddress(mac).forEach(agentAuthTokenRepository::delete);
         pcMasterRepository.findById(mac).ifPresent(pcMasterRepository::delete);
         auditService.log("ADMIN", "DELETE_AGENT", "AGENT", mac);
+    }
+
+    @Transactional
+    public int deleteAll(Collection<String> macAddresses) {
+        int deleted = 0;
+        for (String mac : macAddresses) {
+            boolean existed = pcMasterRepository.existsById(mac)
+                    || !agentAuthTokenRepository.findAllByMacAddress(mac).isEmpty();
+            delete(mac);
+            if (existed) deleted++;
+        }
+        return deleted;
     }
 
     private boolean isPreferredToken(AgentAuthToken candidate, AgentAuthToken existing) {

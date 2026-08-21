@@ -1,0 +1,25 @@
+import { isBrokenPc, isOnlinePc, sortPcs } from '../classrooms/model'
+import type { PcStatus } from '../../types/dashboard'
+
+export const SCREEN_WALL_MAX_PCS = 50
+export const SCREEN_WALL_BATCH_SIZE = 4
+export const SCREEN_WALL_BATCH_INTERVAL_MS = 1_000
+export const SCREEN_WALL_STATUS_POLL_INITIAL_MS = 1_000
+export const SCREEN_WALL_STATUS_POLL_MAX_MS = 3_000
+
+export function screenWallPcs(pcs: PcStatus[]) {
+  return sortPcs(pcs.filter((pc) => pc.role?.toUpperCase() !== 'TEACHER'))
+    .slice(0, SCREEN_WALL_MAX_PCS)
+}
+
+export function canStartScreenWallPc(pc: PcStatus) {
+  return isOnlinePc(pc) && !isBrokenPc(pc) && Boolean(pc.macAddress?.trim())
+}
+
+export function nextScreenWallStartCount(current: number, total: number) {
+  return Math.min(total, current + SCREEN_WALL_BATCH_SIZE)
+}
+
+export function nextScreenWallPollDelay(current: number) {
+  return Math.min(SCREEN_WALL_STATUS_POLL_MAX_MS, Math.ceil(current * 1.5))
+}

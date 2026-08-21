@@ -1,17 +1,17 @@
 # 배포 가이드 (deploy/)
 
-스마트 강의실 통합 관제 **백엔드**를 Synology NAS(또는 일반 Docker 호스트)에
+스마트 강의실 통합 관제 **백엔드와 웹 대시보드**를 Synology NAS(또는 일반 Docker 호스트)에
 배포·업데이트하는 절차서입니다.
 
-> 프론트엔드(JavaFX 데스크톱 앱)는 이 스택에 포함되지 않습니다.
-> 이 tar/이미지는 **백엔드 전용**입니다.
+> React 웹 프론트엔드는 Spring Boot JAR의 정적 리소스로 포함됩니다.
+> JavaFX 클라이언트는 폐기되었습니다. React 웹 화면은 백엔드 이미지에 포함됩니다.
 
 ---
 
 ## 1. 아키텍처 개요
 
 ```
-[관리자 PC: JavaFX 프론트엔드]         [에이전트 800대]
+[관리자 PC: 웹 브라우저]               [에이전트 800대]
               │  HTTPS                        │ HTTPS
               ▼                               ▼
    ┌─────────────────────────────────────────────────┐
@@ -64,9 +64,13 @@ cp .env.example .env
 | `DEFAULT_ADMIN_PASSWORD` | 관리자 초기 비번 |
 | `DEFAULT_VIEWER_PASSWORD` | 뷰어 초기 비번 |
 | `AGENT_INSTALL_KEY` | 에이전트 설치 키 |
+| `ROUTER_WOL_ENABLED` | 온라인 릴레이가 없을 때 ipTIME WOL 폴백 사용 여부 |
+| `ROUTER_WOL_USERNAME` / `ROUTER_WOL_PASSWORD` | ipTIME 공통 관리 계정. Git 커밋 금지 |
+| `ROUTER_WOL_6_PRIMARY_URL` | 6호관 공유기 설치 후 입력. 설치 전 공란 |
 | `DOMAIN` / `EMAIL` | 도메인·연락 이메일 |
 
 > `.env`에는 운영 시크릿이 들어갑니다. Git에 커밋 금지, NAS에서 안전 보관.
+> ipTIME WOL은 공유기 LAN/AP 포트와 대상 PC 유선 NIC가 같은 L2망이어야 합니다. WAN 포트에만 공인망을 연결한 라우터 모드에서는 WOL API 응답과 실제 PC 기동이 일치하지 않습니다.
 
 ---
 
@@ -124,7 +128,7 @@ docker compose logs -f app                       # 기동 로그 확인
 > - `postgres`/`redis`는 **건드리지 않음**. `app`(백엔드)만 새 이미지로 교체.
 > - **다운타임**: 백엔드만 수십 초~1분(JVM 부팅+Flyway+헬스체크 start_period 60s).
 >   postgres/redis는 무중단.
-> - 이 tar는 **백엔드 전용**. 프론트엔드(JavaFX) 변경은 이 절차로 반영 안 됨(별도 배포).
+> - 이 tar에는 **백엔드와 React 웹 프론트엔드가 함께 포함**됩니다. 이미지 교체 후 브라우저 새로고침으로 웹 변경이 반영됩니다.
 
 #### STEP 0 — 빌드 PC: 새 tar 생성
 
@@ -152,7 +156,7 @@ cd deploy
 
 # (a) DB 백업 (스키마 변경 없어도 권장)
 docker compose exec -T postgres \
-  pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup_$(date +%F_%H%M).sql
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup_$(date +%F_%H%M).sql
 
 # (b) 현재 가동 중 이미지를 롤백용으로 태그 보존  ← 롤백 대비 핵심
 docker tag classroom-dashboard:latest classroom-dashboard:prev
@@ -167,7 +171,7 @@ docker tag classroom-dashboard:latest classroom-dashboard:prev
 # 새 classroom-dashboard.tar 를 deploy/ 로 복사한 뒤:
 
 docker load -i classroom-dashboard.tar          # ★ 생략하면 업데이트 안 됨
-docker compose up -d --force-recreate app        # 백엔드만 재생성
+docker compose up -d --no-deps --force-recreate app  # 백엔드만 재생성
 ```
 
 #### STEP 4 — 검증 (이상 시 STEP 5 롤백)
@@ -175,28 +179,29 @@ docker compose up -d --force-recreate app        # 백엔드만 재생성
 ```bash
 docker compose ps                                # app = Up (healthy) 확인
 docker compose logs -f app                       # 기동 로그 / Flyway 마이그레이션 / 에러
-curl -s localhost:8888/health                    # 200 OK
+curl -fsS localhost:8888/actuator/health         # status=UP 확인
 ```
 
 확인 체크리스트:
 - `docker compose ps`에서 `app` 상태가 `Up (healthy)` (최대 ~60s 소요)
 - 로그에 `Started Application`, Flyway `Successfully applied`/`up to date`
 - 로그에 stacktrace·`Migration ... failed`·DB/Redis 인증 오류 없음
-- 프론트엔드 로그인 + 에이전트 하트비트 정상 수신
+- 웹 프론트엔드 로그인·직접 URL 새로고침 + 에이전트 하트비트 정상 수신
 
 #### STEP 5 — 롤백 (검증 실패 시)
 
 ```bash
 docker tag classroom-dashboard:prev classroom-dashboard:latest
-docker compose up -d --force-recreate app
+docker compose up -d --no-deps --force-recreate app
 # DB 스키마가 새 마이그레이션으로 바뀌었으면 STEP 2(a) 백업도 복구 (8장)
 ```
 
-> **왜 `--force-recreate app`?**
+> **왜 `--no-deps --force-recreate app`?**
 > `image: classroom-dashboard:latest` 태그가 고정이라, `docker load`가
 > `:latest` 이미지 ID를 교체합니다. `up -d`가 변경을 감지해 `app`만
 > 재생성하지만, 일부 Compose 버전이 이미지 변경을 못 잡는 드문 케이스를
-> 막기 위해 `--force-recreate app`을 붙입니다.
+> 막기 위해 `--force-recreate app`을 붙입니다. Synology의 구형 Compose가
+> 의존 서비스까지 재생성하지 않도록 `--no-deps`도 함께 사용합니다.
 
 > ❌ **하지 말 것**
 > - tar만 복사하고 `docker load` 생략 → 옛 이미지 그대로, 업데이트 안 됨
@@ -212,13 +217,13 @@ docker compose up -d --force-recreate app
 
 | 서비스 | 이미지 | 포트 | 역할 |
 |---|---|---|---|
-| `app` | `classroom-dashboard:latest` | `8888:8888` | Spring Boot 백엔드 |
+| `app` | `classroom-dashboard:latest` | `127.0.0.1:8888:8888` | Spring Boot 백엔드 + 웹 |
 | `postgres` | `postgres:16-alpine` | (내부) | 메인 DB |
 | `redis` | `redis:7-alpine` | (내부) | 캐시/세션 |
 
 - 모두 `restart: unless-stopped`, `dashboard` 브리지 네트워크
 - `app`은 `postgres`/`redis`가 **healthy**가 될 때까지 대기 후 기동
-- `app` 헬스체크: `GET /health` (start_period 60s)
+- `app` 헬스체크: `GET /actuator/health` (start_period 60s)
 - `env_file: .env` → **`.env`의 모든 키가 컨테이너 환경변수로 주입됨**
 
 ### `.env` 키 전체
@@ -239,7 +244,7 @@ docker compose up -d --force-recreate app
 | JPA | `JPA_DDL_AUTO`(validate), `JPA_SHOW_SQL`(false) | 운영은 validate/false 고정 |
 
 > `docker-compose.yml`이나 `.env`를 수정했다면, tar뿐 아니라 **그 파일도 NAS에 복사**한 뒤
-> `docker compose up -d`(또는 `--force-recreate app`) 해야 반영됩니다.
+> `docker compose up -d`(또는 `--no-deps --force-recreate app`) 해야 반영됩니다.
 
 ---
 
@@ -322,7 +327,7 @@ ScriptController:  true  → 헤더만 반환, Nginx가 직접 파일 서빙
 ```bash
 # DB 덤프
 docker compose exec -T postgres \
-  pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup_$(date +%F).sql
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup_$(date +%F).sql
 
 # 업로드 파일
 tar czf uploads_$(date +%F).tar.gz data/uploads
@@ -349,7 +354,7 @@ docker compose stop                     # 전체 정지(데이터 보존)
 docker compose start                    # 다시 시작
 docker compose down                     # 컨테이너 제거(데이터 보존, -v 금지!)
 docker image prune -f                   # 누적된 옛 <none> 이미지 정리(안전)
-curl -s localhost:8888/health           # 헬스체크
+curl -fsS localhost:8888/actuator/health # 헬스체크
 ```
 
 ---
@@ -358,10 +363,10 @@ curl -s localhost:8888/health           # 헬스체크
 
 | 증상 | 원인 / 조치 |
 |---|---|
-| 업데이트했는데 코드가 그대로 | `docker load` 생략. tar 복사만으론 안 됨 → `docker load -i ...` 후 `up -d --force-recreate app` |
+| 업데이트했는데 코드가 그대로 | `docker load` 생략. tar 복사만으론 안 됨 → `docker load -i ...` 후 `up -d --no-deps --force-recreate app` |
 | `app`이 계속 재시작 | `docker compose logs app` 확인. 대개 `.env`의 DB/Redis 비번 불일치 또는 `JWT_SECRET` 누락 |
 | `app`이 postgres 못 찾음 | postgres healthcheck 미통과. `docker compose logs postgres` 확인 |
-| 파일 다운로드 깨짐 | `NGINX_ACCEL_REDIRECT=true`인데 Nginx internal location 없음 → `false`로 되돌리고 `up -d --force-recreate app` |
+| 파일 다운로드 깨짐 | `NGINX_ACCEL_REDIRECT=true`인데 Nginx internal location 없음 → `false`로 되돌리고 `up -d --no-deps --force-recreate app` |
 | 외부 접속 안 됨(내부는 OK) | Synology 역방향 프록시 대상이 `http://localhost:8888`인지, WebSocket 헤더 전달 켰는지 확인 |
 | 마이그레이션 실패로 기동 중단 | DB 백업 복구 후, 문제 마이그레이션 확인. `JPA_DDL_AUTO`는 항상 `validate` 유지 |
 | 디스크 부족 | `docker image prune -f`, 오래된 `backup_*.sql`/`uploads_*.tar.gz` 정리 |
@@ -372,7 +377,7 @@ curl -s localhost:8888/health           # 헬스체크
 
 ```bash
 docker tag classroom-dashboard:prev classroom-dashboard:latest
-docker compose up -d --force-recreate app
+docker compose up -d --no-deps --force-recreate app
 ```
 
 `:prev`가 없고 이전 버전 tar만 보관한 경우:
@@ -380,7 +385,7 @@ docker compose up -d --force-recreate app
 ```bash
 docker load -i classroom-dashboard-<이전버전>.tar
 docker tag classroom-dashboard:<이전> classroom-dashboard:latest
-docker compose up -d --force-recreate app
+docker compose up -d --no-deps --force-recreate app
 ```
 
 DB 스키마가 새 마이그레이션으로 바뀐 경우, 8장의 DB 백업 복구도 함께 수행.
@@ -396,15 +401,15 @@ deploy\scripts\build-and-export.bat          # → deploy\classroom-dashboard.ta
 # ── NAS ────────────────────────────────────────────
 #   classroom-dashboard.tar 를 deploy/ 로 복사 (.env/compose 변경 시 함께 복사)
 cd deploy
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup_$(date +%F_%H%M).sql
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup_$(date +%F_%H%M).sql
 docker tag classroom-dashboard:latest classroom-dashboard:prev   # 롤백 대비
 docker load -i classroom-dashboard.tar
-docker compose up -d --force-recreate app
+docker compose up -d --no-deps --force-recreate app
 docker compose ps && docker compose logs -f app                  # Up (healthy) 확인
 
 # ── 문제 시 롤백 ───────────────────────────────────
 docker tag classroom-dashboard:prev classroom-dashboard:latest
-docker compose up -d --force-recreate app
+docker compose up -d --no-deps --force-recreate app
 ```
 
 > 컨테이너·데이터 **삭제 불필요**. 데이터는 `deploy/data/`에 bind mount되어 안전합니다.

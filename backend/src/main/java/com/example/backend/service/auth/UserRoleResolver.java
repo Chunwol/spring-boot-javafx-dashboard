@@ -1,10 +1,14 @@
 package com.example.backend.service.auth;
 
+import com.example.backend.model.user.User;
+import com.example.backend.repository.user.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -13,19 +17,19 @@ import java.util.Set;
  * <p>역할 우선순위: {@code ADMIN > VIEWER > USER}.
  * 동일 사용자명이 admin 목록과 viewer 목록 양쪽에 존재하면 ADMIN으로 처리한다.
  *
- * <p>역할 소스는 두 가지를 병합한다:
+ * <p>역할 소스는 DB의 {@code users.role}을 우선하고, 값이 없으면 설정 값을 사용한다:
  * <ol>
  *   <li>application.yml의 {@code app.security.admin-users}, {@code app.security.viewer-users} (쉼표 구분)</li>
  *   <li>환경 변수 {@code DEFAULT_ADMIN_USERNAME}, {@code DEFAULT_VIEWER_USERNAME} (Docker/K8s 주입용)</li>
  * </ol>
  *
- * <p>DB를 조회하지 않으므로 트랜잭션이 불필요하다.
  */
 @Component
 public class UserRoleResolver {
 
     private final Set<String> adminUsers;
     private final Set<String> viewerUsers;
+    private final UserRepository userRepository;
 
     /**
      * 생성자 초기화: yml 설정 + 환경 변수에서 admin/viewer 사용자 목록을 읽어 집합을 구성한다.
@@ -35,10 +39,12 @@ public class UserRoleResolver {
      * @param defaultAdminUsername 환경 변수 {@code DEFAULT_ADMIN_USERNAME}
      * @param defaultViewerUsername 환경 변수 {@code DEFAULT_VIEWER_USERNAME}
      */
-    public UserRoleResolver(@Value("${app.security.admin-users:admin}") String adminUsersRaw,
+    public UserRoleResolver(UserRepository userRepository,
+                            @Value("${app.security.admin-users:admin}") String adminUsersRaw,
                             @Value("${app.security.viewer-users:}") String viewerUsersRaw,
                             @Value("${DEFAULT_ADMIN_USERNAME:admin}") String defaultAdminUsername,
                             @Value("${DEFAULT_VIEWER_USERNAME:}") String defaultViewerUsername) {
+        this.userRepository = userRepository;
         this.adminUsers = parseUsers(adminUsersRaw);
         this.viewerUsers = parseUsers(viewerUsersRaw);
 
@@ -60,10 +66,28 @@ public class UserRoleResolver {
      * @param username 인증된 사용자명
      * @return {@code "ADMIN"}, {@code "VIEWER"}, 또는 {@code "USER"}
      */
+    @Transactional(readOnly = true)
     public String resolveRole(String username) {
         if (username == null || username.isBlank()) {
             return "USER";
         }
+        return userRepository.findByUsername(username)
+                .map(this::resolveRole)
+                .orElseGet(() -> resolveConfiguredRole(username));
+    }
+
+    public String resolveRole(User user) {
+        if (user == null) {
+            return "USER";
+        }
+        String storedRole = normalizeRole(user.getRole());
+        if (storedRole != null) {
+            return storedRole;
+        }
+        return resolveConfiguredRole(user.getUsername());
+    }
+
+    private String resolveConfiguredRole(String username) {
         if (adminUsers.contains(username)) {
             return "ADMIN";
         }
@@ -71,6 +95,17 @@ public class UserRoleResolver {
             return "VIEWER";
         }
         return "USER";
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return null;
+        }
+        String normalized = role.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "ADMIN", "USER", "VIEWER" -> normalized;
+            default -> null;
+        };
     }
 
     /**

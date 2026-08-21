@@ -256,7 +256,7 @@ GET /api/v1/dashboard/config/traffic-thresholds
 
 응답:
 ```json
-{"globalMbps":1200.0,"classroomMbps":400.0,"pcMbps":80.0}
+{"globalMbps":2000.0,"classroomMbps":200.0,"pcMbps":50.0}
 ```
 
 #### 3.6 대시보드 통합 스냅샷
@@ -425,7 +425,15 @@ POST /api/v1/commands/to-ip
 GET /api/v1/commands?page=0&size=20&status=QUEUED,DELIVERED,ACKED
 ```
 
-#### 6.4 ACK/RESULT 상태 충돌
+#### 6.4 대기 명령 취소
+```http
+POST /api/v1/commands/{taskId}/cancel
+```
+
+아직 에이전트에 전달되지 않은 `QUEUED` 명령만 취소합니다. 명령 종류에는 제한이 없으며,
+취소된 명령은 `CANCELLED`로 남아 대상 PC가 나중에 온라인이 되어도 실행되지 않습니다.
+
+#### 6.5 ACK/RESULT 상태 충돌
 - 명령 상태가 허용 상태가 아니면 `409 Conflict`를 반환할 수 있습니다.
 
 ---

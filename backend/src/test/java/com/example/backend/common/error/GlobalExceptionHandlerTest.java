@@ -3,7 +3,10 @@ package com.example.backend.common.error;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.example.backend.common.exception.ConflictException;
 
@@ -58,6 +61,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void handleNoResourceFound_returns404InsteadOf500() {
+        ResponseEntity<ApiErrorResponse> resp = handler.handleNoResourceFound(
+                new NoResourceFoundException(
+                        org.springframework.http.HttpMethod.GET,
+                        "/api/missing",
+                        "No static resource /api/missing"),
+                request);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(resp.getBody()).isNotNull();
+        assertThat(resp.getBody().getError()).isEqualTo("NOT_FOUND");
+    }
+
+    @Test
     void handleUnexpected_returns500() {
         ResponseEntity<ApiErrorResponse> resp = handler.handleUnexpected(
                 new RuntimeException("서버 오류"), request);
@@ -65,5 +82,20 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(resp.getBody()).isNotNull();
         assertThat(resp.getBody().getMessage()).isEqualTo("서버 내부 오류가 발생했습니다.");
+    }
+
+    @Test
+    void handleMessageNotWritable_closesSockJsTransportWithoutJsonErrorBody() {
+        MockHttpServletRequest sockJsRequest = new MockHttpServletRequest(
+                "GET", "/ws/388/o2j0gmwi/eventsource");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.handleMessageNotWritable(
+                new HttpMessageNotWritableException("stream already closed"),
+                sockJsRequest,
+                response);
+
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NO_CONTENT.value());
+        assertThat(response.getContentAsByteArray()).isEmpty();
     }
 }

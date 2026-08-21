@@ -5,6 +5,7 @@ import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.repository.user.UserRepository;
 import com.example.backend.util.JwtUtil;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -23,7 +24,24 @@ public class AuthService {
                 .filter(u -> passwordEncoder.matches(request.getPassword(), u.getPassword()))
                 .orElseThrow(() -> new UnauthorizedException("아이디 또는 비밀번호가 올바르지 않습니다."));
         String token = jwtUtil.generateToken(user.getUsername());
-        String role = userRoleResolver.resolveRole(user.getUsername());
+        String role = userRoleResolver.resolveRole(user);
         return LoginResponse.of(user.getUsername(), token, role);
+    }
+
+    public String issueRefreshToken(String username) {
+        return jwtUtil.generateRefreshToken(username);
+    }
+
+    public LoginResponse refresh(String refreshToken) {
+        try {
+            String username = jwtUtil.validateRefreshAndGetClaims(refreshToken).getSubject();
+            var user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new UnauthorizedException("자동 로그인 정보가 유효하지 않습니다."));
+            String token = jwtUtil.generateToken(user.getUsername());
+            String role = userRoleResolver.resolveRole(user);
+            return LoginResponse.of(user.getUsername(), token, role);
+        } catch (JwtException | IllegalArgumentException ex) {
+            throw new UnauthorizedException("자동 로그인 정보가 만료되었거나 유효하지 않습니다.");
+        }
     }
 }

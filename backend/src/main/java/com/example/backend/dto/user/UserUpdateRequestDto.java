@@ -1,6 +1,7 @@
 package com.example.backend.dto.user;
 
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Pattern;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -12,4 +13,7 @@ public class UserUpdateRequestDto {
 
     @Size(max = 200, message = "email은 200자를 초과할 수 없습니다.")
     private String email;
+
+    @Pattern(regexp = "^(?i)(ADMIN|USER|VIEWER)?$", message = "role은 ADMIN/USER/VIEWER 중 하나여야 합니다.")
+    private String role;
 }

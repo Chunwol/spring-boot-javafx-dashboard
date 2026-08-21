@@ -75,6 +75,72 @@ public class PcMaster {
     @Column(name = "agent_version", length = 40)
     private String agentVersion;
 
+    /** 마지막으로 검증된 전체 설치 번들 버전 */
+    @Schema(description = "검증 완료된 전체 설치 번들 버전")
+    @Column(name = "bundle_version", length = 40)
+    private String bundleVersion;
+
+    @Column(name = "system_boot_time_epoch_seconds")
+    private Long systemBootTimeEpochSeconds;
+
+    @Column(name = "scmate_available")
+    private Boolean scmateAvailable;
+
+    @Column(name = "scmate_availability_reason", length = 40)
+    private String scmateAvailabilityReason;
+
+    @Column(name = "scmate_mode", length = 20)
+    private String scmateMode;
+
+    @Column(name = "scmate_schedule", length = 40)
+    private String scmateSchedule;
+
+    @Column(name = "scmate_selected_point", length = 20)
+    private String scmateSelectedPoint;
+
+    @Column(name = "scmate_product_variant", length = 80)
+    private String scmateProductVariant;
+
+    @Column(name = "scmate_state_source", length = 40)
+    private String scmateStateSource;
+
+    @Column(name = "scmate_transition_pending")
+    private Boolean scmateTransitionPending;
+
+    @Column(name = "scmate_raw_state")
+    private Long scmateRawState;
+
+    @Column(name = "scmate_observed_at")
+    private LocalDateTime scmateObservedAt;
+
+    /** 대시보드를 통해 마지막으로 SCMATE 현재 시점 저장이 성공한 시각 */
+    @Column(name = "scmate_baseline_updated_at")
+    private LocalDateTime scmateBaselineUpdatedAt;
+
+    @Column(name = "scmate_baseline_created_at")
+    private LocalDateTime scmateBaselineCreatedAt;
+
+    @Column(name = "scmate_snap1_created_at")
+    private LocalDateTime scmateSnap1CreatedAt;
+
+    @Column(name = "scmate_snap2_created_at")
+    private LocalDateTime scmateSnap2CreatedAt;
+
+    @Column(name = "scmate_error", length = 255)
+    private String scmateError;
+
+    @Column(name = "scmate_workflow_stage", length = 40)
+    private String scmateWorkflowStage;
+
+    @Column(name = "scmate_workflow_id", length = 40)
+    private String scmateWorkflowId;
+
+    @Column(name = "scmate_workflow_start_session_id", length = 80)
+    private String scmateWorkflowStartSessionId;
+
+    @Column(name = "scmate_workflow_start_boot_time_epoch_seconds")
+    private Long scmateWorkflowStartBootTimeEpochSeconds;
+
     // ── 도메인 메서드 ──────────────────────────────────────────────────────────
 
     /** 에이전트 등록 시 PC 기본 정보를 초기화한다. */

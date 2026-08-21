@@ -123,8 +123,11 @@ services:
         -XX:+HeapDumpOnOutOfMemoryError
       # X-Accel-Redirect: Docker Nginx에 internal location 설정 후 true로 변경
       NGINX_ACCEL_REDIRECT: ${NGINX_ACCEL_REDIRECT:-false}
+      APP_REMOTE_CONTROL_ALLOWED_CIDRS: ${REMOTE_CONTROL_ALLOWED_CIDRS:-223.194.166.0/23,223.194.168.0/23,172.16.13.0/24,172.16.204.0/24}
+      DB_BACKUP_DIR: /app/backups/postgres
     volumes:
       - ./uploads:/app/uploads
+      - ./backups/postgres:/app/backups/postgres
     depends_on:
       pgbouncer:
         condition: service_started

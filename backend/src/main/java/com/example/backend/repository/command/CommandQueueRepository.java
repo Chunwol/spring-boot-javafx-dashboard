@@ -72,6 +72,17 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
            List<CommandQueue> findTop200ByStatusAndAckedAtBeforeOrderByAckedAtAsc(
                   String status, LocalDateTime threshold);
 
+           @Query("SELECT COUNT(c) FROM CommandQueue c " +
+                  "WHERE LOWER(c.macAddress) = LOWER(:macAddress) " +
+                  "AND UPPER(c.commandType) = UPPER(:commandType) " +
+                  "AND c.status IN ('QUEUED', 'DELIVERED', 'ACKED') " +
+                  "AND c.createdAt >= :createdAfter " +
+                  "AND ((:payloadJson IS NULL AND c.payloadJson IS NULL) OR c.payloadJson = :payloadJson)")
+           long countRecentEquivalentPowerCommand(@Param("macAddress") String macAddress,
+                                                  @Param("commandType") String commandType,
+                                                  @Param("payloadJson") String payloadJson,
+                                                  @Param("createdAfter") LocalDateTime createdAfter);
+
            long countByStatus(String status);
 
            long countByStatusIn(List<String> statuses);
@@ -104,6 +115,21 @@ public interface CommandQueueRepository extends JpaRepository<CommandQueue, Long
                    "SET c.status = 'DELIVERED', c.deliveredAt = :deliveredAt, c.isExecuted = false " +
                    "WHERE c.taskId = :taskId AND c.status = 'QUEUED'")
            int markDeliveredIfQueued(@Param("taskId") Long taskId, @Param("deliveredAt") LocalDateTime deliveredAt);
+
+           @Modifying(flushAutomatically = true, clearAutomatically = true)
+           @Query("UPDATE CommandQueue c SET c.status = 'QUEUED', c.deliveredAt = null " +
+                  "WHERE c.taskId = :taskId AND c.status = 'DELIVERED' AND c.ackedAt IS NULL")
+           int requeueDeliveredIfUnacked(@Param("taskId") Long taskId);
+
+           /** 아직 전달되지 않은 명령만 원자적으로 취소한다. */
+           @Modifying(flushAutomatically = true, clearAutomatically = true)
+           @Query("UPDATE CommandQueue c " +
+                  "SET c.status = 'CANCELLED', c.completedAt = :completedAt, " +
+                  "    c.isExecuted = true, c.stderr = :reason " +
+                  "WHERE c.taskId = :taskId AND c.status = 'QUEUED'")
+           int cancelQueuedIfPending(@Param("taskId") Long taskId,
+                                     @Param("completedAt") LocalDateTime completedAt,
+                                     @Param("reason") String reason);
 
            @Modifying(flushAutomatically = true, clearAutomatically = true)
            @Query("UPDATE CommandQueue c " +

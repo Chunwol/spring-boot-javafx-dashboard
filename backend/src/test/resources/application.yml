@@ -19,8 +19,16 @@ spring:
     locations: classpath:db/migration/sqlite
 
 app:
+  wol:
+    router:
+      enabled: false
   cache:
     provider: caffeine
+  runtime:
+    async:
+      await-termination-seconds: 0
+    scheduler:
+      await-termination-seconds: 0
 
 logging:
   level:

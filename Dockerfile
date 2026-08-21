@@ -1,6 +1,13 @@
-# Backend Dockerfile
-# 멀티스테이지 빌드: 1단계는 빌드, 2단계는 실행
-FROM eclipse-temurin:25-jdk as builder
+# Backend + web frontend Dockerfile
+FROM node:22-alpine AS web-builder
+
+WORKDIR /web
+COPY web-frontend/package.json web-frontend/package-lock.json ./
+RUN npm ci
+COPY web-frontend/ ./
+RUN npm run build
+
+FROM eclipse-temurin:25-jdk AS builder
 
 WORKDIR /build
 
@@ -10,9 +17,10 @@ COPY gradle gradle/
 COPY settings-backend.gradle settings.gradle
 COPY common common/
 COPY backend backend/
+COPY --from=web-builder /web/dist web-frontend/dist/
 
 # Backend Boot JAR 빌드
-RUN chmod +x gradlew && ./gradlew :backend:bootJar -x test
+RUN chmod +x gradlew && ./gradlew :backend:bootJar -x test -PskipWebFrontendBuild=true
 
 # 실행 스테이지
 FROM eclipse-temurin:25-jre
@@ -22,7 +30,7 @@ WORKDIR /app
 # PDF 보고서 한글 렌더링용 나눔고딕 폰트 설치 (OFL 라이선스)
 # ReportService가 /usr/share/fonts/truetype/nanum/NanumGothic.ttf 를 로드함
 RUN apt-get update -qq \
-    && apt-get install -y --no-install-recommends fonts-nanum fontconfig \
+    && apt-get install -y --no-install-recommends curl fonts-nanum fontconfig \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 

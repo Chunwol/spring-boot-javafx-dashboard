@@ -1,6 +1,7 @@
 param(
     [switch]$NoBanner,
-    [switch]$IncludeDocker
+    [switch]$IncludeDocker,
+    [switch]$RemoveDockerVolumes
 )
 
 $ErrorActionPreference = "Stop"
@@ -152,12 +153,19 @@ if ($IncludeDocker) {
     if (Test-Path $composeFile) {
         $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
         if ($dockerCmd) {
-            Write-Step "Stopping docker compose stack"
+            Write-Step "Stopping docker compose stack (persistent volumes are preserved)"
             Push-Location $projectRoot
             try {
-                & docker compose down -v 2>$null | Out-Null
+                $downArgs = @("compose", "down")
+                if ($RemoveDockerVolumes) {
+                    Write-WarnLine "Removing Docker volumes because -RemoveDockerVolumes was explicitly supplied"
+                    $downArgs += "--volumes"
+                }
+                & docker @downArgs 2>$null | Out-Null
                 if ($LASTEXITCODE -ne 0) {
-                    & docker-compose down -v 2>$null | Out-Null
+                    $legacyArgs = @("down")
+                    if ($RemoveDockerVolumes) { $legacyArgs += "--volumes" }
+                    & docker-compose @legacyArgs 2>$null | Out-Null
                 }
             } catch {
                 Write-WarnLine "Docker compose cleanup skipped: $($_.Exception.Message)"

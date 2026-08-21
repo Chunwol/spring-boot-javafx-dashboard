@@ -265,6 +265,63 @@ public class ClassroomService {
         return rows;
     }
 
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getClassroomTrafficSummaries() {
+        List<ClassroomSummaryDto> classrooms = getClassroomSummaries();
+        List<Long> groupIds = classrooms.stream().map(ClassroomSummaryDto::getGroupId).toList();
+        if (groupIds.isEmpty()) return List.of();
+
+        List<PcMaster> pcs = pcMasterRepository.findByGroupIdIn(groupIds);
+        List<String> macAddresses = pcs.stream()
+                .map(PcMaster::getMacAddress)
+                .filter(Objects::nonNull)
+                .filter(mac -> !mac.isBlank())
+                .toList();
+        LocalDateTime now = LocalDateTime.now();
+        List<TrafficLog> logs = macAddresses.isEmpty()
+                ? List.of()
+                : trafficLogsRepository.findByMacAddressInAndTimestampBetween(macAddresses, now.minusMinutes(10), now);
+
+        Map<String, TrafficLog> latestByMac = new HashMap<>();
+        for (TrafficLog log : logs) {
+            String mac = DeviceAddressUtil.normalizeMac(log.getMacAddress());
+            if (mac == null) continue;
+            TrafficLog current = latestByMac.get(mac);
+            if (current == null || current.getTimestamp() == null
+                    || (log.getTimestamp() != null && log.getTimestamp().isAfter(current.getTimestamp()))) {
+                latestByMac.put(mac, log);
+            }
+        }
+
+        Map<Long, double[]> totalsByGroup = new HashMap<>();
+        Map<Long, LocalDateTime> updatedAtByGroup = new HashMap<>();
+        for (PcMaster pc : pcs) {
+            if (pc.getGroupId() == null) continue;
+            TrafficLog log = latestByMac.get(DeviceAddressUtil.normalizeMac(pc.getMacAddress()));
+            if (log == null) continue;
+            double[] totals = totalsByGroup.computeIfAbsent(pc.getGroupId(), ignored -> new double[2]);
+            totals[0] += log.getInboundKbps() == null ? 0.0 : log.getInboundKbps() / 1024.0;
+            totals[1] += log.getOutboundKbps() == null ? 0.0 : log.getOutboundKbps() / 1024.0;
+            if (log.getTimestamp() != null) {
+                updatedAtByGroup.merge(pc.getGroupId(), log.getTimestamp(),
+                        (left, right) -> left.isAfter(right) ? left : right);
+            }
+        }
+
+        return classrooms.stream().map(classroom -> {
+            double[] totals = totalsByGroup.getOrDefault(classroom.getGroupId(), new double[2]);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("groupId", classroom.getGroupId());
+            row.put("groupName", classroom.getGroupName());
+            row.put("onlinePcs", classroom.getOnlinePcs());
+            row.put("totalPcs", classroom.getTotalPcs());
+            row.put("inboundMbps", totals[0]);
+            row.put("outboundMbps", totals[1]);
+            row.put("updatedAt", updatedAtByGroup.get(classroom.getGroupId()));
+            return row;
+        }).toList();
+    }
+
     private record PcStats(long totalCount, long onlineCount) {
         private static final PcStats EMPTY = new PcStats(0, 0);
     }

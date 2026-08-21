@@ -1,7 +1,7 @@
 @echo off
 REM Development Mode - Integrated (Windows)
 REM Usage: scripts\run-dev.bat
-REM Builds project and starts both Backend and Frontend in separate terminal windows
+REM Builds project and starts Backend, React dev server, and Agent in separate windows
 
 setlocal enabledelayedexpansion
 
@@ -57,8 +57,8 @@ timeout /t 6 /nobreak
 echo.
 
 REM Start frontend in new terminal window
-echo [4/5] Starting Frontend in new window...
-start "Frontend - JavaFX GUI" cmd /c "cd /d "%PROJECT_ROOT%" && gradlew.bat :frontend:run"
+echo [4/5] Starting Web Frontend in new window...
+start "Web Frontend - http://localhost:5173" cmd /c "cd /d "%PROJECT_ROOT%\web-frontend" && npm ci && npm run dev"
 
 echo [5/5] Starting Agent in new window...
 start "Agent - PCAgent" /D "%PROJECT_ROOT%" cmd /c scripts\run-agent.bat
@@ -68,12 +68,12 @@ echo ============================================================
 echo === Services Running ===
 echo ============================================================
 echo Backend:  http://localhost:8888
-echo Frontend: Check Frontend window
+echo Web UI:   http://localhost:5173
 echo Agent:    scripts\run-agent.bat
 echo.
 echo To stop:
 echo   - Close Backend window
-echo   - Close Frontend window
+echo   - Close Web Frontend window
 echo   - Close Agent window
 echo ============================================================
 echo.

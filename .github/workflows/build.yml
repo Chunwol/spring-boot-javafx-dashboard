@@ -27,7 +27,7 @@ jobs:
       - name: Compile Modules
         run: |
           chmod +x ./gradlew
-          ./gradlew :common:compileJava :backend:compileJava :agent:compileJava :frontend:compileJava -x test --no-daemon
+          ./gradlew :common:compileJava :backend:bootJar :agent:compileJava -x test --no-daemon
 
       - name: Repro Guide
         if: failure()

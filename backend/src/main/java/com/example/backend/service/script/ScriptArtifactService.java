@@ -19,6 +19,10 @@ public class ScriptArtifactService {
         return scriptArtifactRepository.findFirstBySha256(sha256);
     }
 
+    public ScriptArtifact findBySha256AndKind(String sha256, String artifactKind) {
+        return scriptArtifactRepository.findFirstBySha256AndArtifactKind(sha256, artifactKind);
+    }
+
     @Transactional
     public ScriptArtifact save(ScriptArtifact artifact) {
         return scriptArtifactRepository.save(artifact);

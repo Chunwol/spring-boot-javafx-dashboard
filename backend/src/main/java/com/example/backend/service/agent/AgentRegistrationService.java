@@ -9,6 +9,7 @@ import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.UserSettingRepository;
 import com.example.backend.repository.agent.AgentAuthTokenRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,7 @@ public class AgentRegistrationService {
     private final AgentTokenService agentTokenService;
     private final AgentInstallKeyService agentInstallKeyService;
     private final UserSettingRepository userSettingRepository;
+    private final boolean usePostgresAdvisoryLock;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -48,12 +50,15 @@ public class AgentRegistrationService {
                                     AgentAuthTokenRepository agentAuthTokenRepository,
                                     AgentTokenService agentTokenService,
                                     AgentInstallKeyService agentInstallKeyService,
-                                    UserSettingRepository userSettingRepository) {
+                                    UserSettingRepository userSettingRepository,
+                                    @Value("${spring.datasource.url:}") String dataSourceUrl) {
         this.pcMasterRepository = pcMasterRepository;
         this.agentAuthTokenRepository = agentAuthTokenRepository;
         this.agentTokenService = agentTokenService;
         this.agentInstallKeyService = agentInstallKeyService;
         this.userSettingRepository = userSettingRepository;
+        this.usePostgresAdvisoryLock = dataSourceUrl != null
+                && dataSourceUrl.regionMatches(true, 0, "jdbc:postgresql:", 0, "jdbc:postgresql:".length());
     }
 
     /**
@@ -102,9 +107,11 @@ public class AgentRegistrationService {
         // 트랜잭션 commit까지 잠금이 유지되므로(advisory lock은 트랜잭션 종료 시 자동 해제),
         // 이후 findAllByMacAddress가 직전 트랜잭션의 커밋 결과를 반드시 보게 되어
         // UNIQUE(mac_address) 충돌(및 그로 인한 Hibernate AssertionFailure)을 방지한다.
-        entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(hashtext(?1)::bigint)")
-                .setParameter(1, mac)
-                .getSingleResult();
+        if (usePostgresAdvisoryLock) {
+            entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(hashtext(?1)::bigint)")
+                    .setParameter(1, mac)
+                    .getSingleResult();
+        }
 
         PcMaster pc = pcMasterRepository.findById(mac).orElseGet(PcMaster::new);
         pc.setMacAddress(mac);

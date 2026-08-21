@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Collection;
 
 /**
  * 운영 알림(OperationalAlert) CRUD 서비스.
@@ -106,6 +107,15 @@ public class AlertCenterService {
         return operationalAlertRepository.acknowledgeAllUnread(
                 LocalDateTime.now(),
                 resolveAcknowledgedBy(acknowledgedBy));
+    }
+
+    @Transactional
+    public int acknowledgeUnreadByIds(Collection<Long> ids, String acknowledgedBy) {
+        if (ids == null || ids.isEmpty()) return 0;
+        List<Long> safeIds = ids.stream().filter(id -> id != null && id > 0).distinct().limit(MAX_FETCH_LIMIT).toList();
+        if (safeIds.isEmpty()) return 0;
+        return operationalAlertRepository.acknowledgeUnreadByIds(
+                safeIds, LocalDateTime.now(), resolveAcknowledgedBy(acknowledgedBy));
     }
 
     private String normalizeSourceMac(String value) {

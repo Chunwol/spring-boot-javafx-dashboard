@@ -15,6 +15,21 @@ public class HeartbeatDto {
     private String ipAddress;
     private String agentSessionId;
     private String agentVersion;
+    private String bundleVersion;
+    private Long systemBootTimeEpochSeconds;
+    private Boolean scmateAvailable;
+    private String scmateAvailabilityReason;
+    private String scmateMode;
+    private String scmateSchedule;
+    private String scmateSelectedPoint;
+    private String scmateProductVariant;
+    private String scmateStateSource;
+    private Boolean scmateTransitionPending;
+    private Long scmateRawState;
+    private java.time.LocalDateTime scmateBaselineCreatedAt;
+    private java.time.LocalDateTime scmateSnap1CreatedAt;
+    private java.time.LocalDateTime scmateSnap2CreatedAt;
+    private String scmateError;
 
     /**
      * 다중 트래픽 샘플 (신규): [[inboundKbps, outboundKbps], ...]

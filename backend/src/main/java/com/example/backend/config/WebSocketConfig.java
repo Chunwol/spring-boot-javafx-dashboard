@@ -1,10 +1,17 @@
 package com.example.backend.config;
 
+import com.example.backend.remotecontrol.VncRelayHandshakeInterceptor;
+import com.example.backend.remotecontrol.VncRelayWebSocketHandler;
+import com.example.backend.security.WebSocketAuthChannelInterceptor;
+import com.example.backend.security.JwtExpiryWebSocketHandlerDecoratorFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
@@ -15,7 +22,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * <p>엔드포인트 구조:
  * <ul>
  *   <li>{@code /ws} — SockJS 폴백을 포함한 WebSocket 연결 엔드포인트.
- *       JavaFX 클라이언트와 브라우저 대시보드가 이 경로로 접속한다.</li>
+ *       브라우저 대시보드가 이 경로로 접속한다.</li>
  *   <li>{@code /topic/**} — 서버가 구독자에게 브로드캐스트하는 주제 채널
  *       (예: {@code /topic/alerts}, {@code /topic/traffic}).</li>
  *   <li>{@code /app/**} — 클라이언트에서 서버로 메시지를 보내는 접두사.</li>
@@ -35,8 +42,28 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * </pre>
  */
 @Configuration
+@EnableWebSocket
 @EnableWebSocketMessageBroker
-public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer, WebSocketConfigurer {
+
+    private final CorsProperties corsProperties;
+    private final WebSocketAuthChannelInterceptor authChannelInterceptor;
+    private final VncRelayWebSocketHandler vncRelayWebSocketHandler;
+    private final VncRelayHandshakeInterceptor vncRelayHandshakeInterceptor;
+    private final JwtExpiryWebSocketHandlerDecoratorFactory jwtExpiryDecoratorFactory;
+
+    public WebSocketConfig(
+            CorsProperties corsProperties,
+            WebSocketAuthChannelInterceptor authChannelInterceptor,
+            VncRelayWebSocketHandler vncRelayWebSocketHandler,
+            VncRelayHandshakeInterceptor vncRelayHandshakeInterceptor,
+            JwtExpiryWebSocketHandlerDecoratorFactory jwtExpiryDecoratorFactory) {
+        this.corsProperties = corsProperties;
+        this.authChannelInterceptor = authChannelInterceptor;
+        this.vncRelayWebSocketHandler = vncRelayWebSocketHandler;
+        this.vncRelayHandshakeInterceptor = vncRelayHandshakeInterceptor;
+        this.jwtExpiryDecoratorFactory = jwtExpiryDecoratorFactory;
+    }
 
     /** 인바운드 채널(클라이언트 → 서버) 코어 스레드 수 */
     @Value("${app.runtime.websocket.inbound-core-pool-size:4}")
@@ -82,12 +109,21 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws").setAllowedOriginPatterns("*").withSockJS();
+        registry.addEndpoint("/ws")
+                .setAllowedOrigins(corsProperties.getAllowedOrigins().toArray(String[]::new))
+                .withSockJS();
+    }
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(vncRelayWebSocketHandler, "/vnc-relay/*")
+                .addInterceptors(vncRelayHandshakeInterceptor)
+                .setAllowedOrigins(corsProperties.getAllowedOrigins().toArray(String[]::new));
     }
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.taskExecutor()
+        registration.interceptors(authChannelInterceptor).taskExecutor()
                 .corePoolSize(Math.max(2, inboundCorePoolSize))
                 .maxPoolSize(Math.max(inboundCorePoolSize, inboundMaxPoolSize))
                 .queueCapacity(Math.max(100, inboundQueueCapacity));
@@ -103,6 +139,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureWebSocketTransport(WebSocketTransportRegistration registry) {
+        registry.addDecoratorFactory(jwtExpiryDecoratorFactory);
         registry.setMessageSizeLimit(Math.max(256 * 1024, messageSizeLimitBytes));
         registry.setSendBufferSizeLimit(Math.max(512 * 1024, sendBufferSizeLimitBytes));
         registry.setSendTimeLimit(Math.max(5000, sendTimeLimitMs));

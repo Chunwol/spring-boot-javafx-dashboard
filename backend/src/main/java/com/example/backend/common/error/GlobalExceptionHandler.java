@@ -5,6 +5,7 @@ import com.example.backend.common.exception.ResourceNotFoundException;
 import com.example.backend.common.exception.InvalidRequestException;
 import com.example.backend.common.exception.ConflictException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -12,8 +13,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -175,6 +178,25 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(resp);
     }
 
+    @ExceptionHandler(HttpMessageNotWritableException.class)
+    public void handleMessageNotWritable(
+            HttpMessageNotWritableException ex,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        if (request.getRequestURI().startsWith("/ws/")) {
+            log.debug("SockJS transport response closed at {}: {}", request.getRequestURI(), ex.getMessage());
+            if (!response.isCommitted()) {
+                response.setStatus(HttpServletResponse.SC_NO_CONTENT);
+            }
+            return;
+        }
+
+        log.error("Response serialization failed at {} {}", request.getMethod(), request.getRequestURI(), ex);
+        if (!response.isCommitted()) {
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
+    }
+
     /**
      * 요청 파라미터 타입 불일치 처리 (400).
      * 경로 변수나 쿼리 파라미터가 대상 타입으로 변환되지 않을 때 발생한다.
@@ -243,6 +265,18 @@ public class GlobalExceptionHandler {
                 HttpStatus.NOT_FOUND.value(),
                 "NOT_FOUND",
                 "요청한 리소스를 찾을 수 없습니다.",
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(resp);
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleNoResourceFound(
+            NoResourceFoundException ex,
+            HttpServletRequest request) {
+        ApiErrorResponse resp = ApiErrorResponse.of(
+                HttpStatus.NOT_FOUND.value(),
+                "NOT_FOUND",
+                "요청한 경로를 찾을 수 없습니다.",
                 request.getRequestURI());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(resp);
     }

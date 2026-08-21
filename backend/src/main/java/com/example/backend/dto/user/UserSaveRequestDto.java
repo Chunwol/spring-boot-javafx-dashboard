@@ -1,6 +1,7 @@
 package com.example.backend.dto.user;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -13,9 +14,12 @@ public class UserSaveRequestDto {
     private String username;
 
     @NotBlank(message = "password는 필수입니다.")
-    @Size(max = 100, message = "password는 100자를 초과할 수 없습니다.")
+    @Size(min = 8, max = 100, message = "password는 8자 이상 100자 이하로 입력해야 합니다.")
     private String password;
 
     @NotBlank(message = "email은 필수입니다.")
     private String email;
+
+    @Pattern(regexp = "^(?i)(ADMIN|USER|VIEWER)?$", message = "role은 ADMIN/USER/VIEWER 중 하나여야 합니다.")
+    private String role;
 }

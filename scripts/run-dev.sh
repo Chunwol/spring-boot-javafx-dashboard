@@ -1,7 +1,7 @@
 #!/bin/bash
 # Development Mode - Integrated (Mac/Linux/Git Bash)
 # Usage: ./scripts/run-dev.sh
-# Builds project and starts both Backend and Frontend
+# Builds project and starts Backend plus the React development server
 
 set -e
 
@@ -87,12 +87,12 @@ echo -e "${GREEN}✓ Backend started${NC}"
 echo ""
 
 # Start frontend
-echo -e "${YELLOW}[4/4] Starting Frontend...${NC}"
-./gradlew :frontend:run > frontend.log 2>&1 &
+echo -e "${YELLOW}[4/4] Starting Web Frontend...${NC}"
+(cd web-frontend && npm ci && npm run dev) > web-frontend.log 2>&1 &
 FRONTEND_PID=$!
-echo "Frontend PID: $FRONTEND_PID"
+echo "Web Frontend PID: $FRONTEND_PID"
 
-echo -e "${GREEN}✓ Frontend starting${NC}"
+echo -e "${GREEN}✓ Web Frontend starting${NC}"
 echo ""
 
 # Display info
@@ -100,11 +100,11 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}=== Services Running ===${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo "Backend:  http://localhost:8888"
-echo "Frontend: JavaFX GUI window"
+echo "Web UI:   http://localhost:5173"
 echo ""
 echo "Logs:"
 echo "  Backend:  $PROJECT_ROOT/backend.log"
-echo "  Frontend: $PROJECT_ROOT/frontend.log"
+echo "  Web UI:   $PROJECT_ROOT/web-frontend.log"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}"
 echo -e "${GREEN}============================================================${NC}"

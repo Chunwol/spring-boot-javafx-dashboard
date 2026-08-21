@@ -1,0 +1,44 @@
+{
+  "name": "web-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/node": "^26.1.2",
+    "@types/novnc__novnc": "^1.6.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/sockjs-client": "^1.5.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^27.0.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.7.1",
+    "@novnc/novnc": "^1.7.0",
+    "@stomp/stompjs": "^7.3.0",
+    "@tanstack/react-query": "^5.101.4",
+    "fflate": "^0.8.3",
+    "lucide-react": "^1.29.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-hook-form": "^7.84.0",
+    "react-router-dom": "7.18.2",
+    "recharts": "^3.10.1",
+    "sockjs-client": "^1.6.1",
+    "zod": "^4.4.3"
+  }
+}

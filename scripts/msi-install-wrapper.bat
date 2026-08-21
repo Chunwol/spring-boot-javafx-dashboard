@@ -33,11 +33,16 @@ if errorlevel 1 (
 )
 
 echo [2/2] Starting scheduled task...
-schtasks /Run /TN "PCAgent" >nul 2>&1
+schtasks /Run /TN "PCAgentWatchdog" >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Scheduled task start failed. It will start automatically after reboot.
+    schtasks /Run /TN "PCAgent" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Scheduled task start failed. It will start automatically after reboot.
+    ) else (
+        echo [OK] Legacy PCAgent scheduled task started.
+    )
 ) else (
-    echo [OK] PCAgent scheduled task started.
+    echo [OK] PCAgentWatchdog scheduled task started.
 )
 
 echo.

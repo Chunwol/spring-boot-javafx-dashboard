@@ -175,6 +175,31 @@ class AgentConfigLoaderTest {
     }
 
     @Test
+    void load_legacyProductionHttpUrl_migratesAndPersistsHttpsUrl() throws Exception {
+        Path configPath = tempDir.resolve("config.json");
+        Files.writeString(configPath, """
+                {
+                  "serverUrl": "http://223.194.166.251:8080/",
+                  "agentToken": "preserved-token"
+                }
+                """);
+        AgentConfigLoader loader = new AgentConfigLoader(configPath);
+
+        AgentConfig config = loader.load();
+        AgentConfig persisted = new ObjectMapper().readValue(configPath.toFile(), AgentConfig.class);
+
+        assertThat(config.getServerUrl()).isEqualTo("https://pelmon.kro.kr");
+        assertThat(persisted.getServerUrl()).isEqualTo("https://pelmon.kro.kr");
+        assertThat(persisted.getAgentToken()).isEqualTo("preserved-token");
+    }
+
+    @Test
+    void migrateLegacyProductionServerUrl_doesNotRewriteUnrelatedHttpServer() {
+        assertThat(AgentConfigLoader.migrateLegacyProductionServerUrl("http://localhost:8888"))
+                .isEqualTo("http://localhost:8888");
+    }
+
+    @Test
     void resolveDefaultBaseDir_prefersProgramDataOverLegacyAppData() throws Exception {
         Path workingDir = tempDir.resolve("working");
         Path launchDir = tempDir.resolve("launch");

@@ -114,7 +114,7 @@ if ($IncludeBuildMetrics) {
     $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
     $gradleBat = Join-Path $repoRoot "gradlew.bat"
     if (Test-Path $gradleBat) {
-        $buildMetrics += Measure-CommandDuration -FilePath $gradleBat -Arguments @(':frontend:classes') -Label 'frontend classes build'
+        $buildMetrics += Measure-CommandDuration -FilePath $gradleBat -Arguments @(':backend:classes', '-PskipWebFrontendBuild=true') -Label 'backend classes build'
     }
 }
 

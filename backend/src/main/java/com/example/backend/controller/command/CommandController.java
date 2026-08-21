@@ -1,6 +1,7 @@
 package com.example.backend.controller.command;
 
 import com.example.backend.dto.command.CommandRequestDto;
+import com.example.backend.dto.command.CommandStatusBatchRequestDto;
 import com.example.backend.service.command.CommandLifecycleService;
 import com.example.backend.service.command.CommandPollRegistry;
 import com.example.backend.service.heartbeat.HeartbeatService;
@@ -12,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.async.DeferredResult;
@@ -64,14 +66,16 @@ public class CommandController {
         String agentMac = resolveAgentMac(request);
         if (agentMac == null) {
             DeferredResult<ResponseEntity<?>> err = new DeferredResult<>();
-            err.setResult(ResponseEntity.status(401).body(Map.of("error", "Missing agent identity")));
+            err.setResult(ResponseEntity.status(401).cacheControl(CacheControl.noStore())
+                    .body(Map.of("error", "Missing agent identity")));
             return err;
         }
         String canonical = canonicalMac(agentMac);
         Map<String, Object> cmd = heartbeatService.dispatchNextCommand(agentMac);
         if (cmd != null) {
             DeferredResult<ResponseEntity<?>> result = new DeferredResult<>();
-            result.setResult(ResponseEntity.ok(Map.of("command", cmd)));
+            result.setResult(ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                    .body(Map.of("command", cmd)));
             return result;
         }
         return commandPollRegistry.register(canonical, LONG_POLL_TIMEOUT_MS);
@@ -82,6 +86,7 @@ public class CommandController {
     @Operation(
         summary = "PC 명령 발행",
         description = "관리자가 PC에 원격 명령(종료, 재부팅, WOL, 스크립트 등)을 발행합니다. " +
+                      "MULTI 범위는 targetMacs 목록을 한 번에 큐에 저장합니다. " +
                       "GROUP + WOL인 경우 그룹의 온라인 에이전트를 통해 릴레이됩니다."
     )
     @ApiResponse(responseCode = "202", description = "명령 발행 성공 (큐에 저장됨)")
@@ -158,6 +163,26 @@ public class CommandController {
             return ResponseEntity.ok(commandLifecycleService.findCommandById(taskId));
         }
         return ResponseEntity.ok(commandLifecycleService.listCommands(status, page, size));
+    }
+
+    @PostMapping("/commands/status")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "명령 상태 일괄 조회", description = "대량 작업의 taskId를 한 요청으로 조회합니다.")
+    public ResponseEntity<?> commandStatuses(@Valid @RequestBody CommandStatusBatchRequestDto request) {
+        return ResponseEntity.ok(commandLifecycleService.findCommandsByIds(request.getTaskIds()));
+    }
+
+    @PostMapping("/commands/{taskId}/cancel")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "대기 명령 취소",
+        description = "명령 종류와 관계없이 아직 에이전트에 전달되지 않은 QUEUED 명령을 취소합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "명령 취소 성공")
+    @ApiResponse(responseCode = "409", description = "이미 전달 또는 실행되어 취소할 수 없음")
+    public ResponseEntity<Map<String, Object>> cancelCommand(
+            @Parameter(description = "명령 ID") @PathVariable Long taskId) {
+        return ResponseEntity.ok(commandLifecycleService.cancelQueuedCommand(taskId));
     }
 
     // ── HTTP 유틸리티 ────────────────────────────────────────────────────────

@@ -36,6 +36,9 @@ class ApiSmokeIntegrationTest {
 
     private static final String ADMIN_USERNAME = "smoke-admin";
     private static final String ADMIN_PASSWORD = "smoke-password-123!";
+    private static final String VIEWER_USERNAME = "smoke-viewer";
+    private static final String VIEWER_PASSWORD = "smoke-viewer-password-123!";
+    private static final String JWT_SECRET = "api-smoke-integration-test-signing-key-2026";
     private static final String INSTALL_KEY = "SMOKE-INSTALL-KEY-2026";
     private static final String AGENT_MAC = "AA:BB:CC:DD:EE:77";
     private static final String AGENT_HOST = "SMOKE-LAB-77";
@@ -61,11 +64,15 @@ class ApiSmokeIntegrationTest {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + normalizePathForJdbc(SMOKE_DB_PATH));
         registry.add("app.scripts.dir", () -> SMOKE_UPLOAD_DIR.toString());
         registry.add("agent.install-key", () -> INSTALL_KEY);
+        registry.add("app.jwt.secret", () -> JWT_SECRET);
         registry.add("DEFAULT_ADMIN_USERNAME", () -> ADMIN_USERNAME);
         registry.add("DEFAULT_ADMIN_PASSWORD", () -> ADMIN_PASSWORD);
         registry.add("DEFAULT_ADMIN_EMAIL", () -> "smoke-admin@example.com");
         registry.add("DEFAULT_ADMIN_SYNC_ON_STARTUP", () -> "true");
-        registry.add("DEFAULT_VIEWER_SYNC_ON_STARTUP", () -> "false");
+        registry.add("DEFAULT_VIEWER_USERNAME", () -> VIEWER_USERNAME);
+        registry.add("DEFAULT_VIEWER_PASSWORD", () -> VIEWER_PASSWORD);
+        registry.add("DEFAULT_VIEWER_EMAIL", () -> "smoke-viewer@example.com");
+        registry.add("DEFAULT_VIEWER_SYNC_ON_STARTUP", () -> "true");
     }
 
     @AfterAll
@@ -93,6 +100,52 @@ class ApiSmokeIntegrationTest {
         assertCommandCompleted(bearerToken, queuedTaskId);
 
         uploadAndDownloadScript(bearerToken, agentToken);
+    }
+
+    @Test
+    void smoke_openApiDocumentIsAvailable() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "http://localhost:" + port + "/v3/api-docs", String.class);
+
+        Assertions.assertEquals(200, response.getStatusCode().value());
+        Assertions.assertTrue(response.getBody() != null && response.getBody().contains("\"openapi\""),
+                "OpenAPI 문서 응답에 openapi 필드가 없습니다.");
+    }
+
+    @Test
+    void smoke_autoLoginCookieRefreshesAndLogoutClearsIt() throws Exception {
+        Map<String, Object> payload = Map.of(
+                "username", ADMIN_USERNAME,
+                "password", ADMIN_PASSWORD,
+                "autoLogin", true
+        );
+        ResponseEntity<String> login = restTemplate.postForEntity(
+                baseUrl() + "/auth/login", jsonEntity(payload, null), String.class);
+        String loginCookie = login.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
+        Assertions.assertNotNull(loginCookie, "자동 로그인 쿠키가 발급되지 않았습니다.");
+        Assertions.assertTrue(loginCookie.contains("classroom_refresh="));
+        Assertions.assertTrue(loginCookie.contains("HttpOnly"));
+        Assertions.assertTrue(loginCookie.contains("SameSite=Strict"));
+        Assertions.assertTrue(loginCookie.contains("Path=/api/v1/auth"));
+
+        HttpHeaders cookieHeaders = new HttpHeaders();
+        cookieHeaders.add(HttpHeaders.COOKIE, loginCookie.split(";", 2)[0]);
+        ResponseEntity<String> refresh = restTemplate.exchange(
+                baseUrl() + "/auth/refresh",
+                HttpMethod.POST,
+                new HttpEntity<>(cookieHeaders),
+                String.class);
+        Assertions.assertEquals(200, refresh.getStatusCode().value());
+        Assertions.assertFalse(stringValue(parseMap(refresh.getBody()).get("token")).isBlank());
+        Assertions.assertTrue(refresh.getHeaders().getFirst(HttpHeaders.SET_COOKIE).contains("classroom_refresh="));
+
+        ResponseEntity<String> logout = restTemplate.exchange(
+                baseUrl() + "/auth/logout",
+                HttpMethod.POST,
+                new HttpEntity<>(cookieHeaders),
+                String.class);
+        Assertions.assertEquals(204, logout.getStatusCode().value());
+        Assertions.assertTrue(logout.getHeaders().getFirst(HttpHeaders.SET_COOKIE).contains("Max-Age=0"));
     }
 
     @Test
@@ -159,11 +212,53 @@ class ApiSmokeIntegrationTest {
         Assertions.assertEquals("0", stringValue(command.get("exitCode")), "중복 결과 보고로 exitCode가 변경되면 안 됩니다.");
     }
 
+    @Test
+    void viewer_can_save_personal_settings_but_admin_command_api_returns_forbidden() throws Exception {
+        String viewerToken = loginAndGetBearerToken(VIEWER_USERNAME, VIEWER_PASSWORD);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(viewerToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<String> settingResponse = restTemplate.exchange(
+                baseUrl() + "/settings/alert-type-filter",
+                HttpMethod.PUT,
+                new HttpEntity<>("{\"value\":\"[]\"}", headers),
+                String.class);
+        Assertions.assertEquals(204, settingResponse.getStatusCode().value());
+
+        try {
+            restTemplate.exchange(
+                    baseUrl() + "/commands/status",
+                    HttpMethod.POST,
+                    new HttpEntity<>("{\"taskIds\":[]}", headers),
+                    String.class);
+            Assertions.fail("VIEWER의 관리자 명령 API 호출은 거부되어야 합니다.");
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(403, ex.getStatusCode().value());
+        }
+
+        try {
+            restTemplate.exchange(
+                    baseUrl() + "/definitely-missing-smoke-route",
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class);
+            Assertions.fail("없는 API 경로는 404를 반환해야 합니다.");
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(404, ex.getStatusCode().value());
+        }
+    }
+
     private String loginAndGetBearerToken() throws Exception {
+        return loginAndGetBearerToken(ADMIN_USERNAME, ADMIN_PASSWORD);
+    }
+
+    private String loginAndGetBearerToken(String username, String password) throws Exception {
         String url = baseUrl() + "/auth/login";
         Map<String, Object> payload = Map.of(
-                "username", ADMIN_USERNAME,
-                "password", ADMIN_PASSWORD
+                "username", username,
+                "password", password
         );
 
         ResponseEntity<String> response = restTemplate.postForEntity(url, jsonEntity(payload, null), String.class);

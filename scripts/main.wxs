@@ -149,8 +149,8 @@
       <RemoveExistingProducts Before="CostInitialize"/>
       <Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"/>
 
-      <Custom Action="CA_SetExe" After="CostFinalize">NOT Installed</Custom>
-      <Custom Action="CA_PCAgentSetup" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="CA_SetExe" After="CostFinalize">NOT Installed OR JP_UPGRADABLE_FOUND OR REINSTALL</Custom>
+      <Custom Action="CA_PCAgentSetup" After="InstallFiles">NOT Installed OR JP_UPGRADABLE_FOUND OR REINSTALL</Custom>
     </InstallExecuteSequence>
 
     <InstallUISequence>

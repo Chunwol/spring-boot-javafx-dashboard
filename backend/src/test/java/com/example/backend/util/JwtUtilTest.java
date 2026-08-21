@@ -17,6 +17,7 @@ class JwtUtilTest {
         jwtUtil = new JwtUtil();
         ReflectionTestUtils.setField(jwtUtil, "secret", "test-secret-key-that-is-at-least-32-bytes-long!!");
         ReflectionTestUtils.setField(jwtUtil, "expirationMs", 3600000L);
+        ReflectionTestUtils.setField(jwtUtil, "refreshExpirationMs", 7776000000L);
         jwtUtil.init();
     }
 
@@ -58,5 +59,22 @@ class JwtUtilTest {
         String token1 = jwtUtil.generateToken("user1");
         String token2 = jwtUtil.generateToken("user2");
         assertThat(token1).isNotEqualTo(token2);
+    }
+
+    @Test
+    void refreshTokenIsAcceptedOnlyByRefreshValidation() {
+        String refreshToken = jwtUtil.generateRefreshToken("admin");
+
+        assertThat(jwtUtil.validateRefreshAndGetClaims(refreshToken).getSubject()).isEqualTo("admin");
+        assertThatThrownBy(() -> jwtUtil.validateAndGetClaims(refreshToken))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    void accessTokenCannotBeUsedForRefresh() {
+        String accessToken = jwtUtil.generateToken("admin");
+
+        assertThatThrownBy(() -> jwtUtil.validateRefreshAndGetClaims(accessToken))
+                .isInstanceOf(Exception.class);
     }
 }

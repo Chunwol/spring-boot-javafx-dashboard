@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -40,6 +42,15 @@ public class FileDistributionRequestSecurity {
 
     public void validateOrThrow(HttpServletRequest request, String canonicalPayload) {
         if (!enabled) return;
+
+        // Browser administrators are already authenticated by JWT. The shared HMAC secret must
+        // never be shipped in the SPA; keep signature validation for non-user integrations only.
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()))) {
+            return;
+        }
 
         if (requireHttps && !isHttps(request)) {
             throw new IllegalArgumentException("HTTPS required");

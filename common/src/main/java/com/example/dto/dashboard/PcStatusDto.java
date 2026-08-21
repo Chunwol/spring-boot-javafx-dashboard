@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -39,6 +40,30 @@ public class PcStatusDto {
     @Schema(description = "에이전트 버전", example = "1.2.0")
     private String agentVersion;
 
+    @Schema(description = "검증 완료된 전체 설치 번들 버전", example = "1.1.20")
+    private String bundleVersion;
+
+    private Long systemBootTimeEpochSeconds;
+
     @Schema(description = "고장 사유", example = "메인보드 불량")
     private String brokenNote;
+
+    private Boolean scmateAvailable;
+    private String scmateAvailabilityReason;
+    private String scmateMode;
+    private String scmateSchedule;
+    private String scmateSelectedPoint;
+    private String scmateProductVariant;
+    private String scmateStateSource;
+    private Boolean scmateTransitionPending;
+    private Long scmateRawState;
+    private LocalDateTime scmateObservedAt;
+    private LocalDateTime scmateBaselineUpdatedAt;
+    private LocalDateTime scmateBaselineCreatedAt;
+    private LocalDateTime scmateSnap1CreatedAt;
+    private LocalDateTime scmateSnap2CreatedAt;
+    private String scmateError;
+    private String scmateWorkflowStage;
+    private String scmateWorkflowId;
+    private List<String> scmateAllowedActions;
 }

@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.Principal;
 import java.util.Map;
 
 /**
@@ -25,7 +26,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/settings")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('ADMIN','USER')")
+@PreAuthorize("hasAnyRole('ADMIN','USER','VIEWER')")
 @Tag(name = "User Settings", description = "사용자 UI 설정 키-값 저장/조회 API")
 public class UserSettingController {
 
@@ -35,8 +36,9 @@ public class UserSettingController {
     @Operation(summary = "설정값 조회", description = "키에 해당하는 UI 설정값을 조회합니다. 없으면 빈 문자열 반환.")
     @ApiResponse(responseCode = "200", description = "설정값 조회 성공")
     public ResponseEntity<Map<String, String>> get(
-            @Parameter(description = "설정 키", example = "theme") @PathVariable String key) {
-        return ResponseEntity.ok(Map.of("key", key, "value", userSettingService.get(key)));
+            @Parameter(description = "설정 키", example = "theme") @PathVariable String key,
+            Principal principal) {
+        return ResponseEntity.ok(Map.of("key", key, "value", userSettingService.get(principal.getName(), key)));
     }
 
     @PutMapping("/{key}")
@@ -44,8 +46,9 @@ public class UserSettingController {
     @ApiResponse(responseCode = "204", description = "저장 성공")
     public ResponseEntity<Void> put(
             @Parameter(description = "설정 키", example = "theme") @PathVariable String key,
-            @RequestBody Map<String, String> body) {
-        userSettingService.save(key, body.getOrDefault("value", ""));
+            @RequestBody Map<String, String> body,
+            Principal principal) {
+        userSettingService.save(principal.getName(), key, body.getOrDefault("value", ""));
         return ResponseEntity.noContent().build();
     }
 }

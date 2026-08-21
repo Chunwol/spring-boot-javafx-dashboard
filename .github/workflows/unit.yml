@@ -27,7 +27,7 @@ jobs:
       - name: Run Unit Tests
         run: |
           chmod +x ./gradlew
-          ./gradlew :common:test :agent:test :backend:unitTest :frontend:unitTest --no-daemon
+          ./gradlew :common:test :agent:test :backend:unitTest -PskipWebFrontendBuild=true --no-daemon
 
       - name: Upload Test Results
         if: always()
@@ -41,8 +41,6 @@ jobs:
             agent/build/reports/tests/**
             backend/build/test-results/**
             backend/build/reports/tests/**
-            frontend/build/test-results/**
-            frontend/build/reports/tests/**
           if-no-files-found: warn
 
       - name: Repro Guide

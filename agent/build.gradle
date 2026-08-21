@@ -11,7 +11,7 @@ plugins {
 }
 
 group = 'com.example'
-version = '1.1.12'
+version = '1.1.68'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_25
@@ -32,6 +32,9 @@ dependencies {
     // JSON 직렬화
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.1'
+
+    // SCMATE native API access without exposing its credential in process arguments
+    implementation 'net.java.dev.jna:jna:5.19.1'
 
     // 로깅 (rolling file + 콘솔)
     implementation 'ch.qos.logback:logback-classic:1.5.6'
@@ -83,6 +86,54 @@ jar {
 }
 
 def bundledJreDir = file("${rootDir}/dist/jre-${System.currentTimeMillis()}")
+
+def sha256File = { File source ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    source.withInputStream { input ->
+        byte[] buffer = new byte[64 * 1024]
+        int read
+        while ((read = input.read(buffer)) > 0) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    digest.digest().collect { String.format('%02x', it & 0xff) }.join()
+}
+
+def writeBundleManifest = { File bundleDir ->
+    def allowedRoots = ['agent.jar', 'agent-watchdog.ps1', 'install-helper.ps1',
+                        'agent-bundle-updater.ps1', 'jre/', 'vnc/']
+    def files = fileTree(bundleDir).files
+            .findAll { file ->
+                def relative = bundleDir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+                allowedRoots.any { allowed -> relative == allowed || relative.startsWith(allowed) }
+            }
+            .sort { left, right ->
+                bundleDir.toPath().relativize(left.toPath()).toString() <=>
+                        bundleDir.toPath().relativize(right.toPath()).toString()
+            }
+            .collect { file ->
+                [
+                        path  : bundleDir.toPath().relativize(file.toPath()).toString().replace('\\', '/'),
+                        size  : file.length(),
+                        sha256: sha256File(file)
+                ]
+            }
+    def manifest = [
+            schemaVersion          : 1,
+            bundleVersion          : project.version.toString().replaceAll('-SNAPSHOT', ''),
+            minimumBootstrapVersion: '1.1.20',
+            createdAt              : java.time.OffsetDateTime.now().toString(),
+            components             : [
+                    agent  : project.version.toString().replaceAll('-SNAPSHOT', ''),
+                    jre    : System.getProperty('java.runtime.version'),
+                    vnc    : '1.8.2.2',
+                    watchdog: project.version.toString().replaceAll('-SNAPSHOT', '')
+            ],
+            files                  : files
+    ]
+    new File(bundleDir, 'bundle-manifest.json').setText(
+            groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest)), 'UTF-8')
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // 번들 JRE 생성 (jlink) — Java 설치 불필요 배포용
@@ -194,9 +245,13 @@ tasks.register('prepareManualInstallSet') {
             from("${rootDir}/scripts/uninstall.bat")
             from("${rootDir}/scripts/agent-watchdog.ps1")
             from("${rootDir}/scripts/install-helper.ps1")
+            from("${rootDir}/scripts/agent-bundle-updater.ps1")
+            from("${rootDir}/scripts/manual-install-cleanup.ps1")
+            from("${rootDir}/scripts/manual-install.marker")
             into bundleDir
             rename('install.bat', 'install-agent.bat')
             rename('uninstall.bat', 'uninstall-agent.bat')
+            rename('manual-install.marker', '.pcagent-manual-package')
         }
 
         copy {
@@ -211,6 +266,8 @@ tasks.register('prepareManualInstallSet') {
             into new File(bundleDir, 'vnc')
         }
 
+        writeBundleManifest(bundleDir)
+
         println "[OK] Manual install set created: ${bundleDir.absolutePath}"
     }
 }
@@ -224,6 +281,51 @@ tasks.register('zipManualInstallSet', Zip) {
     from("${rootDir}/dist/manual-install/PCAgent-${appVersion}-manual")
     archiveFileName = "PCAgent-${appVersion}-manual.zip"
     destinationDirectory = file("${rootDir}/dist/manual-install")
+}
+
+tasks.register('prepareFullUpdateBundle') {
+    group = 'distribution'
+    description = 'Create transactional full update bundle with agent, JRE, VNC, and watchdog'
+    dependsOn jar, 'buildJre'
+
+    doLast {
+        def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+        def bundleDir = file("${rootDir}/dist/update-bundle/PCAgent-${appVersion}-update-bundle")
+        bundleDir.deleteDir()
+        bundleDir.mkdirs()
+
+        copy {
+            from("${layout.buildDirectory.get()}/libs/agent.jar")
+            into bundleDir
+        }
+        copy {
+            from(bundledJreDir)
+            into new File(bundleDir, 'jre')
+        }
+        copy {
+            from("${rootDir}/vnc")
+            into new File(bundleDir, 'vnc')
+        }
+        copy {
+            from("${rootDir}/scripts/agent-watchdog.ps1")
+            from("${rootDir}/scripts/install-helper.ps1")
+            from("${rootDir}/scripts/agent-bundle-updater.ps1")
+            into bundleDir
+        }
+        writeBundleManifest(bundleDir)
+        println "[OK] Full update bundle created: ${bundleDir.absolutePath}"
+    }
+}
+
+tasks.register('zipFullUpdateBundle', Zip) {
+    group = 'distribution'
+    description = 'Zip transactional full update bundle'
+    dependsOn 'prepareFullUpdateBundle'
+
+    def appVersion = project.version.toString().replaceAll('-SNAPSHOT', '')
+    from("${rootDir}/dist/update-bundle/PCAgent-${appVersion}-update-bundle")
+    archiveFileName = "PCAgent-${appVersion}-update-bundle.zip"
+    destinationDirectory = file("${rootDir}/dist/update-bundle")
 }
 
 // ═══════════════════════════════════════════════════════════════════════

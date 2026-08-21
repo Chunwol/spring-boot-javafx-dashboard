@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<?import javafx.scene.control.TextArea?>
-
-<TextArea fx:id="textInput" prefRowCount="4" promptText="공지사항을 입력하세요"
-          xmlns:fx="http://javafx.com/fxml" />

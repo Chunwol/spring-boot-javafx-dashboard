@@ -15,10 +15,12 @@ import com.example.backend.service.filedist.FileDistributionOrchestrator;
 import com.example.backend.service.realtime.WebSocketService;
 import com.example.backend.service.status.OperationalMetricsService;
 import com.example.backend.service.traffic.TrafficLogFlushService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -63,6 +65,7 @@ import java.util.concurrent.ConcurrentMap;
 public class HeartbeatService {
 
     private static final Logger log = LoggerFactory.getLogger(HeartbeatService.class);
+    private static final long BOOT_TIME_CHANGE_TOLERANCE_SECONDS = 5L;
 
     private final PcMasterRepository pcMasterRepository;
     private final ClassroomResolutionService classroomResolutionService;
@@ -73,6 +76,7 @@ public class HeartbeatService {
     private final FileDistributionOrchestrator fileDistributionOrchestrator;
     private final OperationalMetricsService operationalMetricsService;
     private final TrafficLogFlushService trafficLogFlushService;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.heartbeat.persist-interval-seconds:30}")
     private int heartbeatPersistIntervalSeconds;
@@ -86,11 +90,20 @@ public class HeartbeatService {
     @Value("${app.command.max-retries:3}")
     private int maxCommandRetries;
 
+    @Value("${app.command.queue-ttl-seconds:300}")
+    private long commandQueueTtlSeconds;
+
     @Value("${app.command.dispatch-on-heartbeat:true}")
     private boolean dispatchCommandOnHeartbeat;
 
     @Value("${app.heartbeat.auto-catchup-check-interval-seconds:300}")
     private int autoCatchupCheckIntervalSeconds;
+
+    @Value("${app.scmate.cli-username:}")
+    private String scmateCliUsername;
+
+    @Value("${app.scmate.cli-password:}")
+    private String scmateCliPassword;
 
     private final ConcurrentMap<String, LocalDateTime> lastPcPersistedAt = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, LocalDateTime> lastTrafficPersistedAt = new ConcurrentHashMap<>();
@@ -120,6 +133,22 @@ public class HeartbeatService {
         String previousRole = pc.getRole();
         Long previousGroupId = pc.getGroupId();
         String previousAgentSessionId = pc.getLastAgentSessionId();
+        Long previousSystemBootTimeEpochSeconds = pc.getSystemBootTimeEpochSeconds();
+        Boolean previousScmateAvailable = pc.getScmateAvailable();
+        String previousScmateAvailabilityReason = pc.getScmateAvailabilityReason();
+        String previousScmateMode = pc.getScmateMode();
+        String previousScmateSchedule = pc.getScmateSchedule();
+        String previousScmateSelectedPoint = pc.getScmateSelectedPoint();
+        String previousScmateProductVariant = pc.getScmateProductVariant();
+        String previousScmateStateSource = pc.getScmateStateSource();
+        Boolean previousScmateTransitionPending = pc.getScmateTransitionPending();
+        Long previousScmateRawState = pc.getScmateRawState();
+        LocalDateTime previousScmateBaselineCreatedAt = pc.getScmateBaselineCreatedAt();
+        LocalDateTime previousScmateSnap1CreatedAt = pc.getScmateSnap1CreatedAt();
+        LocalDateTime previousScmateSnap2CreatedAt = pc.getScmateSnap2CreatedAt();
+        String previousScmateError = pc.getScmateError();
+        String previousScmateWorkflowStage = pc.getScmateWorkflowStage();
+        LocalDateTime previousScmateObservedAt = pc.getScmateObservedAt();
 
         pc.setPcName(heartbeat.getHostname());
         pc.setIpAddress(heartbeat.getIpAddress());
@@ -127,6 +156,65 @@ public class HeartbeatService {
         pc.setLastAgentSessionId(normalizeSessionId(heartbeat.getAgentSessionId()));
         if (heartbeat.getAgentVersion() != null && !heartbeat.getAgentVersion().isBlank()) {
             pc.setAgentVersion(heartbeat.getAgentVersion());
+        }
+        if (heartbeat.getBundleVersion() != null && !heartbeat.getBundleVersion().isBlank()) {
+            pc.setBundleVersion(heartbeat.getBundleVersion().trim());
+        }
+        if (heartbeat.getSystemBootTimeEpochSeconds() != null) {
+            pc.setSystemBootTimeEpochSeconds(heartbeat.getSystemBootTimeEpochSeconds());
+        }
+        if (heartbeat.getScmateAvailable() != null) {
+            String incomingSchedule = normalizeScmateToken(heartbeat.getScmateSchedule());
+            String incomingMode = normalizeScmateMode(heartbeat.getScmateMode(), heartbeat.getScmateSchedule());
+            String incomingSelectedPoint = normalizeScmateToken(heartbeat.getScmateSelectedPoint());
+            String incomingStateSource = normalizeScmateToken(heartbeat.getScmateStateSource());
+            boolean preserveCliVerifiedMode = shouldPreserveCliVerifiedMode(
+                    previousSystemBootTimeEpochSeconds, heartbeat.getSystemBootTimeEpochSeconds(),
+                    previousScmateMode, previousScmateSchedule, previousScmateStateSource,
+                    incomingMode, incomingSchedule, incomingStateSource);
+            pc.setScmateAvailable(heartbeat.getScmateAvailable());
+            pc.setScmateAvailabilityReason(normalizeScmateToken(heartbeat.getScmateAvailabilityReason()));
+            if (!preserveCliVerifiedMode) {
+                pc.setScmateSchedule(incomingSchedule);
+                pc.setScmateMode(incomingMode);
+                pc.setScmateSelectedPoint(incomingSelectedPoint);
+                pc.setScmateStateSource(incomingStateSource);
+                pc.setScmateRawState(heartbeat.getScmateRawState());
+            }
+            pc.setScmateProductVariant(trimToLength(heartbeat.getScmateProductVariant(), 80));
+            pc.setScmateTransitionPending(Boolean.TRUE.equals(heartbeat.getScmateTransitionPending()));
+            if (heartbeat.getScmateBaselineCreatedAt() != null) {
+                pc.setScmateBaselineCreatedAt(heartbeat.getScmateBaselineCreatedAt());
+            }
+            if (heartbeat.getScmateSnap1CreatedAt() != null) {
+                pc.setScmateSnap1CreatedAt(heartbeat.getScmateSnap1CreatedAt());
+            }
+            if (heartbeat.getScmateSnap2CreatedAt() != null) {
+                pc.setScmateSnap2CreatedAt(heartbeat.getScmateSnap2CreatedAt());
+            }
+            String heartbeatScmateError = trimToLength(heartbeat.getScmateError(), 255);
+            if (heartbeatScmateError != null || !"FAILED".equals(pc.getScmateWorkflowStage())) {
+                pc.setScmateError(heartbeatScmateError);
+            }
+            advanceScmateWorkflow(pc);
+            boolean scmateStateChanged = !Objects.equals(previousScmateAvailable, pc.getScmateAvailable())
+                    || !Objects.equals(previousScmateAvailabilityReason, pc.getScmateAvailabilityReason())
+                    || !Objects.equals(previousScmateMode, pc.getScmateMode())
+                    || !Objects.equals(previousScmateSchedule, pc.getScmateSchedule())
+                    || !Objects.equals(previousScmateSelectedPoint, pc.getScmateSelectedPoint())
+                    || !Objects.equals(previousScmateProductVariant, pc.getScmateProductVariant())
+                    || !Objects.equals(previousScmateStateSource, pc.getScmateStateSource())
+                    || !Objects.equals(previousScmateTransitionPending, pc.getScmateTransitionPending())
+                    || !Objects.equals(previousScmateRawState, pc.getScmateRawState())
+                    || !Objects.equals(previousScmateBaselineCreatedAt, pc.getScmateBaselineCreatedAt())
+                    || !Objects.equals(previousScmateSnap1CreatedAt, pc.getScmateSnap1CreatedAt())
+                    || !Objects.equals(previousScmateSnap2CreatedAt, pc.getScmateSnap2CreatedAt())
+                    || !Objects.equals(previousScmateError, pc.getScmateError())
+                    || !Objects.equals(previousScmateWorkflowStage, pc.getScmateWorkflowStage());
+            if (scmateStateChanged || previousScmateObservedAt == null
+                    || Duration.between(previousScmateObservedAt, now).getSeconds() >= heartbeatPersistIntervalSeconds) {
+                pc.setScmateObservedAt(now);
+            }
         }
 
         // 자동 그룹핑 (IP 매칭 실패 시 기존 groupId를 해제)
@@ -152,7 +240,22 @@ public class HeartbeatService {
             || !Objects.equals(previousStatus, pc.getStatus())
             || !Objects.equals(previousRole, pc.getRole())
             || !Objects.equals(previousGroupId, pc.getGroupId())
-            || !Objects.equals(previousAgentSessionId, pc.getLastAgentSessionId());
+            || !Objects.equals(previousAgentSessionId, pc.getLastAgentSessionId())
+            || !Objects.equals(previousSystemBootTimeEpochSeconds, pc.getSystemBootTimeEpochSeconds())
+            || !Objects.equals(previousScmateAvailable, pc.getScmateAvailable())
+            || !Objects.equals(previousScmateAvailabilityReason, pc.getScmateAvailabilityReason())
+            || !Objects.equals(previousScmateMode, pc.getScmateMode())
+            || !Objects.equals(previousScmateSchedule, pc.getScmateSchedule())
+            || !Objects.equals(previousScmateSelectedPoint, pc.getScmateSelectedPoint())
+            || !Objects.equals(previousScmateProductVariant, pc.getScmateProductVariant())
+            || !Objects.equals(previousScmateStateSource, pc.getScmateStateSource())
+            || !Objects.equals(previousScmateTransitionPending, pc.getScmateTransitionPending())
+            || !Objects.equals(previousScmateRawState, pc.getScmateRawState())
+            || !Objects.equals(previousScmateBaselineCreatedAt, pc.getScmateBaselineCreatedAt())
+            || !Objects.equals(previousScmateSnap1CreatedAt, pc.getScmateSnap1CreatedAt())
+            || !Objects.equals(previousScmateSnap2CreatedAt, pc.getScmateSnap2CreatedAt())
+            || !Objects.equals(previousScmateError, pc.getScmateError())
+            || !Objects.equals(previousScmateWorkflowStage, pc.getScmateWorkflowStage());
         boolean shouldPersistPc = pcStateChanged || shouldPersistByInterval(mac, now, lastPcPersistedAt,
             heartbeatPersistIntervalSeconds);
         if (shouldPersistPc) {
@@ -170,6 +273,8 @@ public class HeartbeatService {
             }
         }
 
+        handleScmateBootChange(mac, previousSystemBootTimeEpochSeconds,
+                pc.getSystemBootTimeEpochSeconds(), now);
         handleAgentSessionChange(mac, previousAgentSessionId, pc.getLastAgentSessionId(), now);
 
         // 최신/진행중 배포 기준 버전과 다를 경우, 늦게 켜진 에이전트를 자동 캐치업 대상으로 추가한다.
@@ -212,14 +317,22 @@ public class HeartbeatService {
      * 같은 명령을 가져가는 race condition을 방지한다.
      * 다른 스레드가 이미 가져간 경우 null 반환.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Map<String, Object> dispatchNextCommand(String mac) {
         List<CommandQueue> candidates = commandQueueRepository
-                .findNextDispatchCandidates(mac, PageRequest.of(0, 1));
+                .findNextDispatchCandidates(mac, PageRequest.of(0, 100));
         if (candidates.isEmpty()) return null;
 
-        CommandQueue pending = candidates.get(0);
         LocalDateTime deliveredAt = LocalDateTime.now();
+        LocalDateTime validCreatedAt = deliveredAt.minusSeconds(Math.max(1L, commandQueueTtlSeconds));
+        CommandQueue pending = candidates.stream()
+                .filter(command -> command.getCreatedAt() != null
+                        && !command.getCreatedAt().isBefore(validCreatedAt))
+                .findFirst()
+                .orElse(null);
+        if (pending == null) {
+            return null;
+        }
 
         // CAS: QUEUED인 경우에만 DELIVERED로 전환. 0이면 다른 스레드가 먼저 가져감.
         int updated = commandQueueRepository.markDeliveredIfQueued(pending.getTaskId(), deliveredAt);
@@ -235,7 +348,31 @@ public class HeartbeatService {
         cmd.put("type",      pending.getCommandType());
         cmd.put("payload",   pending.getPayloadJson());
         cmd.put("scriptUrl", pending.getScriptUrl());
+        if ("SCMATE_CONTROL".equalsIgnoreCase(pending.getCommandType())
+                && scmateActionRequiresCredential(pending.getPayloadJson())) {
+            cmd.put("scmateCredential", Map.of(
+                    "username", scmateCliUsername == null ? "" : scmateCliUsername,
+                    "password", scmateCliPassword == null ? "" : scmateCliPassword));
+        }
         return cmd;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void requeueDeliveredIfUnacked(Long taskId) {
+        if (taskId != null) {
+            commandQueueRepository.requeueDeliveredIfUnacked(taskId);
+        }
+    }
+
+    private boolean scmateActionRequiresCredential(String payloadJson) {
+        try {
+            String action = objectMapper.readTree(payloadJson == null ? "{}" : payloadJson)
+                    .path("action").asText("");
+            return !"STATUS".equalsIgnoreCase(action)
+                    && !"INSTALL_RECOVERY_MODULE".equalsIgnoreCase(action);
+        } catch (Exception ignored) {
+            return true;
+        }
     }
 
     @Transactional
@@ -438,6 +575,220 @@ public class HeartbeatService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
+    static String normalizeScmateMode(String mode, String schedule) {
+        if (mode != null) {
+            String normalized = mode.trim().toUpperCase(java.util.Locale.ROOT);
+            if ("PROTECTED".equals(normalized) || "OPERATOR".equals(normalized)) {
+                return normalized;
+            }
+        }
+        String normalizedSchedule = normalizeScmateToken(schedule);
+        if ("MANUAL".equals(normalizedSchedule)) return "OPERATOR";
+        if ("RESTART".equals(normalizedSchedule)
+                || "DAILY_FIRST_BOOT".equals(normalizedSchedule)
+                || "WEEKLY".equals(normalizedSchedule)) {
+            return "PROTECTED";
+        }
+        return "UNKNOWN";
+    }
+
+    static boolean shouldPreserveCliVerifiedMode(Long previousBootTime,
+                                                 Long incomingBootTime,
+                                                 String previousMode,
+                                                 String previousSchedule,
+                                                 String previousStateSource,
+                                                 String incomingMode,
+                                                 String incomingSchedule,
+                                                 String incomingStateSource) {
+        return Objects.equals(previousBootTime, incomingBootTime)
+                && "PROTECTED".equalsIgnoreCase(previousMode)
+                && "RESTART".equalsIgnoreCase(previousSchedule)
+                && previousStateSource != null
+                && previousStateSource.toUpperCase(java.util.Locale.ROOT).contains("SHD_CMD")
+                && "OPERATOR".equalsIgnoreCase(incomingMode)
+                && "MANUAL".equalsIgnoreCase(incomingSchedule)
+                && (incomingStateSource == null
+                || !incomingStateSource.toUpperCase(java.util.Locale.ROOT).contains("SHD_CMD"));
+    }
+
+    private static String normalizeScmateToken(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private String trimToLength(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
+    private void advanceScmateWorkflow(PcMaster pc) {
+        String stage = pc.getScmateWorkflowStage();
+        if (stage == null) {
+            return;
+        }
+        if ("OPERATOR_REQUESTED".equals(stage)
+                && "PROTECT_DISABLED".equalsIgnoreCase(pc.getScmateAvailabilityReason())) {
+            queueOperatorProtectionRecovery(pc);
+            return;
+        }
+        if ("OPERATOR_ENABLE_PENDING".equals(stage)
+                && Boolean.TRUE.equals(pc.getScmateAvailable())) {
+            if ("OPERATOR".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("OPERATOR_READY");
+                pc.setScmateError(null);
+            } else if ("PROTECTED".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("FAILED");
+                pc.setScmateError("SCMATE 운영자 모드 전환 후 복구 작업이 남아 있습니다.");
+            }
+            return;
+        }
+        if ("FAILED".equals(stage)
+                && isAlreadyProtectedNoOpError(pc.getScmateError())
+                && Boolean.TRUE.equals(pc.getScmateAvailable())) {
+            pc.setScmateError(null);
+            if ("OPERATOR".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("OPERATOR_READY");
+                return;
+            }
+            if ("PROTECTED".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("COMPLETED");
+                return;
+            }
+        }
+        if (Boolean.TRUE.equals(pc.getScmateAvailable())
+                && (pc.getScmateError() == null || pc.getScmateError().isBlank())
+                && List.of("FAILED", "INSTALL_REQUESTED", "INSTALL_PENDING_REBOOT", "OPERATOR_READY",
+                "PROTECTION_ENABLE_REQUESTED", "PROTECTION_ENABLE_PENDING")
+                .contains(stage)) {
+            if ("OPERATOR".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("OPERATOR_READY");
+                return;
+            }
+            if ("PROTECTED".equals(pc.getScmateMode())) {
+                pc.setScmateWorkflowStage("COMPLETED");
+                return;
+            }
+        }
+        if ("OPERATOR_REQUESTED".equals(stage)
+                && !Boolean.TRUE.equals(pc.getScmateTransitionPending())
+                && "OPERATOR".equals(pc.getScmateMode())) {
+            pc.setScmateWorkflowStage("OPERATOR_READY");
+            pc.setScmateError(null);
+            return;
+        }
+        if (Boolean.TRUE.equals(pc.getScmateTransitionPending())) return;
+        boolean bootChanged = isConfirmedBootChange(
+                pc.getScmateWorkflowStartBootTimeEpochSeconds(),
+                pc.getSystemBootTimeEpochSeconds());
+        if ("PROTECTION_REQUESTED".equals(stage)
+                && "PROTECTED".equals(pc.getScmateMode())) {
+            pc.setScmateWorkflowStage("COMPLETED");
+            pc.setScmateError(null);
+            return;
+        }
+        if ("WAITING_PROTECTED_REBOOT".equals(stage)
+                && bootChanged
+                && "PROTECTED".equals(pc.getScmateMode())) {
+            pc.setScmateWorkflowStage("COMPLETED");
+            pc.setScmateError(null);
+            return;
+        }
+        if ("RESTORE_REQUESTED".equals(stage)) {
+            if (pc.getScmateError() != null && !pc.getScmateError().isBlank()) {
+                pc.setScmateWorkflowStage("FAILED");
+                return;
+            }
+            if (bootChanged && Boolean.TRUE.equals(pc.getScmateAvailable())
+                    && ("PROTECTED".equals(pc.getScmateMode()) || "OPERATOR".equals(pc.getScmateMode()))) {
+                pc.setScmateWorkflowStage("COMPLETED");
+                pc.setScmateError(null);
+            } else if (bootChanged && Boolean.FALSE.equals(pc.getScmateAvailable())) {
+                pc.setScmateWorkflowStage("FAILED");
+                pc.setScmateError("시스템 복구 후 SCMATE 상태를 확인하지 못했습니다.");
+            }
+        }
+    }
+
+    private void queueOperatorProtectionRecovery(PcMaster pc) {
+        List<CommandQueue> active = commandQueueRepository
+                .findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                        pc.getMacAddress(), List.of("QUEUED", "DELIVERED", "ACKED"));
+        if (!active.isEmpty()) {
+            return;
+        }
+        CommandQueue command = new CommandQueue();
+        command.setMacAddress(pc.getMacAddress());
+        command.setCommandType("SCMATE_CONTROL");
+        command.setPayloadJson("{\"action\":\"ENABLE_PROTECTION\",\"recoveryPoint\":\"BASELINE\","
+                + "\"resumeAction\":\"REQUEST_OPERATOR\"}");
+        command.setStatus("QUEUED");
+        command.setCreatedAt(LocalDateTime.now());
+        command.setIsExecuted(false);
+        commandQueueRepository.save(command);
+        pc.setScmateWorkflowStage("OPERATOR_ENABLE_REQUESTED");
+        pc.setScmateError(null);
+    }
+
+    private static boolean isAlreadyProtectedNoOpError(String error) {
+        return error != null && error.startsWith("SCMATE_PROTECTION_NOT_DISABLED:");
+    }
+
+    private void handleScmateBootChange(String mac,
+                                         Long previousBootTime,
+                                         Long currentBootTime,
+                                         LocalDateTime now) {
+        if (!isConfirmedBootChange(previousBootTime, currentBootTime)) {
+            return;
+        }
+        List<CommandQueue> inFlightCommands = commandQueueRepository
+                .findByMacAddressAndStatusInOrderByCreatedAtAsc(mac, List.of("DELIVERED", "ACKED"));
+        if (inFlightCommands.isEmpty()) return;
+
+        PcMaster workflowPc = pcMasterRepository.findById(mac).orElse(null);
+        for (CommandQueue cmd : inFlightCommands) {
+            if ("SCMATE_CONTROL".equalsIgnoreCase(cmd.getCommandType())) {
+                if (!"RESTORE_BASELINE".equals(scmateControlAction(cmd)) || workflowPc == null) continue;
+                if ("COMPLETED".equals(workflowPc.getScmateWorkflowStage())) {
+                    completeScmateRestartCommand(cmd, now,
+                            "system boot time changed after saved-point restore");
+                } else if ("FAILED".equals(workflowPc.getScmateWorkflowStage())) {
+                    failScmateRestartCommand(cmd, now, workflowPc.getScmateError());
+                }
+                continue;
+            }
+            if (isScmateWorkflowReboot(cmd)) {
+                completeScmateRestartCommand(cmd, now,
+                        "system boot time changed after SCMATE workflow reboot");
+            }
+        }
+    }
+
+    static boolean isConfirmedBootChange(Long previousBootTime, Long currentBootTime) {
+        return previousBootTime != null
+                && currentBootTime != null
+                && currentBootTime - previousBootTime > BOOT_TIME_CHANGE_TOLERANCE_SECONDS;
+    }
+
+    private void completeScmateRestartCommand(CommandQueue command, LocalDateTime now, String detail) {
+        command.setStatus("COMPLETED");
+        command.setExitCode(0);
+        command.setCompletedAt(now);
+        command.setIsExecuted(true);
+        command.setStderr(detail);
+        commandQueueRepository.save(command);
+    }
+
+    private void failScmateRestartCommand(CommandQueue command, LocalDateTime now, String detail) {
+        command.setStatus("FAILED");
+        command.setCompletedAt(now);
+        command.setIsExecuted(true);
+        command.setStderr(detail == null ? "SCMATE restart verification failed" : detail);
+        commandQueueRepository.save(command);
+    }
+
     private void handleAgentSessionChange(String mac,
                                           String previousSessionId,
                                           String currentSessionId,
@@ -453,6 +804,9 @@ public class HeartbeatService {
         }
 
         for (CommandQueue cmd : inFlightCommands) {
+            if ("SCMATE_CONTROL".equalsIgnoreCase(cmd.getCommandType()) || isScmateWorkflowReboot(cmd)) {
+                continue;
+            }
             int retryCount = cmd.getRetryCount() == null ? 0 : cmd.getRetryCount();
             if (retryCount >= maxCommandRetries) {
                 cmd.setStatus("FAILED");
@@ -487,6 +841,30 @@ public class HeartbeatService {
             return true;
         }
         return Duration.between(prev, now).getSeconds() >= intervalSeconds;
+    }
+
+    private boolean isScmateWorkflowReboot(CommandQueue command) {
+        if (command == null || !"REBOOT".equalsIgnoreCase(command.getCommandType())) {
+            return false;
+        }
+        try {
+            return objectMapper.readTree(command.getPayloadJson() == null ? "{}" : command.getPayloadJson())
+                    .hasNonNull("scmateWorkflowId");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private String scmateControlAction(CommandQueue command) {
+        if (command == null || !"SCMATE_CONTROL".equalsIgnoreCase(command.getCommandType())) {
+            return "";
+        }
+        try {
+            return objectMapper.readTree(command.getPayloadJson() == null ? "{}" : command.getPayloadJson())
+                    .path("action").asText("").trim().toUpperCase(java.util.Locale.ROOT);
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private boolean hasText(String value) {

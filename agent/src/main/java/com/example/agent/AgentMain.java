@@ -14,9 +14,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
@@ -24,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -35,8 +35,7 @@ import java.util.concurrent.TimeUnit;
  *
  * 실행 흐름:
  *   1. config.json 로드
- *   2. 인터넷 연결 확인
- *   3. 서버 health check
+ *   2. 서버 health check
  *   3. agentToken이 없으면 자동 등록 (POST /api/v1/agent/register)
  *   4. 하트비트 스케줄러 시작 (heartbeatIntervalSec ± jitter)
  *   5. 하트비트 응답에서 명령 수신 → CommandExecutor에 위임
@@ -46,8 +45,7 @@ public class AgentMain {
     private static final Logger log = LoggerFactory.getLogger(AgentMain.class);
     private static final int SERVER_INITIAL_RETRY = 5;
     private static final long SERVER_RETRY_SLEEP_MS = 10_000L;
-    private static final long SERVER_BACKOFF_MS = 10 * 60 * 1000L;
-    private static final long INTERNET_RETRY_MS = 30_000L;
+    private static final long SERVER_BACKOFF_MS = 30_000L;
     private static final String MAIN_AUTOSTART_TASK = "PCAgentWatchdog";
     private static final String LEGACY_WATCHDOG_TASK = "\\PCAgent\\Main";
     // "PCAgent" 이름은 ASUS 계열 PC에서 Task Scheduler 충돌 → 마이그레이션 시 제거
@@ -55,7 +53,6 @@ public class AgentMain {
     private static final String WATCHDOG_SCRIPT_NAME = "agent-watchdog.ps1";
     private static final String LEGACY_AUTORUN_REG_KEY = "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
     private static final String LEGACY_AUTORUN_REG_VALUE = "PCAgent";
-    private static AgentConfig agentConfig; // OTA, 인터넷 체크에서 사용
     private static final String AGENT_VERSION = resolveAppVersion();
 
     public static void main(String[] args) {
@@ -97,8 +94,6 @@ public class AgentMain {
                 System.exit(2);
                 return;
             }
-        agentConfig = config;
-
         log.info("서버: {}", config.getServerUrl());
         log.info("config 경로: {}", configLoader.getConfigPath());
 
@@ -311,7 +306,20 @@ public class AgentMain {
             // 에이전트를 일반 모드로 즉시 시작 (설치 후 재부팅 불필요)
             String exePath = resolveInstalledExePath();
             if (exePath != null) {
-                new ProcessBuilder(exePath).start();
+                String normalizedLauncher = Path.of(exePath).toAbsolutePath().normalize().toString();
+                String watchdogScript = resolveWatchdogScriptPath(normalizedLauncher);
+                boolean registered = registerAutostartWithPowerShell(normalizedLauncher, watchdogScript)
+                        || registerAutostartWithSchtasks(normalizedLauncher, watchdogScript);
+                if (registered) {
+                    cleanupLegacyAutostartEntries();
+                    if (startAutostartTask()) {
+                        log.info("첫 설치 자동 시작 작업 등록/즉시 실행 완료: {}", MAIN_AUTOSTART_TASK);
+                        return;
+                    }
+                }
+                ProcessBuilder builder = new ProcessBuilder(normalizedLauncher);
+                builder.environment().put("PCAGENT_CONFIG_DIR", dataDir.toString());
+                builder.start();
             }
         } catch (Exception e) {
             // 실패해도 설치 자체는 성공 — HKLM Run 키로 다음 로그인 시 자동 시작
@@ -361,8 +369,6 @@ public class AgentMain {
 
     private static void waitUntilServerReachable(HeartbeatSender heartbeat) throws InterruptedException {
         while (true) {
-            waitForInternetConnection();
-
             boolean serverAlive = false;
             for (int i = 1; i <= SERVER_INITIAL_RETRY; i++) {
                 if (heartbeat.checkServerAlive()) {
@@ -378,30 +384,8 @@ public class AgentMain {
                 return;
             }
 
-            log.warn("서버 연결 5회 실패. 10분 후 다시 확인합니다.");
+            log.warn("서버 연결 5회 실패. 30초 후 다시 확인합니다.");
             Thread.sleep(SERVER_BACKOFF_MS);
-        }
-    }
-
-    private static void waitForInternetConnection() throws InterruptedException {
-        while (!isInternetAvailable()) {
-            log.warn("인터넷 연결 없음. 30초 후 재확인합니다.");
-            Thread.sleep(INTERNET_RETRY_MS);
-        }
-    }
-
-    /**
-     * TCP 소켓으로 설정된 호스트:포트 연결을 시도한다.
-     * config.json의 internetCheckHost/internetCheckPort로 대상 변경 가능.
-     */
-    private static boolean isInternetAvailable() {
-        String host = agentConfig != null ? agentConfig.getInternetCheckHost() : "1.1.1.1";
-        int port = agentConfig != null ? agentConfig.getInternetCheckPort() : 53;
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), 3000);
-            return true;
-        } catch (Exception e) {
-            return false;
         }
     }
 
@@ -450,7 +434,7 @@ public class AgentMain {
     }
 
     /**
-     * Windows Task Scheduler에 자동 시작 작업(PCAgent)을 등록한다.
+     * Windows Task Scheduler에 자동 시작 작업(PCAgentWatchdog)을 등록한다.
      * Windows Service(--launcher-as-service / WinSW) 대안 — 미서명 EXE 권한 문제 회피.
      *
      * 동작:
@@ -477,7 +461,7 @@ public class AgentMain {
             String normalizedLauncher = Path.of(launcher).toAbsolutePath().normalize().toString();
             String watchdogScript = resolveWatchdogScriptPath(normalizedLauncher);
             boolean registered = registerAutostartWithPowerShell(normalizedLauncher, watchdogScript)
-                    || registerAutostartWithSchtasks(normalizedLauncher);
+                    || registerAutostartWithSchtasks(normalizedLauncher, watchdogScript);
             if (registered) {
                 cleanupLegacyAutostartEntries();
                 if (watchdogScript != null) {
@@ -491,7 +475,13 @@ public class AgentMain {
                 return;
             }
             if (isSchtaskRegistered(MAIN_AUTOSTART_TASK)) {
-                log.warn("자동 시작 재등록 실패 - 기존 작업 유지: {}", MAIN_AUTOSTART_TASK);
+                boolean watchdogExpected = watchdogScript != null && !watchdogScript.isBlank();
+                if (verifyAutostartTask(watchdogExpected)) {
+                    log.warn("자동 시작 재등록 실패 - 검증된 기존 작업 유지: {}", MAIN_AUTOSTART_TASK);
+                    logAutostartTaskSummary();
+                    return;
+                }
+                log.warn("자동 시작 재등록 실패 - 기존 작업 정의가 검증되지 않음: {}", MAIN_AUTOSTART_TASK);
                 logAutostartTaskSummary();
                 return;
             }
@@ -524,14 +514,18 @@ public class AgentMain {
     }
 
     private static boolean registerAutostartWithPowerShell(String launcher, String watchdogScript) {
+        boolean watchdogExpected = watchdogScript != null && !watchdogScript.isBlank();
+        String script = buildAutostartRegistrationScript(launcher, watchdogScript);
+        return runPowerShellEncoded("PowerShell 자동 시작 작업 등록", script, 15)
+                && verifyAutostartTask(watchdogExpected);
+    }
+
+    private static String buildAutostartRegistrationScript(String launcher, String watchdogScript) {
         Path workDir = Path.of(launcher).getParent();
         String workDirValue = workDir == null ? "" : workDir.toString();
         String script;
         if (watchdogScript != null && !watchdogScript.isBlank()) {
-            String psArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass"
-                    + " -File \"" + watchdogScript + "\""
-                    + (workDirValue.isBlank() ? "" : " -InstallDir \"" + workDirValue + "\"")
-                    + " -LauncherPath \"" + launcher + "\"";
+            String psArgs = buildHiddenPowerShellArgs(launcher, watchdogScript);
             script = "$action = New-ScheduledTaskAction"
                     + " -Execute 'powershell.exe'"
                     + " -Argument " + psSingleQuote(psArgs)
@@ -545,27 +539,102 @@ public class AgentMain {
                 + "; $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)"
                 + " -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)"
                 + " -StartWhenAvailable"
+                + " -Hidden"
+                // New-ScheduledTaskSettingsSet 기본값이 배터리 조건을 켠 채로 잡는다(-DisallowStartIfOnBatteries/
+                // -StopIfGoingOnBatteries 둘 다 미지정 시 True). 배터리/UPS 순간전환 시 Windows가 이 작업을
+                // "실패"가 아닌 "정책 정지"로 죽여 RestartCount가 발동하지 않고, 다음 재부팅 전까지 안 돌아온다.
+                + " -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries"
                 + "; $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest"
                 + "; Register-ScheduledTask -TaskName " + psSingleQuote(MAIN_AUTOSTART_TASK)
                 + " -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null";
-        return runCommand("PowerShell 자동 시작 작업 등록",
-                new String[]{"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
-                15);
+        return "$ErrorActionPreference = 'Stop'; " + script;
     }
 
-    private static boolean registerAutostartWithSchtasks(String launcher) {
+    private static boolean registerAutostartWithSchtasks(String launcher, String watchdogScript) {
         // schtasks /TR 값은 작업 스케줄러가 다시 파싱한다.
         // 공백이 있는 Program Files 경로는 /TR 문자열 내부에서도 반드시 따옴표로 감싸야 한다.
+        String taskRun;
+        if (watchdogScript != null && !watchdogScript.isBlank()) {
+            taskRun = "powershell.exe " + buildHiddenPowerShellArgs(launcher, watchdogScript);
+        } else {
+            taskRun = "\"" + launcher + "\"";
+        }
         return runCommand("schtasks 자동 시작 작업 등록",
                 new String[]{
                         "schtasks", "/Create",
                         "/TN", MAIN_AUTOSTART_TASK,
-                        "/TR", "\"" + launcher + "\"",
+                        "/TR", taskRun,
                         "/SC", "ONSTART",
                         "/RU", "SYSTEM",
                         "/F"
                 },
-                15);
+                15)
+                && verifyAutostartTask(watchdogScript != null && !watchdogScript.isBlank());
+    }
+
+    private static String buildHiddenPowerShellArgs(String launcher, String watchdogScript) {
+        Path workDir = Path.of(launcher).getParent();
+        String workDirValue = workDir == null ? "" : workDir.toString();
+        String command = "& " + psSingleQuote(watchdogScript)
+                + (workDirValue.isBlank() ? "" : " -InstallDir " + psSingleQuote(workDirValue))
+                + " -LauncherPath " + psSingleQuote(launcher);
+        return "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand "
+                + toPowerShellEncodedCommand(command);
+    }
+
+    private static String toPowerShellEncodedCommand(String script) {
+        return Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+    }
+
+    private static boolean runPowerShellEncoded(String description, String script, int timeoutSec) {
+        return runCommand(description,
+                new String[]{
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-WindowStyle", "Hidden",
+                        "-ExecutionPolicy", "Bypass",
+                        "-EncodedCommand", toPowerShellEncodedCommand(script)
+                },
+                timeoutSec);
+    }
+
+    private static boolean verifyAutostartTask(boolean watchdogExpected) {
+        String script = buildAutostartValidationScript(watchdogExpected);
+        return runPowerShellEncoded("PowerShell 자동 시작 작업 정의 검증", script, 10);
+    }
+
+    private static String buildAutostartValidationScript(boolean watchdogExpected) {
+        String expectWatchdog = watchdogExpected ? "$true" : "$false";
+        return "$ErrorActionPreference = 'Stop'; "
+                + "$task = @(Get-ScheduledTask -TaskName " + psSingleQuote(MAIN_AUTOSTART_TASK)
+                + " -ErrorAction Stop | Where-Object { $_.TaskPath -eq '\\' } | Select-Object -First 1)[0]; "
+                + "if (-not $task) { throw 'PCAgentWatchdog task was not found at root path.' }; "
+                + "$xml = [xml](Export-ScheduledTask -TaskName " + psSingleQuote(MAIN_AUTOSTART_TASK) + "); "
+                + "$command = [string]$xml.Task.Actions.Exec.Command; "
+                + "$arguments = [string]$xml.Task.Actions.Exec.Arguments; "
+                + "$userId = [string]$xml.Task.Principals.Principal.UserId; "
+                + "if ($userId -notmatch '^(SYSTEM|S-1-5-18)$') { throw ('PCAgentWatchdog principal is not SYSTEM: ' + $userId) }; "
+                + "$executionTimeLimit = [string]$xml.Task.Settings.ExecutionTimeLimit; "
+                + "if ($executionTimeLimit -and $executionTimeLimit -ne 'PT0S') { throw ('PCAgentWatchdog execution time limit is not unlimited: ' + $executionTimeLimit) }; "
+                + "if ([string]$xml.Task.Settings.DisallowStartIfOnBatteries -ieq 'true') { throw 'PCAgentWatchdog cannot start on batteries.' }; "
+                + "if ([string]$xml.Task.Settings.StopIfGoingOnBatteries -ieq 'true') { throw 'PCAgentWatchdog stops on batteries.' }; "
+                + "if (" + expectWatchdog + ") { "
+                + "if ($command -notmatch '(?i)powershell(\\.exe)?$') { throw ('PCAgentWatchdog action is not powershell.exe: ' + $command) }; "
+                + "if ($arguments -notmatch '(?i)-WindowStyle\\s+Hidden') { throw 'PCAgentWatchdog action is not hidden.' }; "
+                + "if ($arguments -notmatch '(?i)-EncodedCommand') { throw 'PCAgentWatchdog action is not encoded.' }; "
+                + "if ($arguments -match '(?i)\\s-File\\s') { throw 'PCAgentWatchdog action still uses -File.' }; "
+                + "} else { "
+                + "if ([string]::IsNullOrWhiteSpace($command)) { throw 'PCAgentWatchdog direct action is missing.' }; "
+                + "}";
+    }
+
+    private static boolean startAutostartTask() {
+        return runPowerShellEncoded("PowerShell 자동 시작 작업 즉시 실행",
+                "Start-ScheduledTask -TaskName " + psSingleQuote(MAIN_AUTOSTART_TASK),
+                10)
+                || runCommand("schtasks 자동 시작 작업 즉시 실행",
+                new String[]{"schtasks", "/Run", "/TN", MAIN_AUTOSTART_TASK},
+                10);
     }
 
     private static String psSingleQuote(String value) {

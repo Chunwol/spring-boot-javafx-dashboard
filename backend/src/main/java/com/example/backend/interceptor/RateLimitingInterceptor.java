@@ -205,7 +205,9 @@ public class RateLimitingInterceptor implements HandlerInterceptor {
                endpoint.contains("/actuator") ||
                endpoint.contains("/ip-ranges") ||           // IP 범위 조회 (빈번한 에이전트 요청)
                endpoint.startsWith("/api/v1/heartbeat") ||  // 에이전트 heartbeat (JWT 인증, 120초 주기)
-               endpoint.startsWith("/api/v1/agent/commands"); // 에이전트 롱폴링 (JWT 인증, 상시 연결)
+               endpoint.startsWith("/api/v1/agent/commands") || // 에이전트 롱폴링 (JWT 인증, 상시 연결)
+               endpoint.equals("/api/v1/remote-control/sessions") || // 관리자 전용, 세션 수는 별도 제한
+               endpoint.startsWith("/api/v1/remote-control/sessions/");
     }
 
     /**

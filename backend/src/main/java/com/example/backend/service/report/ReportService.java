@@ -34,6 +34,7 @@ import com.itextpdf.layout.properties.UnitValue;
 import com.itextpdf.layout.properties.VerticalAlignment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -66,6 +67,15 @@ public class ReportService {
     private final TrafficLogsRepository trafficRepository;
     private final ClassroomGroupRepository groupRepository;
     private final CommandQueueRepository commandRepository;
+
+    @Value("${spring.jpa.properties.hibernate.dialect:org.hibernate.dialect.PostgreSQLDialect}")
+    private String hibernateDialect;
+
+    public record TrafficSummary(long totalInboundKbps,
+                                 long totalOutboundKbps,
+                                 Map<LocalDate, Long> dailyInbound,
+                                 Map<String, Long> byTimeSlot) {
+    }
 
     public ReportService(PcMasterRepository pcRepository,
                          TrafficLogsRepository trafficRepository,
@@ -653,7 +663,99 @@ public class ReportService {
         return totals;
     }
 
+    /**
+     * 웹 트래픽 보고서용 DB 집계. 조회 건수와 무관하게 일별 최대 31행,
+     * 시간별 최대 24행만 애플리케이션으로 가져온다.
+     */
+    public TrafficSummary aggregateTraffic(Long groupId, LocalDateTime start, LocalDateTime end) {
+        List<TrafficLogsRepository.DailyTrafficAggregate> dailyRows;
+        List<TrafficLogsRepository.HourlyTrafficAggregate> hourlyRows;
+
+        if (groupId == null) {
+            if (usesSqliteDialect()) {
+                dailyRows = trafficRepository.aggregateDailyBetweenSqlite(start, end);
+                hourlyRows = trafficRepository.aggregateHourlyBetweenSqlite(start, end);
+            } else {
+                dailyRows = trafficRepository.aggregateDailyBetween(start, end);
+                hourlyRows = trafficRepository.aggregateHourlyBetween(start, end);
+            }
+        } else {
+            List<String> macAddresses = pcRepository.findByGroupId(groupId).stream()
+                    .map(PcMaster::getMacAddress)
+                    .filter(Objects::nonNull)
+                    .filter(mac -> !mac.isBlank())
+                    .distinct()
+                    .toList();
+            if (macAddresses.isEmpty()) {
+                return emptyTrafficSummary();
+            }
+            if (usesSqliteDialect()) {
+                dailyRows = trafficRepository.aggregateDailyForMacAddressesBetweenSqlite(macAddresses, start, end);
+                hourlyRows = trafficRepository.aggregateHourlyForMacAddressesBetweenSqlite(macAddresses, start, end);
+            } else {
+                dailyRows = trafficRepository.aggregateDailyForMacAddressesBetween(macAddresses, start, end);
+                hourlyRows = trafficRepository.aggregateHourlyForMacAddressesBetween(macAddresses, start, end);
+            }
+        }
+
+        Map<LocalDate, Long> dailyInbound = new TreeMap<>();
+        long totalInbound = 0L;
+        long totalOutbound = 0L;
+        for (TrafficLogsRepository.DailyTrafficAggregate row : dailyRows) {
+            if (row.getYearPart() == null || row.getMonthPart() == null || row.getDayPart() == null) {
+                continue;
+            }
+            try {
+                LocalDate date = LocalDate.of(row.getYearPart(), row.getMonthPart(), row.getDayPart());
+                long inbound = nonNullLong(row.getInboundKbps());
+                long outbound = nonNullLong(row.getOutboundKbps());
+                dailyInbound.put(date, inbound);
+                totalInbound += inbound;
+                totalOutbound += outbound;
+            } catch (DateTimeException ignored) {
+                log.warn("트래픽 일별 집계에서 잘못된 날짜를 제외했습니다: {}-{}-{}",
+                        row.getYearPart(), row.getMonthPart(), row.getDayPart());
+            }
+        }
+
+        Map<String, Long> byTimeSlot = emptyTimeSlots();
+        for (TrafficLogsRepository.HourlyTrafficAggregate row : hourlyRows) {
+            Integer hour = row.getHourPart();
+            if (hour == null || hour < 0 || hour > 23) {
+                continue;
+            }
+            long total = nonNullLong(row.getInboundKbps()) + nonNullLong(row.getOutboundKbps());
+            String slot = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "night";
+            byTimeSlot.merge(slot, total, Long::sum);
+        }
+
+        return new TrafficSummary(totalInbound, totalOutbound, dailyInbound, byTimeSlot);
+    }
+
+    private TrafficSummary emptyTrafficSummary() {
+        return new TrafficSummary(0L, 0L, new TreeMap<>(), emptyTimeSlots());
+    }
+
+    private Map<String, Long> emptyTimeSlots() {
+        Map<String, Long> totals = new LinkedHashMap<>();
+        totals.put("morning", 0L);
+        totals.put("afternoon", 0L);
+        totals.put("night", 0L);
+        return totals;
+    }
+
+    private long nonNullLong(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private boolean usesSqliteDialect() {
+        return hibernateDialect != null && hibernateDialect.toLowerCase(Locale.ROOT).contains("sqlite");
+    }
+
     public List<TrafficLog> getTrafficForMacBetween(String mac, LocalDateTime start, LocalDateTime end) {
+        if (mac == null || mac.isBlank()) {
+            return trafficRepository.findByTimestampBetween(start, end);
+        }
         return trafficRepository.findByMacAddressAndTimestampBetween(mac, start, end);
     }
 

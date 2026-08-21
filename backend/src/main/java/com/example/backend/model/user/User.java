@@ -47,13 +47,23 @@ public class User {
     @Column(nullable = false)
     private String email;
 
+    /** 애플리케이션 역할 (ADMIN / USER / VIEWER) */
+    @Schema(description = "애플리케이션 역할")
+    @Column(name = "role")
+    private String role;
+
     /**
      * 신규 사용자 생성자.
      */
     public User(String username, String password, String email) {
+        this(username, password, email, "USER");
+    }
+
+    public User(String username, String password, String email, String role) {
         this.username = username;
         this.password = password;
         this.email = email;
+        this.role = role;
     }
 
     // ── 도메인 메서드 ──────────────────────────────────────────────────────────
@@ -66,6 +76,11 @@ public class User {
     /** 이메일을 변경한다. */
     public void changeEmail(String email) {
         this.email = email;
+    }
+
+    /** 역할을 변경한다. */
+    public void changeRole(String role) {
+        this.role = role;
     }
 
     /** 사용자명을 변경한다. */

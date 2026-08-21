@@ -3,6 +3,7 @@ package com.example.backend.util;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,10 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
+    private static final String TOKEN_TYPE_CLAIM = "tokenType";
+    private static final String ACCESS_TOKEN_TYPE = "access";
+    private static final String REFRESH_TOKEN_TYPE = "refresh";
+
     /**
      * JWT 서명 시크릿 키.
      * 환경 변수 {@code JWT_SECRET} 또는 프로퍼티 {@code app.jwt.secret}로 설정.
@@ -44,6 +49,9 @@ public class JwtUtil {
      */
     @Value("${app.jwt.expiration:3600000}")
     private long expirationMs;
+
+    @Value("${app.jwt.refresh-expiration:7776000000}")
+    private long refreshExpirationMs;
 
     private Key key;
 
@@ -79,6 +87,7 @@ public class JwtUtil {
         Date exp = new Date(now.getTime() + expirationMs);
         return Jwts.builder()
                 .setSubject(username)
+                .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN_TYPE)
                 .setIssuedAt(now)
                 .setExpiration(exp)
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -95,6 +104,34 @@ public class JwtUtil {
      * @throws io.jsonwebtoken.JwtException 서명 불일치 또는 만료 등
      */
     public Claims validateAndGetClaims(String token) {
+        Claims claims = parseClaims(token);
+        if (REFRESH_TOKEN_TYPE.equals(claims.get(TOKEN_TYPE_CLAIM, String.class))) {
+            throw new UnsupportedJwtException("Refresh token cannot be used as an access token");
+        }
+        return claims;
+    }
+
+    public String generateRefreshToken(String username) {
+        Date now = new Date();
+        Date exp = new Date(now.getTime() + refreshExpirationMs);
+        return Jwts.builder()
+                .setSubject(username)
+                .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN_TYPE)
+                .setIssuedAt(now)
+                .setExpiration(exp)
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public Claims validateRefreshAndGetClaims(String token) {
+        Claims claims = parseClaims(token);
+        if (!REFRESH_TOKEN_TYPE.equals(claims.get(TOKEN_TYPE_CLAIM, String.class))) {
+            throw new UnsupportedJwtException("Access token cannot be used as a refresh token");
+        }
+        return claims;
+    }
+
+    private Claims parseClaims(String token) {
         return Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
     }
 }

@@ -21,6 +21,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 ENV TZ=Asia/Seoul \
     SERVER_PORT=8888 \
-    JAVA_OPTS="-Duser.timezone=Asia/Seoul -Xmx512m -Xms256m"
+    JAVA_OPTS="-Duser.timezone=Asia/Seoul -Xms512m -Xmx1g"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar --server.port=${SERVER_PORT}"]

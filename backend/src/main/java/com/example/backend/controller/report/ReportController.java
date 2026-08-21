@@ -1,7 +1,6 @@
 package com.example.backend.controller.report;
 
 import com.example.backend.model.report.MonthlyReport;
-import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.report.MonthlyReportRepository;
 import com.example.backend.service.report.MonthlyReportService;
 import com.example.backend.service.report.ReportService;
@@ -12,8 +11,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -34,6 +36,8 @@ import java.util.*;
 @RequestMapping("/api/v1/reports")
 @Tag(name = "Reports", description = "보고서 생성 API")
 public class ReportController {
+
+    static final Duration MAX_TRAFFIC_REPORT_RANGE = Duration.ofDays(31);
 
     private final ReportService reportService;
     private final MonthlyReportService monthlyReportService;
@@ -64,6 +68,7 @@ public class ReportController {
     }
 
     @PostMapping("/monthly/{yearMonth}/regenerate")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "월간 보고서 강제 재생성",
                description = "ADMIN 전용 — 누락된 월 또는 데이터 보정 후 재집계")
     public ResponseEntity<MonthlyReport> regenerate(@PathVariable String yearMonth) {
@@ -159,29 +164,19 @@ public class ReportController {
             @RequestParam(required = false) String to,
             @Parameter(description = "강의실 ID (미지정 시 전체)") @RequestParam(required = false) Long groupId) {
 
-        LocalDateTime[] range = parseDateRange(from, to, 7);
-        List<TrafficLog> logs = groupId != null
-                ? reportService.getTrafficForGroupBetween(groupId, range[0], range[1])
-                : reportService.getTrafficForMacBetween(null, range[0], range[1]);
-
-        Map<LocalDate, Long> dailyIn = reportService.dailyInboundAggregation(logs, range[0], range[1]);
-        Map<String, Long> bySlot = reportService.computeUsageByTimeSlot(logs);
-
-        long totalIn = logs.stream()
-                .mapToLong(l -> l.getInboundKbps() != null ? l.getInboundKbps() : 0L).sum();
-        long totalOut = logs.stream()
-                .mapToLong(l -> l.getOutboundKbps() != null ? l.getOutboundKbps() : 0L).sum();
+        LocalDateTime[] range = parseTrafficDateRange(from, to);
+        ReportService.TrafficSummary summary = reportService.aggregateTraffic(groupId, range[0], range[1]);
 
         Map<String, Long> dailyInStr = new LinkedHashMap<>();
-        dailyIn.forEach((date, val) -> dailyInStr.put(date.toString(), val));
+        summary.dailyInbound().forEach((date, val) -> dailyInStr.put(date.toString(), val));
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("from", range[0].toString());
         resp.put("to", range[1].toString());
-        resp.put("totalInboundKbps", totalIn);
-        resp.put("totalOutboundKbps", totalOut);
+        resp.put("totalInboundKbps", summary.totalInboundKbps());
+        resp.put("totalOutboundKbps", summary.totalOutboundKbps());
         resp.put("dailyInbound", dailyInStr);
-        resp.put("byTimeSlot", bySlot);
+        resp.put("byTimeSlot", summary.byTimeSlot());
         return ResponseEntity.ok(resp);
     }
 
@@ -235,5 +230,32 @@ public class ReportController {
             t = LocalDate.now().atTime(23, 59, 59);
         }
         return new LocalDateTime[]{f, t};
+    }
+
+    private static LocalDateTime[] parseTrafficDateRange(String from, String to) {
+        if ((from == null || from.isBlank()) && (to == null || to.isBlank())) {
+            LocalDate today = LocalDate.now();
+            return new LocalDateTime[]{today.minusDays(6).atStartOfDay(), today.atTime(23, 59, 59)};
+        }
+        if (from == null || from.isBlank() || to == null || to.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from과 to를 함께 입력해야 합니다.");
+        }
+
+        LocalDateTime start;
+        LocalDateTime end;
+        try {
+            start = LocalDateTime.parse(from, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            end = LocalDateTime.parse(to, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (DateTimeException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from 또는 to 형식이 올바르지 않습니다.");
+        }
+
+        if (end.isBefore(start)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "from은 to보다 늦을 수 없습니다.");
+        }
+        if (Duration.between(start, end).compareTo(MAX_TRAFFIC_REPORT_RANGE) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "트래픽 보고서는 최대 31일까지 조회할 수 있습니다.");
+        }
+        return new LocalDateTime[]{start, end};
     }
 }

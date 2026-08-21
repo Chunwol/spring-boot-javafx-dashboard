@@ -1,0 +1,4 @@
+ARG BASE_IMAGE=classroom-dashboard:latest
+FROM ${BASE_IMAGE}
+
+COPY app.jar /app/app.jar

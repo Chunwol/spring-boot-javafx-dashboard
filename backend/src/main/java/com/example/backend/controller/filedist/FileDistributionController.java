@@ -17,8 +17,10 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 파일 배포 API
@@ -32,6 +34,8 @@ import java.util.Map;
 public class FileDistributionController {
 
     private static final Logger log = LoggerFactory.getLogger(FileDistributionController.class);
+    private static final Pattern MAC_ADDRESS = Pattern.compile("^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$");
+    private static final int MAX_EXPLICIT_TARGETS = 2000;
 
     private final FileDistributionOrchestrator orchestrator;
     private final FileDistributionRequestSecurity requestSecurity;
@@ -51,7 +55,7 @@ public class FileDistributionController {
     @PostMapping("/jobs")
     @Operation(
         summary = "파일 배포 작업 생성",
-        description = "파일 배포 Job을 생성합니다. uploadId는 필수이며, waveSize로 배포 단위를 조절합니다."
+        description = "파일 배포 Job을 생성합니다. uploadId는 필수이며, groupId 또는 targetMacs로 대상을 지정하고 waveSize로 배포 단위를 조절합니다."
     )
     @ApiResponse(responseCode = "200", description = "Job 생성 성공 (jobId, status, uploadId 반환)")
     @ApiResponse(responseCode = "400", description = "uploadId 누락 또는 totalChunks 오류")
@@ -64,10 +68,14 @@ public class FileDistributionController {
         int waveSize = toInt(body.get("waveSize"), 5);
         boolean canaryOnly = Boolean.parseBoolean(String.valueOf(body.getOrDefault("canaryOnly", false)));
         Long groupId = parseOptionalLong(body.get("groupId"), "groupId");
+        boolean explicitTargetsRequested = body.containsKey("targetMacs");
+        List<String> targetMacs = parseTargetMacs(body.get("targetMacs"), explicitTargetsRequested);
         Long artifactId = parseOptionalLong(body.get("artifactId"), "artifactId");
         String targetVersion = body.get("targetVersion") == null ? null : String.valueOf(body.get("targetVersion"));
         String sourceMode = String.valueOf(body.getOrDefault("sourceMode", "HYBRID_PEER"));
         Double rampUpFactor = parseOptionalDouble(body.get("rampUpFactor"), "rampUpFactor");
+        String updatePackageType = String.valueOf(body.getOrDefault("updatePackageType", "JAR"))
+                .trim().toUpperCase(java.util.Locale.ROOT);
 
         if (uploadId.isBlank()) {
             throw new IllegalArgumentException("uploadId is required");
@@ -75,11 +83,23 @@ public class FileDistributionController {
         if (totalChunks <= 0) {
             throw new IllegalArgumentException("totalChunks must be > 0");
         }
+        if (groupId != null && explicitTargetsRequested) {
+            throw new IllegalArgumentException("groupId and targetMacs cannot be used together");
+        }
+        if (!"JAR".equals(updatePackageType) && !"FULL_BUNDLE".equals(updatePackageType)) {
+            throw new IllegalArgumentException("updatePackageType must be JAR or FULL_BUNDLE");
+        }
+        if ("FULL_BUNDLE".equals(updatePackageType)) {
+            sourceMode = "SERVER_ONLY";
+        }
 
         // 재전송 공격 방어: 요청의 모든 핵심 파라미터를 정규화 문자열로 서명 검증
         String canonical = "createJob|" + uploadId + "|" + originalFilename + "|" + totalChunks + "|"
                 + waveSize + "|" + canaryOnly + "|" + groupId + "|" + artifactId + "|" + targetVersion + "|"
-                + sourceMode + "|" + rampUpFactor;
+                + sourceMode + "|" + rampUpFactor + "|" + updatePackageType;
+        if (explicitTargetsRequested) {
+            canonical += "|targetMacs=" + String.join(",", targetMacs);
+        }
         requestSecurity.validateOrThrow(request, canonical);
 
         FileDistributionJob job = orchestrator.createJob(
@@ -92,7 +112,9 @@ public class FileDistributionController {
                 artifactId,
                 targetVersion,
                 sourceMode,
-                rampUpFactor
+                rampUpFactor,
+                updatePackageType,
+                explicitTargetsRequested ? targetMacs : null
         );
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("jobId", job.getId());
@@ -102,7 +124,30 @@ public class FileDistributionController {
         response.put("targetVersion", job.getTargetVersion());
         response.put("sourceMode", job.getSourceMode());
         response.put("rampUpFactor", job.getRampUpFactor());
+        response.put("updatePackageType", job.getUpdatePackageType());
         return response;
+    }
+
+    private List<String> parseTargetMacs(Object raw, boolean requested) {
+        if (!requested) {
+            return List.of();
+        }
+        if (!(raw instanceof List<?> values) || values.isEmpty()) {
+            throw new IllegalArgumentException("targetMacs must contain at least one MAC address");
+        }
+        if (values.size() > MAX_EXPLICIT_TARGETS) {
+            throw new IllegalArgumentException("targetMacs cannot exceed " + MAX_EXPLICIT_TARGETS + " entries");
+        }
+
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (Object value : values) {
+            String mac = value == null ? "" : String.valueOf(value).trim();
+            if (!MAC_ADDRESS.matcher(mac).matches()) {
+                throw new IllegalArgumentException("targetMacs contains an invalid MAC address");
+            }
+            normalized.add(mac.replace('-', ':').toUpperCase(java.util.Locale.ROOT));
+        }
+        return List.copyOf(normalized);
     }
 
     /**

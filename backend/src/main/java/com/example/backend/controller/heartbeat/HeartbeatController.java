@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -71,7 +72,7 @@ public class HeartbeatController {
         if (pendingCmd != null) {
             resp.put("command", pendingCmd);
         }
-        return ResponseEntity.ok(resp);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(resp);
     }
 
     @PostMapping("/offline")

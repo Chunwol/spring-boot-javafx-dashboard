@@ -14,6 +14,7 @@ import com.example.backend.service.filedist.FileDistributionOrchestrator;
 import com.example.backend.service.realtime.WebSocketService;
 import com.example.backend.service.status.OperationalMetricsService;
 import com.example.backend.service.traffic.TrafficLogFlushService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,6 +40,42 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class HeartbeatServiceTest {
 
+    @Test
+    void normalizeScmateMode_preservesAgentModeAndDerivesOnlyFromSchedule() {
+        assertThat(HeartbeatService.normalizeScmateMode("PROTECTED", "MANUAL")).isEqualTo("PROTECTED");
+        assertThat(HeartbeatService.normalizeScmateMode("OPERATOR", "RESTART")).isEqualTo("OPERATOR");
+        assertThat(HeartbeatService.normalizeScmateMode("PROTECTED", "WEEKLY")).isEqualTo("PROTECTED");
+        assertThat(HeartbeatService.normalizeScmateMode("OPERATOR", null)).isEqualTo("OPERATOR");
+        assertThat(HeartbeatService.normalizeScmateMode("UNKNOWN", "MANUAL")).isEqualTo("OPERATOR");
+        assertThat(HeartbeatService.normalizeScmateMode(null, "DAILY_FIRST_BOOT")).isEqualTo("PROTECTED");
+        assertThat(HeartbeatService.normalizeScmateMode(null, "OTHER")).isEqualTo("UNKNOWN");
+    }
+
+    @Test
+    void cliVerifiedProtectedModeIsNotOverwrittenByStaleSameBootHeartbeat() {
+        assertThat(HeartbeatService.shouldPreserveCliVerifiedMode(
+                100L, 100L,
+                "PROTECTED", "RESTART", "SCMATE_CLIENT_MEMORY+SHD_API+SHD_CMD",
+                "OPERATOR", "MANUAL", "SCMATE_CLIENT_MEMORY+SHD_API")).isTrue();
+        assertThat(HeartbeatService.shouldPreserveCliVerifiedMode(
+                100L, 200L,
+                "PROTECTED", "RESTART", "SCMATE_CLIENT_MEMORY+SHD_API+SHD_CMD",
+                "OPERATOR", "MANUAL", "SCMATE_CLIENT_MEMORY+SHD_API")).isFalse();
+        assertThat(HeartbeatService.shouldPreserveCliVerifiedMode(
+                100L, 100L,
+                "PROTECTED", "RESTART", "SCMATE_CLIENT_MEMORY+SHD_API+SHD_CMD",
+                "OPERATOR", "MANUAL", "SCMATE_CLIENT_MEMORY+SHD_API+SHD_CMD")).isFalse();
+    }
+
+    @Test
+    void confirmedBootChangeRequiresForwardMovementBeyondClockJitter() {
+        assertThat(HeartbeatService.isConfirmedBootChange(100L, 200L)).isTrue();
+        assertThat(HeartbeatService.isConfirmedBootChange(200L, 100L)).isFalse();
+        assertThat(HeartbeatService.isConfirmedBootChange(100L, 105L)).isFalse();
+        assertThat(HeartbeatService.isConfirmedBootChange(100L, 106L)).isTrue();
+        assertThat(HeartbeatService.isConfirmedBootChange(null, 200L)).isFalse();
+    }
+
     @Mock PcMasterRepository pcMasterRepository;
     @Mock ClassroomResolutionService classroomResolutionService;
     @Mock TrafficLogsRepository trafficLogsRepository;
@@ -47,6 +85,7 @@ class HeartbeatServiceTest {
     @Mock WebSocketService webSocketService;
     @Mock OperationalMetricsService operationalMetricsService;
     @Mock TrafficLogFlushService trafficLogFlushService;
+    @Mock ObjectMapper objectMapper;
 
     @InjectMocks HeartbeatService heartbeatService;
 
@@ -56,6 +95,7 @@ class HeartbeatServiceTest {
         ReflectionTestUtils.setField(heartbeatService, "trafficLogMinIntervalSeconds", 30);
         ReflectionTestUtils.setField(heartbeatService, "trafficSampleIntervalSeconds", 2);
         ReflectionTestUtils.setField(heartbeatService, "maxCommandRetries", 3);
+        ReflectionTestUtils.setField(heartbeatService, "commandQueueTtlSeconds", 300L);
         ReflectionTestUtils.setField(heartbeatService, "dispatchCommandOnHeartbeat", true);
         ReflectionTestUtils.setField(heartbeatService, "autoCatchupCheckIntervalSeconds", 300);
     }
@@ -167,6 +207,23 @@ class HeartbeatServiceTest {
         assertThat(response.get("taskId")).isEqualTo(99L);
         assertThat(response.get("type")).isEqualTo("LIST_FILES");
         verify(commandQueueRepository).markDeliveredIfQueued(eq(99L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void dispatchNextCommand_doesNotDeliverExpiredQueuedCommand() {
+        CommandQueue expired = new CommandQueue();
+        expired.setTaskId(100L);
+        expired.setMacAddress("AA:BB:CC:DD:EE:12");
+        expired.setCommandType("SHUTDOWN");
+        expired.setStatus("QUEUED");
+        expired.setCreatedAt(LocalDateTime.now().minusMinutes(10));
+        when(commandQueueRepository.findNextDispatchCandidates(
+                eq(expired.getMacAddress()), any())).thenReturn(List.of(expired));
+
+        assertThat(heartbeatService.dispatchNextCommand(expired.getMacAddress())).isNull();
+
+        verify(commandQueueRepository, never()).markDeliveredIfQueued(
+                eq(expired.getTaskId()), any(LocalDateTime.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -299,6 +356,471 @@ class HeartbeatServiceTest {
 
         assertThat(response).isNull();
         verify(commandQueueRepository, never()).findNextDispatchCandidates(eq("AA:BB:CC:DD:EE:41"), any());
+    }
+
+    @Test
+    void processHeartbeat_operatorModeCompletesRequestWithoutReboot() {
+        String mac = "AA:BB:CC:DD:EE:60";
+        PcMaster pc = savedPc(mac, "1.1.23");
+        pc.setIpAddress("10.10.0.60");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("PROTECTED");
+        pc.setScmateTransitionPending(true);
+        pc.setScmateWorkflowStage("OPERATOR_REQUESTED");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-60");
+        heartbeat.setIpAddress("10.10.0.60");
+        heartbeat.setAgentSessionId("same-session");
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("OPERATOR");
+        heartbeat.setScmateTransitionPending(false);
+        heartbeat.setScmateRawState(1L);
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.60", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.60", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("OPERATOR_READY");
+        assertThat(pc.getScmateMode()).isEqualTo("OPERATOR");
+        verify(pcMasterRepository).save(pc);
+    }
+
+    @Test
+    void processHeartbeat_operatorTransitionIsNotReportedReadyUntilStable() {
+        String mac = "AA:BB:CC:DD:EE:64";
+        PcMaster pc = savedPc(mac, "1.1.27");
+        pc.setIpAddress("10.10.0.64");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("PROTECTED");
+        pc.setScmateTransitionPending(false);
+        pc.setScmateWorkflowStage("OPERATOR_REQUESTED");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-64");
+        heartbeat.setIpAddress("10.10.0.64");
+        heartbeat.setAgentSessionId("same-session");
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("OPERATOR");
+        heartbeat.setScmateTransitionPending(true);
+        heartbeat.setScmateRawState(3L);
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.64", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.64", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("OPERATOR_REQUESTED");
+        assertThat(pc.getScmateMode()).isEqualTo("OPERATOR");
+        assertThat(pc.getScmateTransitionPending()).isTrue();
+    }
+
+    @Test
+    void processHeartbeat_operatorRequestQueuesProtectionRecoveryWhenDeleteTaskDisablesEngine() {
+        String mac = "AA:BB:CC:DD:EE:65";
+        PcMaster pc = savedPc(mac, "1.1.41");
+        pc.setIpAddress("10.10.0.65");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("PROTECTED");
+        pc.setScmateWorkflowStage("OPERATOR_REQUESTED");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-65");
+        heartbeat.setIpAddress("10.10.0.65");
+        heartbeat.setAgentSessionId("same-session");
+        heartbeat.setScmateAvailable(false);
+        heartbeat.setScmateAvailabilityReason("PROTECT_DISABLED");
+        heartbeat.setScmateMode("UNKNOWN");
+        heartbeat.setScmateSchedule("UNKNOWN");
+        heartbeat.setScmateTransitionPending(false);
+        heartbeat.setScmateRawState(9L);
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.65", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.65", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                mac, List.of("QUEUED", "DELIVERED", "ACKED"))).thenReturn(List.of());
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        ArgumentCaptor<CommandQueue> captor = ArgumentCaptor.forClass(CommandQueue.class);
+        verify(commandQueueRepository).save(captor.capture());
+        assertThat(captor.getValue().getCommandType()).isEqualTo("SCMATE_CONTROL");
+        assertThat(captor.getValue().getPayloadJson())
+                .contains("\"action\":\"ENABLE_PROTECTION\"")
+                .contains("\"resumeAction\":\"REQUEST_OPERATOR\"");
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("OPERATOR_ENABLE_REQUESTED");
+    }
+
+    @Test
+    void processHeartbeat_afterProtectedReboot_completesWorkflowEvenWhenRebootAckIsLate() throws Exception {
+        String mac = "AA:BB:CC:DD:EE:61";
+        PcMaster pc = savedPc(mac, "1.1.23");
+        pc.setIpAddress("10.10.0.61");
+        pc.setLastAgentSessionId("before-protected-reboot");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("OPERATOR");
+        pc.setScmateTransitionPending(true);
+        pc.setScmateWorkflowStage("WAITING_PROTECTED_REBOOT");
+        pc.setSystemBootTimeEpochSeconds(100L);
+        pc.setScmateWorkflowStartBootTimeEpochSeconds(100L);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-61");
+        heartbeat.setIpAddress("10.10.0.61");
+        heartbeat.setAgentSessionId("after-protected-reboot");
+        heartbeat.setSystemBootTimeEpochSeconds(200L);
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("PROTECTED");
+        heartbeat.setScmateSchedule("RESTART");
+        heartbeat.setScmateTransitionPending(false);
+        heartbeat.setScmateRawState(0L);
+
+        CommandQueue reboot = new CommandQueue();
+        reboot.setTaskId(161L);
+        reboot.setMacAddress(mac);
+        reboot.setCommandType("REBOOT");
+        reboot.setPayloadJson("{\"scmateWorkflowId\":\"workflow-61\",\"scmateAction\":\"REBOOT_TO_PROTECTED\"}");
+        reboot.setStatus("DELIVERED");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.61", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.61", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                mac, List.of("DELIVERED", "ACKED"))).thenReturn(List.of(reboot));
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+        when(objectMapper.readTree(reboot.getPayloadJson()))
+                .thenReturn(new ObjectMapper().readTree(reboot.getPayloadJson()));
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("COMPLETED");
+        assertThat(pc.getScmateMode()).isEqualTo("PROTECTED");
+        assertThat(pc.getScmateTransitionPending()).isFalse();
+        assertThat(reboot.getStatus()).isEqualTo("COMPLETED");
+        assertThat(reboot.getExitCode()).isZero();
+        assertThat(reboot.getIsExecuted()).isTrue();
+        assertThat(reboot.getStderr()).contains("system boot time changed");
+        verify(pcMasterRepository).save(pc);
+        verify(commandQueueRepository).save(reboot);
+    }
+
+    @Test
+    void processHeartbeat_afterProtectionRequestAutoReboot_completesScmateWorkflow() {
+        String mac = "AA:BB:CC:DD:EE:62";
+        PcMaster pc = savedPc(mac, "1.1.23");
+        pc.setIpAddress("10.10.0.62");
+        pc.setLastAgentSessionId("before-auto-reboot");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("OPERATOR");
+        pc.setScmateTransitionPending(false);
+        pc.setScmateWorkflowStage("PROTECTION_REQUESTED");
+        pc.setSystemBootTimeEpochSeconds(100L);
+        pc.setScmateWorkflowStartBootTimeEpochSeconds(100L);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-62");
+        heartbeat.setIpAddress("10.10.0.62");
+        heartbeat.setAgentSessionId("after-auto-reboot");
+        heartbeat.setSystemBootTimeEpochSeconds(200L);
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("PROTECTED");
+        heartbeat.setScmateSchedule("RESTART");
+        heartbeat.setScmateTransitionPending(false);
+        heartbeat.setScmateRawState(0L);
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.62", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.62", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                mac, List.of("DELIVERED", "ACKED"))).thenReturn(List.of());
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("COMPLETED");
+        assertThat(pc.getScmateMode()).isEqualTo("PROTECTED");
+        assertThat(pc.getScmateTransitionPending()).isFalse();
+        verify(pcMasterRepository).save(pc);
+    }
+
+    @Test
+    void processHeartbeat_afterSystemRestoreNewSession_completesWorkflowAndCommand() throws Exception {
+        String mac = "AA:BB:CC:DD:EE:63";
+        PcMaster pc = savedPc(mac, "1.1.24");
+        pc.setIpAddress("10.10.0.63");
+        pc.setLastAgentSessionId("before-system-restore");
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("PROTECTED");
+        pc.setScmateTransitionPending(false);
+        pc.setScmateWorkflowStage("RESTORE_REQUESTED");
+        pc.setSystemBootTimeEpochSeconds(100L);
+        pc.setScmateWorkflowStartBootTimeEpochSeconds(100L);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-63");
+        heartbeat.setIpAddress("10.10.0.63");
+        heartbeat.setAgentSessionId("after-system-restore");
+        heartbeat.setSystemBootTimeEpochSeconds(200L);
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("PROTECTED");
+        heartbeat.setScmateSchedule("RESTART");
+        heartbeat.setScmateTransitionPending(false);
+        heartbeat.setScmateRawState(0L);
+
+        CommandQueue restore = new CommandQueue();
+        restore.setTaskId(163L);
+        restore.setMacAddress(mac);
+        restore.setCommandType("SCMATE_CONTROL");
+        restore.setPayloadJson("{\"action\":\"RESTORE_BASELINE\"}");
+        restore.setStatus("ACKED");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.63", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.63", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                mac, List.of("DELIVERED", "ACKED"))).thenReturn(List.of(restore));
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+        when(objectMapper.readTree(restore.getPayloadJson()))
+                .thenReturn(new ObjectMapper().readTree(restore.getPayloadJson()));
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("COMPLETED");
+        assertThat(pc.getScmateMode()).isEqualTo("PROTECTED");
+        assertThat(pc.getLastAgentSessionId()).isEqualTo("after-system-restore");
+        assertThat(restore.getStatus()).isEqualTo("COMPLETED");
+        assertThat(restore.getExitCode()).isZero();
+        assertThat(restore.getIsExecuted()).isTrue();
+        verify(commandQueueRepository).save(restore);
+    }
+
+    @Test
+    void processHeartbeat_sessionChangeWithoutBootChange_doesNotCompleteRestore() {
+        String mac = "AA:BB:CC:DD:EE:65";
+        PcMaster pc = savedPc(mac, "1.1.30");
+        pc.setLastAgentSessionId("old-agent-process");
+        pc.setSystemBootTimeEpochSeconds(100L);
+        pc.setScmateAvailable(true);
+        pc.setScmateMode("PROTECTED");
+        pc.setScmateSchedule("RESTART");
+        pc.setScmateWorkflowStage("RESTORE_REQUESTED");
+        pc.setScmateWorkflowStartBootTimeEpochSeconds(100L);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-65");
+        heartbeat.setIpAddress("10.10.0.65");
+        heartbeat.setAgentSessionId("new-agent-process");
+        heartbeat.setSystemBootTimeEpochSeconds(100L);
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateMode("PROTECTED");
+        heartbeat.setScmateSchedule("RESTART");
+        heartbeat.setScmateTransitionPending(false);
+
+        CommandQueue restore = new CommandQueue();
+        restore.setTaskId(165L);
+        restore.setMacAddress(mac);
+        restore.setCommandType("SCMATE_CONTROL");
+        restore.setPayloadJson("{\"action\":\"RESTORE_BASELINE\"}");
+        restore.setStatus("ACKED");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.65", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.65", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findByMacAddressAndStatusInOrderByCreatedAtAsc(
+                mac, List.of("DELIVERED", "ACKED"))).thenReturn(List.of(restore));
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("RESTORE_REQUESTED");
+        assertThat(restore.getStatus()).isEqualTo("ACKED");
+        verify(commandQueueRepository, never()).save(restore);
+    }
+
+    @Test
+    void processHeartbeat_persistsScmateDetailFieldsWithoutRawModeReinterpretation() {
+        String mac = "AA:BB:CC:DD:EE:66";
+        PcMaster pc = savedPc(mac, "1.1.30");
+        pc.setIpAddress("10.10.0.66");
+        LocalDateTime baseline = LocalDateTime.of(2026, 8, 13, 9, 0);
+        LocalDateTime snap1 = baseline.plusHours(1);
+        LocalDateTime snap2 = baseline.plusHours(2);
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-66");
+        heartbeat.setIpAddress("10.10.0.66");
+        heartbeat.setSystemBootTimeEpochSeconds(123456L);
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateAvailabilityReason("available");
+        heartbeat.setScmateMode("OPERATOR");
+        heartbeat.setScmateSchedule("RESTART");
+        heartbeat.setScmateSelectedPoint("SNAP1");
+        heartbeat.setScmateProductVariant("RX2");
+        heartbeat.setScmateStateSource("client_display");
+        heartbeat.setScmateRawState(0L);
+        heartbeat.setScmateBaselineCreatedAt(baseline);
+        heartbeat.setScmateSnap1CreatedAt(snap1);
+        heartbeat.setScmateSnap2CreatedAt(snap2);
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId("10.10.0.66", mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, "10.10.0.66", mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getSystemBootTimeEpochSeconds()).isEqualTo(123456L);
+        assertThat(pc.getScmateMode()).isEqualTo("OPERATOR");
+        assertThat(pc.getScmateSchedule()).isEqualTo("RESTART");
+        assertThat(pc.getScmateAvailabilityReason()).isEqualTo("AVAILABLE");
+        assertThat(pc.getScmateSelectedPoint()).isEqualTo("SNAP1");
+        assertThat(pc.getScmateProductVariant()).isEqualTo("RX2");
+        assertThat(pc.getScmateStateSource()).isEqualTo("CLIENT_DISPLAY");
+        assertThat(pc.getScmateBaselineCreatedAt()).isEqualTo(baseline);
+        assertThat(pc.getScmateSnap1CreatedAt()).isEqualTo(snap1);
+        assertThat(pc.getScmateSnap2CreatedAt()).isEqualTo(snap2);
+    }
+
+    @Test
+    void dispatchNextCommand_refreshStatusDetailIncludesCredential() throws Exception {
+        String mac = "AA:BB:CC:DD:EE:77";
+        CommandQueue command = new CommandQueue();
+        command.setTaskId(77L);
+        command.setMacAddress(mac);
+        command.setCommandType("SCMATE_CONTROL");
+        command.setPayloadJson("{\"action\":\"REFRESH_STATUS_DETAIL\",\"recoveryPoint\":\"BASELINE\"}");
+        command.setCreatedAt(LocalDateTime.now().minusSeconds(1));
+
+        ReflectionTestUtils.setField(heartbeatService, "scmateCliUsername", "Administrator");
+        ReflectionTestUtils.setField(heartbeatService, "scmateCliPassword", "2500");
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of(command));
+        when(commandQueueRepository.markDeliveredIfQueued(eq(77L), any())).thenReturn(1);
+        when(objectMapper.readTree(command.getPayloadJson()))
+                .thenReturn(new ObjectMapper().readTree(command.getPayloadJson()));
+
+        Map<String, Object> dispatched = heartbeatService.dispatchNextCommand(mac);
+
+        assertThat(dispatched).containsKey("scmateCredential");
+        Map<?, ?> credential = (Map<?, ?>) dispatched.get("scmateCredential");
+        assertThat(credential.get("username")).isEqualTo("Administrator");
+        assertThat(credential.get("password")).isEqualTo("2500");
+    }
+
+    @Test
+    void processHeartbeat_preservesWorkflowFailureWhenHeartbeatHasNoScmateError() {
+        String mac = "AA:BB:CC:DD:EE:78";
+        PcMaster pc = savedPc(mac, "1.1.35");
+        pc.setScmateWorkflowStage("FAILED");
+        pc.setScmateError("SCMATE detail command failed");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-78");
+        heartbeat.setIpAddress(pc.getIpAddress());
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateAvailabilityReason("ACTIVE");
+        heartbeat.setScmateMode("OPERATOR");
+        heartbeat.setScmateSchedule("MANUAL");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId(pc.getIpAddress(), mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, pc.getIpAddress(), mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("FAILED");
+        assertThat(pc.getScmateError()).isEqualTo("SCMATE detail command failed");
+    }
+
+    @Test
+    void processHeartbeatClearsAlreadyProtectedNoOpFailure() {
+        String mac = "AA:BB:CC:DD:EE:7A";
+        PcMaster pc = savedPc(mac, "1.1.40");
+        pc.setScmateWorkflowStage("FAILED");
+        pc.setScmateError("SCMATE_PROTECTION_NOT_DISABLED: SCMATE protection is not in the disabled state.");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-7a");
+        heartbeat.setIpAddress(pc.getIpAddress());
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateAvailabilityReason("ACTIVE");
+        heartbeat.setScmateMode("PROTECTED");
+        heartbeat.setScmateSchedule("RESTART");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId(pc.getIpAddress(), mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, pc.getIpAddress(), mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("COMPLETED");
+        assertThat(pc.getScmateError()).isNull();
+    }
+
+    @Test
+    void processHeartbeat_reconcilesStaleWorkflowStageFromStableScmateState() {
+        String mac = "AA:BB:CC:DD:EE:79";
+        PcMaster pc = savedPc(mac, "1.1.35");
+        pc.setScmateWorkflowStage("INSTALL_PENDING_REBOOT");
+
+        HeartbeatDto heartbeat = new HeartbeatDto();
+        heartbeat.setMacAddress(mac);
+        heartbeat.setHostname("pc-79");
+        heartbeat.setIpAddress(pc.getIpAddress());
+        heartbeat.setScmateAvailable(true);
+        heartbeat.setScmateAvailabilityReason("ACTIVE");
+        heartbeat.setScmateMode("OPERATOR");
+        heartbeat.setScmateSchedule("MANUAL");
+
+        when(pcMasterRepository.findById(mac)).thenReturn(Optional.of(pc));
+        when(classroomResolutionService.resolveGroupId(pc.getIpAddress(), mac)).thenReturn(null);
+        when(classroomResolutionService.resolveRole(null, pc.getIpAddress(), mac))
+                .thenReturn(ClassroomResolutionService.PcRole.UNKNOWN);
+        when(commandQueueRepository.findNextDispatchCandidates(eq(mac), any())).thenReturn(List.of());
+        when(fileDistributionOrchestrator.tryAutoCatchUpOnHeartbeat(any())).thenReturn(Optional.empty());
+
+        heartbeatService.processHeartbeat(heartbeat);
+
+        assertThat(pc.getScmateWorkflowStage()).isEqualTo("OPERATOR_READY");
+        assertThat(pc.getScmateError()).isNull();
     }
 
     private PcMaster savedPc(String macAddress, String agentVersion) {

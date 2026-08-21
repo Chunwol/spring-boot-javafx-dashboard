@@ -19,14 +19,28 @@ echo " Classroom Dashboard — Docker 이미지 빌드"
 echo "================================================"
 echo ""
 
-echo "[1/3] Docker 이미지 빌드 중..."
+echo "[1/5] 웹 프론트엔드 테스트 및 빌드 중..."
+npm --prefix web-frontend ci
+npm --prefix web-frontend test
+npm --prefix web-frontend run build
+
+echo ""
+echo "[2/5] 백엔드 테스트 중..."
+./gradlew :backend:test -PskipWebFrontendBuild --no-daemon
+
+echo ""
+echo "[3/5] 백엔드 JAR 빌드 중..."
+./gradlew :backend:bootJar -PskipWebFrontendBuild --no-daemon
+
+echo ""
+echo "[4/5] Docker 이미지 빌드 중..."
 docker build \
   -f deploy/Dockerfile \
   -t "${IMAGE_NAME}:${IMAGE_TAG}" \
   .
 
 echo ""
-echo "[2/3] 이미지 파일로 내보내는 중... (시간이 걸릴 수 있습니다)"
+echo "[5/5] 이미지 파일로 내보내는 중... (시간이 걸릴 수 있습니다)"
 docker save "${IMAGE_NAME}:${IMAGE_TAG}" | gzip > "${OUTPUT_FILE}"
 
 SIZE=$(du -sh "${OUTPUT_FILE}" | cut -f1)

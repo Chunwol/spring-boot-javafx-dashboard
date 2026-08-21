@@ -92,4 +92,9 @@ public class FileDistributionJob {
     @Schema(description = "웨이브별 배포 비율 (ramp-up factor)")
     @Column(name = "ramp_up_factor")
     private Double rampUpFactor;
+
+    /** 업데이트 패키지 유형 (JAR 또는 FULL_BUNDLE) */
+    @Schema(description = "업데이트 패키지 유형", allowableValues = {"JAR", "FULL_BUNDLE"})
+    @Column(name = "update_package_type", length = 24)
+    private String updatePackageType;
 }

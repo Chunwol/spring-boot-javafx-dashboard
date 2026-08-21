@@ -244,7 +244,7 @@ ACK 전송 (POST /agent/commands/{taskId}/ack)
 
 | 증상 | 원인 | 해결 |
 |------|------|------|
-| "Java를 찾을 수 없습니다" | Java 미설치 또는 PATH 미등록 | JDK 25+ 설치 후 환경변수 설정 |
+| "정상 동작하는 PCAgent 자체 Java 25 런타임을 찾을 수 없습니다" | 번들 JRE/runtime 누락 또는 손상 | 최신 수동 설치 세트로 재설치하여 자체 JRE 복구 |
 | "config.json 찾을 수 없음" | 설정 파일 누락 | config.json 생성 (2.2절 참조) |
 | exit code 2 | 등록 3회 실패 | config.json의 serverUrl/installKey 확인 |
 

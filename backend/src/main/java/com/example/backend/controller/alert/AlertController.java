@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import java.util.List;
 import java.util.Map;
@@ -89,6 +90,17 @@ public class AlertController {
     public Map<String, Integer> acknowledgeAll(Authentication authentication) {
         String actor = authentication != null ? authentication.getName() : "unknown";
         int acknowledged = alertCenterService.acknowledgeAllUnread(actor);
+        return Map.of("acknowledged", acknowledged);
+    }
+
+    @PostMapping("/ack-selected")
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @Operation(summary = "선택한 운영 알림 확인 처리", description = "화면 필터에 표시된 미확인 알림만 일괄 확인합니다.")
+    public Map<String, Integer> acknowledgeSelected(
+            @RequestBody Map<String, List<Long>> body,
+            Authentication authentication) {
+        String actor = authentication != null ? authentication.getName() : "unknown";
+        int acknowledged = alertCenterService.acknowledgeUnreadByIds(body.get("alertIds"), actor);
         return Map.of("acknowledged", acknowledged);
     }
 }

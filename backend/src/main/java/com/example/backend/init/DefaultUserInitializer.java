@@ -95,6 +95,7 @@ public class DefaultUserInitializer implements ApplicationRunner {
 
         userRepository.findByUsername(username).ifPresentOrElse(user -> {
             boolean changed = false;
+            String targetRole = normalizeRole(label);
 
             boolean passwordMatches = passwordEncoder.matches(rawPassword, user.getPassword());
             if (!passwordMatches) {
@@ -109,6 +110,12 @@ public class DefaultUserInitializer implements ApplicationRunner {
                 logger.info("Default {} email updated from ENV for user={}", label, username);
             }
 
+            if (!targetRole.equalsIgnoreCase(user.getRole())) {
+                user.setRole(targetRole);
+                changed = true;
+                logger.info("Default {} role updated from ENV for user={}", label, username);
+            }
+
             if (changed) {
                 userRepository.save(user);
             } else {
@@ -116,9 +123,15 @@ public class DefaultUserInitializer implements ApplicationRunner {
             }
         }, () -> {
             String encodedPassword = passwordEncoder.encode(rawPassword);
-            User account = new User(username, encodedPassword, email);
+            User account = new User(username, encodedPassword, email, normalizeRole(label));
             userRepository.save(account);
             logger.info("Created default {} user from environment: {} (email={})", label, username, email);
         });
+    }
+
+    private String normalizeRole(String label) {
+        if ("admin".equalsIgnoreCase(label)) return "ADMIN";
+        if ("viewer".equalsIgnoreCase(label)) return "VIEWER";
+        return "USER";
     }
 }

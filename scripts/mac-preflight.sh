@@ -45,10 +45,11 @@ fi
 echo "[OK] gradlew is runnable"
 
 # 3) Validate required artifacts layout conventions
-if [[ -f "dist/frontend/frontend-mac.jar" || -f "dist/frontend/frontend-mac-aarch64.jar" || -f "dist/frontend/frontend-linux.jar" ]]; then
-  echo "[OK] Frontend platform JAR exists"
+if [[ -f "web-frontend/package-lock.json" ]]; then
+  echo "[OK] Web frontend lockfile exists"
 else
-  echo "[INFO] Frontend platform JARs not found yet (will be created by build)"
+  echo "[FAIL] web-frontend/package-lock.json not found"
+  exit 1
 fi
 
 echo

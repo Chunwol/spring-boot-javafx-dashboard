@@ -49,7 +49,7 @@ public class CommandQueue {
     @Column(name = "is_executed")
     private Boolean isExecuted = false;
 
-    /** 명령 상태 (QUEUED / DELIVERED / ACKED / COMPLETED / FAILED) */
+    /** 명령 상태 (QUEUED / DELIVERED / ACKED / COMPLETED / FAILED / CANCELLED) */
     @Schema(description = "명령 상태")
     @Column(name = "status")
     private String status = "QUEUED";

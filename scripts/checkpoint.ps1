@@ -116,8 +116,8 @@ if ($BuildVerify -eq "Yes" -or $BuildVerify -eq "Y") {
     $buildResponse = Read-Host
     
     if ($buildResponse -ne 'n' -and $buildResponse -ne 'N') {
-        Write-Status "Building frontend..." "Info"
-        $buildOutput = & .\gradlew.bat :frontend:build -x test 2>&1
+        Write-Status "Building web frontend..." "Info"
+        $buildOutput = & npm --prefix web-frontend run build 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Status "✅ Build successful" "Success"
         } else {

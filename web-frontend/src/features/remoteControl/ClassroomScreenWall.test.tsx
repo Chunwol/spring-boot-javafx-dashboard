@@ -1,0 +1,112 @@
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ClassroomScreenWall } from './ClassroomScreenWall'
+
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  get: vi.fn(),
+  ticket: vi.fn(),
+  close: vi.fn(),
+  closeBatchOnExit: vi.fn(),
+  disconnect: vi.fn(),
+  rfbCreated: vi.fn(),
+}))
+
+vi.mock('../../auth/AuthProvider', () => ({
+  useAuth: () => ({ token: 'test-jwt' }),
+}))
+
+vi.mock('./api', () => ({
+  createRemoteControlSession: mocks.create,
+  getRemoteControlSession: mocks.get,
+  issueRemoteControlTicket: mocks.ticket,
+  closeRemoteControlSession: mocks.close,
+  closeRemoteControlSessionsOnPageExit: mocks.closeBatchOnExit,
+  remoteControlWebSocketUrl: () => 'ws://localhost/vnc-relay/session?ticket=secret',
+}))
+
+vi.mock('@novnc/novnc', () => ({
+  default: function MockRfb() {
+    const client = {
+      viewOnly: false,
+      scaleViewport: false,
+      resizeSession: true,
+      focusOnClick: true,
+      qualityLevel: 7,
+      compressionLevel: 3,
+      disconnect: mocks.disconnect,
+      sendCredentials: vi.fn(),
+      addEventListener(type: string, listener: (event: CustomEvent) => void) {
+        if (type === 'connect') queueMicrotask(() => listener(new CustomEvent('connect')))
+      },
+    }
+    mocks.rfbCreated(client)
+    return client
+  },
+}))
+
+const room = {
+  groupId: 214,
+  groupName: '214호',
+  onlinePcs: 1,
+  totalPcs: 1,
+  runningCommandCount: 0,
+}
+
+const pc = {
+  macAddress: 'AA:BB:CC:DD:EE:FF',
+  pcName: '214-1',
+  ipAddress: '223.194.167.61',
+  groupId: 214,
+  groupName: '214호',
+  online: true,
+  role: 'STUDENT',
+}
+
+describe('ClassroomScreenWall', () => {
+  afterEach(cleanup)
+
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset())
+    mocks.create.mockResolvedValue({
+      sessionId: 'wall-session', taskId: 1, macAddress: pc.macAddress,
+      status: 'READY', expiresAt: '2026-08-09T20:00:00Z',
+    })
+    mocks.ticket.mockResolvedValue({
+      sessionId: 'wall-session', taskId: 1,
+      webSocketPath: '/vnc-relay/wall-session?ticket=secret',
+      oneTimePassword: 'Abcd1234', ticketExpiresAt: '2026-08-09T19:30:00Z',
+    })
+    mocks.close.mockResolvedValue(undefined)
+  })
+
+  it('opens a low-bandwidth view-only stream and cleans it up', async () => {
+    const view = render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+
+    expect(await screen.findByText('연결됨')).toBeInTheDocument()
+    const client = mocks.rfbCreated.mock.calls[0][0]
+    expect(client.viewOnly).toBe(true)
+    expect(client.scaleViewport).toBe(true)
+    expect(client.resizeSession).toBe(false)
+    expect(client.focusOnClick).toBe(false)
+    expect(client.qualityLevel).toBe(2)
+    expect(client.compressionLevel).toBe(9)
+
+    window.dispatchEvent(new Event('pagehide'))
+    expect(mocks.closeBatchOnExit).toHaveBeenCalledWith(['wall-session'], 'test-jwt')
+
+    view.unmount()
+    await waitFor(() => expect(mocks.close).toHaveBeenCalledWith('wall-session'))
+    expect(mocks.disconnect).toHaveBeenCalled()
+  })
+
+  it('does not reconnect when a status refresh replaces the PC object', async () => {
+    const view = render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+    expect(await screen.findByText('연결됨')).toBeInTheDocument()
+
+    view.rerender(<ClassroomScreenWall room={{ ...room }} pcs={[{ ...pc }]} onClose={vi.fn()} />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+    expect(mocks.rfbCreated).toHaveBeenCalledTimes(1)
+  })
+})

@@ -13,24 +13,24 @@ import org.springframework.stereotype.Component;
  *
  * <p>설정 키:
  * <pre>
- * TRAFFIC_ALERT_THRESHOLD_GLOBAL_MBPS     (기본 5000 Mbps, 전체 네트워크 임계값)
- * TRAFFIC_ALERT_THRESHOLD_CLASSROOM_MBPS  (기본 1000 Mbps, 강의실 단위 임계값)
- * TRAFFIC_ALERT_THRESHOLD_PC_MBPS         (기본 300 Mbps, 단일 PC 임계값)
+ * TRAFFIC_ALERT_THRESHOLD_GLOBAL_MBPS     (기본 2000 Mbps, 전체 네트워크 임계값)
+ * TRAFFIC_ALERT_THRESHOLD_CLASSROOM_MBPS  (기본 200 Mbps, 강의실 단위 임계값)
+ * TRAFFIC_ALERT_THRESHOLD_PC_MBPS         (기본 50 Mbps, 단일 PC 임계값)
  * </pre>
  */
 @Component
 public class TrafficThresholdConfig {
 
     /** 전체 네트워크 인바운드 트래픽 경보 임계값(Mbps). 이 값 초과 시 GLOBAL 레벨 알림 발행. */
-    @Value("${TRAFFIC_ALERT_THRESHOLD_GLOBAL_MBPS:5000}")
+    @Value("${TRAFFIC_ALERT_THRESHOLD_GLOBAL_MBPS:2000}")
     private double globalThresholdMbps;
 
     /** 강의실 단위 인바운드 트래픽 경보 임계값(Mbps). 이 값 초과 시 CLASSROOM 레벨 알림 발행. */
-    @Value("${TRAFFIC_ALERT_THRESHOLD_CLASSROOM_MBPS:1000}")
+    @Value("${TRAFFIC_ALERT_THRESHOLD_CLASSROOM_MBPS:200}")
     private double classroomThresholdMbps;
 
     /** 단일 PC 인바운드 트래픽 경보 임계값(Mbps). 이 값 초과 시 PC 레벨 알림 발행. */
-    @Value("${TRAFFIC_ALERT_THRESHOLD_PC_MBPS:300}")
+    @Value("${TRAFFIC_ALERT_THRESHOLD_PC_MBPS:50}")
     private double pcThresholdMbps;
 
     // Getters

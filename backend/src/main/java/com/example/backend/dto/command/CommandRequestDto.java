@@ -9,15 +9,15 @@ import java.util.List;
 
 public class CommandRequestDto {
     @NotBlank(message = "scope는 필수입니다.")
-    @Pattern(regexp = "^(?i)(SINGLE|GROUP)$", message = "scope는 SINGLE 또는 GROUP 이어야 합니다.")
-    private String scope; // SINGLE, GROUP
+    @Pattern(regexp = "^(?i)(SINGLE|GROUP|MULTI)$", message = "scope는 SINGLE, GROUP 또는 MULTI 이어야 합니다.")
+    private String scope; // SINGLE, GROUP, MULTI
 
     @Pattern(regexp = "^(?i)(TEACHER|STUDENT|ALL)?$", message = "role은 TEACHER/STUDENT/ALL 중 하나여야 합니다.")
     private String role;  // TEACHER, STUDENT, ALL
 
     @NotBlank(message = "type은 필수입니다.")
-    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL|PCON|COLLECT_FILES|LIST_FILES|AGENT_UPDATE|REMOTE_CONTROL_START|REMOTE_CONTROL_STOP)$", message = "type 값이 올바르지 않습니다.")
-    private String type;  // SHUTDOWN, REBOOT, RUN_CMD, RUN_PS1, WOL, PCON, COLLECT_FILES, LIST_FILES, AGENT_UPDATE, REMOTE_CONTROL_START, REMOTE_CONTROL_STOP
+    @Pattern(regexp = "^(?i)(SHUTDOWN|REBOOT|RUN_CMD|RUN_PS1|WOL|PCON|COLLECT_FILES|LIST_FILES|AGENT_UPDATE|AGENT_BUNDLE_UPDATE|REMOTE_CONTROL_START|REMOTE_CONTROL_STOP|SCMATE_CONTROL)$", message = "type 값이 올바르지 않습니다.")
+    private String type;
 
     @Pattern(regexp = "^$|^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$", message = "macAddress 형식이 올바르지 않습니다.")
     private String macAddress;

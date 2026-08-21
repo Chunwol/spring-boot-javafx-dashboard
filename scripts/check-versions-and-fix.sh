@@ -5,8 +5,8 @@
 # 맞춰야 하는 버전 (Required versions)
 #   Java  : 25 LTS  (openjdk 25.0.x)
 #   Gradle: 8.14.4  (gradlew wrapper 포함, 별도 설치 불필요)
-#   JavaFX: 25.0.2  (frontend/build.gradle openjfx 플러그인 고정값)
-#   Spring Boot: 3.4.0 (backend/build.gradle 고정값, Java 25 최고 호환)
+#   Node  : 24.x 이상 (web-frontend)
+#   Spring Boot: 4.x (backend/build.gradle)
 # ====================================================
 #
 # Usage:

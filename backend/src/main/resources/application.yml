@@ -76,6 +76,9 @@ scheduler:
   initial-delay: 5000
 
 app:
+  scmate:
+    cli-username: ${SCMATE_CLI_USERNAME:}
+    cli-password: ${SCMATE_CLI_PASSWORD:}
   runtime:
     async:
       core-pool-size: ${APP_ASYNC_CORE_POOL_SIZE:12}
@@ -98,6 +101,9 @@ app:
   security:
     admin-users: ${ADMIN_USERS:${DEFAULT_ADMIN_USERNAME:admin}}
     viewer-users: ${VIEWER_USERS:${DEFAULT_VIEWER_USERNAME:}}
+    cors:
+      # Comma-separated exact origins. Same-origin production requests do not require CORS.
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   nginx:
     # true: Nginx X-Accel-Redirect로 파일 서빙 위임 (JVM 힙 우회, Tomcat 스레드 즉시 반환)
     # Nginx에 아래 설정이 필요함:
@@ -107,6 +113,10 @@ app:
     internal-location: ${NGINX_INTERNAL_LOCATION:/internal-uploads/}
   scripts:
     dir: ${UPLOAD_DIR:uploads/}
+    chunk-max-bytes: ${SCRIPT_CHUNK_MAX_BYTES:16777216}
+    chunk-staging-max-bytes: ${SCRIPT_CHUNK_STAGING_MAX_BYTES:64424509440}
+    chunk-ttl-ms: ${SCRIPT_CHUNK_TTL_MS:86400000}
+    chunk-cleanup-interval-ms: ${SCRIPT_CHUNK_CLEANUP_INTERVAL_MS:3600000}
   collect:
     max-total-bytes: ${COLLECT_ARTIFACT_MAX_TOTAL_BYTES:32212254720}
   http-redirect:
@@ -121,7 +131,7 @@ app:
     peer-shared-secret: ${FD_PEER_SHARED_SECRET:change-me-peer-shared-secret}
     fail-threshold: ${FD_FAIL_THRESHOLD:0.20}
     auto-rollback-enabled: ${FD_AUTO_ROLLBACK_ENABLED:true}
-    auto-catchup-on-heartbeat: ${FD_AUTO_CATCHUP_ON_HEARTBEAT:true}
+    auto-catchup-on-heartbeat: ${FD_AUTO_CATCHUP_ON_HEARTBEAT:false}
     auto-catchup-failure-cooldown-seconds: ${FD_AUTO_CATCHUP_FAILURE_COOLDOWN_SECONDS:300}
     security:
       enabled: ${FD_SECURITY_ENABLED:false}
@@ -138,6 +148,8 @@ app:
   jwt:
     secret: ${JWT_SECRET:your-secret-key-change-me-in-production}
     expiration: ${JWT_EXPIRATION:86400000}
+    refresh-expiration: ${JWT_REFRESH_EXPIRATION:7776000000}
+    refresh-cookie-secure: ${JWT_REFRESH_COOKIE_SECURE:false}
   heartbeat:
     timeout-minutes: ${HEARTBEAT_TIMEOUT_MINUTES:2}
     interval-seconds: ${HEARTBEAT_INTERVAL_SECONDS:120}
@@ -146,11 +158,45 @@ app:
     persist-interval-seconds: ${HEARTBEAT_PERSIST_INTERVAL_SECONDS:30}
     auto-catchup-check-interval-seconds: ${HEARTBEAT_AUTO_CATCHUP_CHECK_INTERVAL_SECONDS:300}
   command:
-    timeout-seconds: ${COMMAND_TIMEOUT_SECONDS:45}
+    timeout-seconds: ${COMMAND_TIMEOUT_SECONDS:600}
+    queue-ttl-seconds: ${COMMAND_QUEUE_TTL_SECONDS:300}
     dispatch-on-heartbeat: ${COMMAND_DISPATCH_ON_HEARTBEAT:true}
     verify-offline-timeout-seconds: ${COMMAND_VERIFY_OFFLINE_TIMEOUT_SECONDS:120}
     verify-offline-silence-seconds: ${COMMAND_VERIFY_OFFLINE_SILENCE_SECONDS:40}
     verify-online-timeout-seconds: ${COMMAND_VERIFY_ONLINE_TIMEOUT_SECONDS:240}
+  wol:
+    router:
+      enabled: ${ROUTER_WOL_ENABLED:false}
+      username: ${ROUTER_WOL_USERNAME:}
+      password: ${ROUTER_WOL_PASSWORD:}
+      connect-timeout: ${ROUTER_WOL_CONNECT_TIMEOUT:2s}
+      request-timeout: ${ROUTER_WOL_REQUEST_TIMEOUT:4s}
+      dedup-window: ${ROUTER_WOL_DEDUP_WINDOW:2m}
+      routes:
+        - cidr: 223.194.166.0/24
+          gateways:
+            - ${ROUTER_WOL_166_PRIMARY_URL:http://223.194.166.249:8080}
+            - ${ROUTER_WOL_166_SECONDARY_URL:http://223.194.166.245:8080}
+        - cidr: 223.194.167.0/24
+          gateways:
+            - ${ROUTER_WOL_167_PRIMARY_URL:http://223.194.167.253:8080}
+            - ${ROUTER_WOL_167_SECONDARY_URL:http://223.194.167.252:8080}
+        - cidr: 223.194.168.0/24
+          gateways:
+            - ${ROUTER_WOL_168_PRIMARY_URL:http://223.194.168.251:8080}
+            - ${ROUTER_WOL_168_SECONDARY_URL:}
+        - cidr: 223.194.169.0/24
+          gateways:
+            - ${ROUTER_WOL_169_PRIMARY_URL:http://223.194.169.250:8080}
+            - ${ROUTER_WOL_169_SECONDARY_URL:}
+        - cidr: 172.16.204.0/24
+          gateways:
+            - ${ROUTER_WOL_204_PRIMARY_URL:http://172.16.204.150:8080}
+            - ${ROUTER_WOL_204_SECONDARY_URL:http://172.16.204.151:8080}
+        - cidr: 172.16.13.0/24
+          gateways:
+            - ${ROUTER_WOL_6_PRIMARY_URL:}
+            - ${ROUTER_WOL_6_SECONDARY_URL:}
   traffic:
     alert-threshold-mbps: ${TRAFFIC_ALERT_THRESHOLD_MBPS:100}
     log-min-interval-seconds: ${TRAFFIC_LOG_MIN_INTERVAL_SECONDS:30}
@@ -185,7 +231,6 @@ app:
       forbidden-rate: ${METRICS_ALERT_FORBIDDEN_RATE:0.40}
       ack-p95-ms: ${METRICS_ALERT_ACK_P95_MS:20000}
       result-p95-ms: ${METRICS_ALERT_RESULT_P95_MS:45000}
-      online-ratio-min: ${METRICS_ALERT_ONLINE_RATIO_MIN:0.70}
       window-seconds: ${METRICS_ALERT_WINDOW_SECONDS:300}
       min-command-samples: ${METRICS_ALERT_MIN_COMMAND_SAMPLES:10}
       min-transfer-samples: ${METRICS_ALERT_MIN_TRANSFER_SAMPLES:10}

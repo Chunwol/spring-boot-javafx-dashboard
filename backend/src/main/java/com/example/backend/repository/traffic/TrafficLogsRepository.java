@@ -4,6 +4,8 @@ import com.example.backend.model.traffic.TrafficLog;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -19,6 +21,20 @@ import java.util.Optional;
  */
 @Repository
 public interface TrafficLogsRepository extends JpaRepository<TrafficLog, Long> {
+
+    interface DailyTrafficAggregate {
+        Integer getYearPart();
+        Integer getMonthPart();
+        Integer getDayPart();
+        Long getInboundKbps();
+        Long getOutboundKbps();
+    }
+
+    interface HourlyTrafficAggregate {
+        Integer getHourPart();
+        Long getInboundKbps();
+        Long getOutboundKbps();
+    }
 
     /**
      * 지정 기간 내의 트래픽 로그를 조회한다.
@@ -64,4 +80,120 @@ public interface TrafficLogsRepository extends JpaRepository<TrafficLog, Long> {
      * @return 트래픽 로그 목록
      */
     List<TrafficLog> findByMacAddressInAndTimestampBetween(List<String> macAddresses, LocalDateTime start, LocalDateTime end);
+
+    @Query("""
+            select year(t.timestamp) as yearPart,
+                   month(t.timestamp) as monthPart,
+                   day(t.timestamp) as dayPart,
+                   coalesce(sum(t.inboundKbps), 0) as inboundKbps,
+                   coalesce(sum(t.outboundKbps), 0) as outboundKbps
+              from TrafficLog t
+             where t.timestamp between :start and :end
+             group by year(t.timestamp), month(t.timestamp), day(t.timestamp)
+             order by year(t.timestamp), month(t.timestamp), day(t.timestamp)
+            """)
+    List<DailyTrafficAggregate> aggregateDailyBetween(@Param("start") LocalDateTime start,
+                                                        @Param("end") LocalDateTime end);
+
+    @Query("""
+            select year(t.timestamp) as yearPart,
+                   month(t.timestamp) as monthPart,
+                   day(t.timestamp) as dayPart,
+                   coalesce(sum(t.inboundKbps), 0) as inboundKbps,
+                   coalesce(sum(t.outboundKbps), 0) as outboundKbps
+              from TrafficLog t
+             where t.macAddress in :macAddresses
+               and t.timestamp between :start and :end
+             group by year(t.timestamp), month(t.timestamp), day(t.timestamp)
+             order by year(t.timestamp), month(t.timestamp), day(t.timestamp)
+            """)
+    List<DailyTrafficAggregate> aggregateDailyForMacAddressesBetween(
+            @Param("macAddresses") List<String> macAddresses,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    @Query("""
+            select hour(t.timestamp) as hourPart,
+                   coalesce(sum(t.inboundKbps), 0) as inboundKbps,
+                   coalesce(sum(t.outboundKbps), 0) as outboundKbps
+              from TrafficLog t
+             where t.timestamp between :start and :end
+             group by hour(t.timestamp)
+             order by hour(t.timestamp)
+            """)
+    List<HourlyTrafficAggregate> aggregateHourlyBetween(@Param("start") LocalDateTime start,
+                                                          @Param("end") LocalDateTime end);
+
+    @Query("""
+            select hour(t.timestamp) as hourPart,
+                   coalesce(sum(t.inboundKbps), 0) as inboundKbps,
+                   coalesce(sum(t.outboundKbps), 0) as outboundKbps
+              from TrafficLog t
+             where t.macAddress in :macAddresses
+               and t.timestamp between :start and :end
+             group by hour(t.timestamp)
+             order by hour(t.timestamp)
+            """)
+    List<HourlyTrafficAggregate> aggregateHourlyForMacAddressesBetween(
+            @Param("macAddresses") List<String> macAddresses,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    @Query(value = """
+            select cast(strftime('%Y', timestamp / 1000, 'unixepoch', 'localtime') as integer) as yearPart,
+                   cast(strftime('%m', timestamp / 1000, 'unixepoch', 'localtime') as integer) as monthPart,
+                   cast(strftime('%d', timestamp / 1000, 'unixepoch', 'localtime') as integer) as dayPart,
+                   coalesce(sum(inbound_kbps), 0) as inboundKbps,
+                   coalesce(sum(outbound_kbps), 0) as outboundKbps
+              from traffic_logs
+             where timestamp between :start and :end
+             group by yearPart, monthPart, dayPart
+             order by yearPart, monthPart, dayPart
+            """, nativeQuery = true)
+    List<DailyTrafficAggregate> aggregateDailyBetweenSqlite(@Param("start") LocalDateTime start,
+                                                              @Param("end") LocalDateTime end);
+
+    @Query(value = """
+            select cast(strftime('%Y', timestamp / 1000, 'unixepoch', 'localtime') as integer) as yearPart,
+                   cast(strftime('%m', timestamp / 1000, 'unixepoch', 'localtime') as integer) as monthPart,
+                   cast(strftime('%d', timestamp / 1000, 'unixepoch', 'localtime') as integer) as dayPart,
+                   coalesce(sum(inbound_kbps), 0) as inboundKbps,
+                   coalesce(sum(outbound_kbps), 0) as outboundKbps
+              from traffic_logs
+             where mac_address in (:macAddresses)
+               and timestamp between :start and :end
+             group by yearPart, monthPart, dayPart
+             order by yearPart, monthPart, dayPart
+            """, nativeQuery = true)
+    List<DailyTrafficAggregate> aggregateDailyForMacAddressesBetweenSqlite(
+            @Param("macAddresses") List<String> macAddresses,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
+
+    @Query(value = """
+            select cast(strftime('%H', timestamp / 1000, 'unixepoch', 'localtime') as integer) as hourPart,
+                   coalesce(sum(inbound_kbps), 0) as inboundKbps,
+                   coalesce(sum(outbound_kbps), 0) as outboundKbps
+              from traffic_logs
+             where timestamp between :start and :end
+             group by hourPart
+             order by hourPart
+            """, nativeQuery = true)
+    List<HourlyTrafficAggregate> aggregateHourlyBetweenSqlite(@Param("start") LocalDateTime start,
+                                                                @Param("end") LocalDateTime end);
+
+    @Query(value = """
+            select cast(strftime('%H', timestamp / 1000, 'unixepoch', 'localtime') as integer) as hourPart,
+                   coalesce(sum(inbound_kbps), 0) as inboundKbps,
+                   coalesce(sum(outbound_kbps), 0) as outboundKbps
+              from traffic_logs
+             where mac_address in (:macAddresses)
+               and timestamp between :start and :end
+             group by hourPart
+             order by hourPart
+            """, nativeQuery = true)
+    List<HourlyTrafficAggregate> aggregateHourlyForMacAddressesBetweenSqlite(
+            @Param("macAddresses") List<String> macAddresses,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
 }

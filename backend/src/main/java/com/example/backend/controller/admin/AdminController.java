@@ -15,16 +15,21 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 관리자 단편 API
@@ -38,6 +43,9 @@ import java.util.Map;
 @PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin", description = "관리자 단편 API")
 public class AdminController {
+
+    private static final Pattern MAC_PATTERN = Pattern.compile("^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$");
+    private static final int MAX_BULK_AGENTS = 1000;
 
     private final CommandService commandService;
     private final CommandLifecycleService commandLifecycleService;
@@ -155,6 +163,26 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("status", "deleted", "mac", mac));
     }
 
+    @PutMapping("/agents/bulk/revoke")
+    @Operation(summary = "에이전트 토큰 일괄 폐기", description = "선택한 에이전트의 모든 토큰을 한 요청에서 폐기합니다.")
+    public ResponseEntity<Map<String, Object>> revokeTokens(@RequestBody Map<String, List<String>> body) {
+        Set<String> macs = normalizeMacs(body.get("macAddresses"));
+        macs.forEach(agentTokenService::revokeByMac);
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        auditService.log(username, "BULK_REVOKE_TOKEN", "AGENT", String.valueOf(macs.size()));
+        return ResponseEntity.ok(Map.of("status", "revoked", "count", macs.size()));
+    }
+
+    @PostMapping("/agents/bulk/delete")
+    @Operation(summary = "에이전트 일괄 삭제", description = "선택한 PC 레코드와 토큰을 한 요청에서 삭제합니다.")
+    public ResponseEntity<Map<String, Object>> deleteAgents(@RequestBody Map<String, List<String>> body) {
+        Set<String> macs = normalizeMacs(body.get("macAddresses"));
+        int deleted = adminService.deleteAll(macs);
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        auditService.log(username, "BULK_DELETE_AGENT", "AGENT", String.valueOf(macs.size()));
+        return ResponseEntity.ok(Map.of("status", "deleted", "requested", macs.size(), "deleted", deleted));
+    }
+
     @GetMapping("/audit/logs")
     @Operation(summary = "감사 로그 조회", description = "action 또는 actor 기준으로 최근 감사 로그를 조회합니다. 기본 최대 100건.")
     @ApiResponse(responseCode = "200", description = "감사 로그 목록")
@@ -197,5 +225,21 @@ public class AdminController {
             out.add(row);
         }
         return ResponseEntity.ok(out);
+    }
+
+    private Set<String> normalizeMacs(List<String> values) {
+        if (values == null || values.isEmpty() || values.size() > MAX_BULK_AGENTS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "macAddresses must contain between 1 and " + MAX_BULK_AGENTS + " items");
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String value : values) {
+            String mac = value == null ? "" : value.trim().replace('-', ':').toUpperCase();
+            if (!MAC_PATTERN.matcher(mac).matches()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid MAC address");
+            }
+            normalized.add(mac);
+        }
+        return normalized;
     }
 }

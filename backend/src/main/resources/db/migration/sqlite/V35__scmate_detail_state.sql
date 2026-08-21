@@ -1,0 +1,10 @@
+ALTER TABLE pc_master ADD COLUMN system_boot_time_epoch_seconds INTEGER;
+ALTER TABLE pc_master ADD COLUMN scmate_availability_reason TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_schedule TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_selected_point TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_product_variant TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_state_source TEXT;
+ALTER TABLE pc_master ADD COLUMN scmate_baseline_created_at TIMESTAMP;
+ALTER TABLE pc_master ADD COLUMN scmate_snap1_created_at TIMESTAMP;
+ALTER TABLE pc_master ADD COLUMN scmate_snap2_created_at TIMESTAMP;
+ALTER TABLE pc_master ADD COLUMN scmate_workflow_start_boot_time_epoch_seconds INTEGER;

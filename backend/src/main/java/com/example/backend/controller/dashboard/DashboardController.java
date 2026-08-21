@@ -76,6 +76,12 @@ public class DashboardController {
         return ResponseEntity.ok(classroomService.getClassroomPcTraffic(classroomId));
     }
 
+    @GetMapping("/classrooms/traffic/summary")
+    @Operation(summary = "전체 강의실 트래픽 요약", description = "모든 강의실의 최신 트래픽 합계를 한 번에 조회합니다.")
+    public ResponseEntity<List<Map<String, Object>>> getClassroomTrafficSummaries() {
+        return ResponseEntity.ok(classroomService.getClassroomTrafficSummaries());
+    }
+
     @GetMapping("/traffic")
     @Operation(summary = "네트워크 트래픽 조회", description = "현재 인바운드/아웃바운드 트래픽(Mbps)을 조회합니다.")
     @ApiResponse(responseCode = "200", description = "트래픽 조회 성공")
@@ -183,7 +189,31 @@ public class DashboardController {
             return ResponseEntity.badRequest().build();
         }
         String note = payload.getOrDefault("note", "broken");
-        return ResponseEntity.ok(pcStatusService.markPcAsBroken(macAddress, ipAddress, note));
+        Integer seatNumber = parseSeatNumber(payload.get("seatNumber"));
+        Long groupId = parsePositiveLong(payload.get("groupId"), "강의실 ID");
+        return ResponseEntity.ok(pcStatusService.markPcAsBroken(macAddress, ipAddress, note, seatNumber, groupId));
+    }
+
+    private Integer parseSeatNumber(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            int seatNumber = Integer.parseInt(value.trim());
+            if (seatNumber <= 0) throw new IllegalArgumentException("좌석 번호는 1 이상이어야 합니다.");
+            return seatNumber;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("좌석 번호는 숫자여야 합니다.");
+        }
+    }
+
+    private Long parsePositiveLong(String value, String fieldName) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            long parsed = Long.parseLong(value.trim());
+            if (parsed <= 0) throw new IllegalArgumentException(fieldName + "는 1 이상이어야 합니다.");
+            return parsed;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(fieldName + "는 숫자여야 합니다.");
+        }
     }
 
     @GetMapping("/pcs/broken")

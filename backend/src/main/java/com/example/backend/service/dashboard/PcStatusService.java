@@ -2,10 +2,12 @@ package com.example.backend.service.dashboard;
 
 import com.example.dto.dashboard.PcStatusDto;
 import com.example.backend.model.classroom.ClassroomGroup;
+import com.example.backend.common.exception.ConflictException;
 import com.example.backend.model.pc.PcMaster;
 import com.example.backend.repository.classroom.ClassroomGroupRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.service.classroom.ClassroomResolutionService;
+import com.example.backend.util.AgentVersionUtil;
 import com.example.backend.util.PaginationUtil;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -14,9 +16,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -53,17 +57,39 @@ public class PcStatusService {
      * Mark a PC as broken (supports both MAC and IP addresses)
      */
     public PcStatusDto markPcAsBroken(String macAddress, String ipAddress, String note) {
+        return markPcAsBroken(macAddress, ipAddress, note, null, null);
+    }
+
+    public PcStatusDto markPcAsBroken(String macAddress, String ipAddress, String note, Integer seatNumber) {
+        return markPcAsBroken(macAddress, ipAddress, note, seatNumber, null);
+    }
+
+    public PcStatusDto markPcAsBroken(
+            String macAddress, String ipAddress, String note, Integer seatNumber, Long groupId) {
         PcMaster pc;
         if (macAddress != null && !macAddress.isBlank()) {
             pc = pcMasterRepository.findById(macAddress).orElseThrow(() ->
                     new IllegalArgumentException("PC가 존재하지 않습니다: " + macAddress));
         } else if (ipAddress != null && !ipAddress.isBlank()) {
             pc = pcMasterRepository.findByIpAddress(ipAddress)
-                    .orElseGet(() -> createBrokenPlaceholderPc(ipAddress, note));
+                    .orElseGet(() -> createBrokenPlaceholderPc(ipAddress, note, seatNumber, groupId));
         } else {
             throw new IllegalArgumentException("macAddress 또는 ipAddress가 필요합니다.");
         }
 
+        if (macAddress == null && seatNumber != null && !isBrokenPlaceholder(pc)) {
+            throw new ConflictException("이미 등록된 PC가 사용하는 IP입니다: " + ipAddress);
+        }
+
+        if (isBrokenPlaceholder(pc) && seatNumber != null) {
+            if (seatNumber <= 0) throw new IllegalArgumentException("좌석 번호는 1 이상이어야 합니다.");
+            pc.setPcName("미사용 PC " + seatNumber);
+        }
+        if (isBrokenPlaceholder(pc) && groupId != null) {
+            validateGroup(groupId);
+            pc.setGroupId(groupId);
+            pc.setRole(classroomResolutionService.resolveRole(groupId, pc.getIpAddress(), null).name());
+        }
         pc.setStatus("BROKEN");
         pc.setBrokenNote(note == null || note.isBlank() ? "broken" : note.trim());
         pcMasterRepository.save(pc);
@@ -113,15 +139,19 @@ public class PcStatusService {
     /**
      * Create a placeholder PC entry for broken IP addresses
      */
-    private PcMaster createBrokenPlaceholderPc(String ipAddress, String note) {
-        Long groupId = classroomResolutionService.resolveGroupIdByIp(ipAddress);
+    private PcMaster createBrokenPlaceholderPc(
+            String ipAddress, String note, Integer seatNumber, Long requestedGroupId) {
+        Long groupId = requestedGroupId != null
+                ? requestedGroupId
+                : classroomResolutionService.resolveGroupIdByIp(ipAddress);
         if (groupId == null) {
             throw new IllegalArgumentException("해당 IP에 매핑된 강의실이 없습니다: " + ipAddress);
         }
+        validateGroup(groupId);
 
         PcMaster pc = new PcMaster();
         pc.setMacAddress(BROKEN_PLACEHOLDER_PREFIX + ipAddress.replace('.', '-'));
-        pc.setPcName("BROKEN " + ipAddress);
+        pc.setPcName(seatNumber == null ? "BROKEN " + ipAddress : "미사용 PC " + seatNumber);
         pc.setIpAddress(ipAddress);
         pc.setGroupId(groupId);
         pc.setRole(classroomResolutionService.resolveRole(groupId, ipAddress, null).name());
@@ -129,6 +159,12 @@ public class PcStatusService {
         pc.setBrokenNote(note == null || note.isBlank() ? "broken" : note.trim());
         pc.setLastSeen(null);
         return pc;
+    }
+
+    private void validateGroup(Long groupId) {
+        if (!classroomGroupRepository.existsById(groupId)) {
+            throw new IllegalArgumentException("강의실이 존재하지 않습니다: " + groupId);
+        }
     }
 
     /**
@@ -193,8 +229,79 @@ public class PcStatusService {
         dto.setOnline("ONLINE".equalsIgnoreCase(pc.getStatus()) || "IDLE".equalsIgnoreCase(pc.getStatus()));
         dto.setRole(pc.getRole());
         dto.setAgentVersion(pc.getAgentVersion());
+        dto.setBundleVersion(pc.getBundleVersion());
+        dto.setSystemBootTimeEpochSeconds(pc.getSystemBootTimeEpochSeconds());
         dto.setBrokenNote(pc.getBrokenNote());
         dto.setLastSeen(pc.getLastSeen());
+        dto.setScmateAvailable(pc.getScmateAvailable());
+        dto.setScmateAvailabilityReason(pc.getScmateAvailabilityReason());
+        dto.setScmateMode(pc.getScmateMode());
+        dto.setScmateSchedule(pc.getScmateSchedule());
+        dto.setScmateSelectedPoint(pc.getScmateSelectedPoint());
+        dto.setScmateProductVariant(pc.getScmateProductVariant());
+        dto.setScmateStateSource(pc.getScmateStateSource());
+        dto.setScmateTransitionPending(pc.getScmateTransitionPending());
+        dto.setScmateRawState(pc.getScmateRawState());
+        dto.setScmateObservedAt(pc.getScmateObservedAt());
+        dto.setScmateBaselineUpdatedAt(pc.getScmateBaselineUpdatedAt());
+        dto.setScmateBaselineCreatedAt(pc.getScmateBaselineCreatedAt());
+        dto.setScmateSnap1CreatedAt(pc.getScmateSnap1CreatedAt());
+        dto.setScmateSnap2CreatedAt(pc.getScmateSnap2CreatedAt());
+        dto.setScmateError(pc.getScmateError());
+        dto.setScmateWorkflowStage(pc.getScmateWorkflowStage());
+        dto.setScmateWorkflowId(pc.getScmateWorkflowId());
+        dto.setScmateAllowedActions(resolveScmateAllowedActions(pc));
         return dto;
+    }
+
+    private List<String> resolveScmateAllowedActions(PcMaster pc) {
+        if (!"ONLINE".equalsIgnoreCase(pc.getStatus())) {
+            return List.of();
+        }
+        List<String> actions = new ArrayList<>();
+        boolean detailedScmateSupported = AgentVersionUtil.isAtLeast(pc.getAgentVersion(), 1, 1, 35);
+        if (detailedScmateSupported) {
+            actions.add("REFRESH_STATUS_DETAIL");
+        }
+        if ("TEACHER".equalsIgnoreCase(pc.getRole())) {
+            return List.copyOf(actions);
+        }
+
+        boolean modeControlSupported = AgentVersionUtil.isAtLeast(pc.getAgentVersion(), 1, 1, 27);
+        if (modeControlSupported && pc.getSystemBootTimeEpochSeconds() != null) {
+            actions.add("REBOOT_TO_OPERATOR");
+            actions.add("REBOOT_TO_PROTECTED");
+        }
+
+        if ("NOT_INSTALLED".equalsIgnoreCase(pc.getScmateAvailabilityReason())
+                && AgentVersionUtil.isAtLeast(pc.getAgentVersion(), 1, 1, 28)
+                && !"INSTALL_PENDING_REBOOT".equals(pc.getScmateWorkflowStage())) {
+            actions.add("INSTALL_RECOVERY_MODULE");
+        }
+        if ("PROTECT_DISABLED".equalsIgnoreCase(pc.getScmateAvailabilityReason())
+                && AgentVersionUtil.isAtLeast(pc.getAgentVersion(), 1, 1, 40)) {
+            actions.add("ENABLE_PROTECTION");
+        }
+
+        if (!Boolean.TRUE.equals(pc.getScmateAvailable())) {
+            return List.copyOf(actions);
+        }
+
+        if (detailedScmateSupported) {
+            actions.add("REQUEST_OPERATOR");
+            actions.add("REQUEST_PROTECTED");
+            actions.add("RESTORE_BASELINE");
+        }
+
+        boolean stableManual = "MANUAL".equalsIgnoreCase(pc.getScmateSchedule())
+                && !Boolean.TRUE.equals(pc.getScmateTransitionPending());
+        boolean rebootObserved = pc.getScmateWorkflowStartBootTimeEpochSeconds() != null
+                && pc.getSystemBootTimeEpochSeconds() != null
+                && !Objects.equals(pc.getScmateWorkflowStartBootTimeEpochSeconds(),
+                        pc.getSystemBootTimeEpochSeconds());
+        if (detailedScmateSupported && stableManual && rebootObserved) {
+            actions.add("UPDATE_BASELINE");
+        }
+        return List.copyOf(actions);
     }
 }

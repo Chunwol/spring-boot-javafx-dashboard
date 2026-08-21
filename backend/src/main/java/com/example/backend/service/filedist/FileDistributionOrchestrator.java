@@ -64,6 +64,8 @@ import java.util.TreeSet;
 public class FileDistributionOrchestrator {
     private static final String SOURCE_MODE_SERVER_ONLY = "SERVER_ONLY";
     private static final String SOURCE_MODE_HYBRID_PEER = "HYBRID_PEER";
+    private static final String UPDATE_PACKAGE_JAR = "JAR";
+    private static final String UPDATE_PACKAGE_FULL_BUNDLE = "FULL_BUNDLE";
 
     private final FileDistributionJobRepository jobRepo;
     private final FileDistributionAgentStatusRepository agentStatusRepo;
@@ -97,7 +99,7 @@ public class FileDistributionOrchestrator {
     @Value("${app.file-distribution.auto-rollback-enabled:true}")
     private boolean autoRollbackEnabled;
 
-    @Value("${app.file-distribution.auto-catchup-on-heartbeat:true}")
+    @Value("${app.file-distribution.auto-catchup-on-heartbeat:false}")
     private boolean autoCatchupOnHeartbeat;
 
     @Value("${app.file-distribution.auto-catchup-failure-cooldown-seconds:300}")
@@ -157,6 +159,28 @@ public class FileDistributionOrchestrator {
                                          String sourceMode,
                                          Double rampUpFactor,
                                          List<String> explicitTargetAgentIds) {
+        return createJob(uploadId, originalFilename, totalChunks, waveSize, canaryOnly, groupId,
+                artifactId, targetVersion, sourceMode, rampUpFactor, UPDATE_PACKAGE_JAR, explicitTargetAgentIds);
+    }
+
+    @Transactional
+    public FileDistributionJob createJob(String uploadId,
+                                         String originalFilename,
+                                         int totalChunks,
+                                         int waveSize,
+                                         boolean canaryOnly,
+                                         Long groupId,
+                                         Long artifactId,
+                                         String targetVersion,
+                                         String sourceMode,
+                                         Double rampUpFactor,
+                                         String updatePackageType,
+                                         List<String> explicitTargetAgentIds) {
+        String normalizedPackageType = normalizeUpdatePackageType(updatePackageType);
+        if (UPDATE_PACKAGE_FULL_BUNDLE.equals(normalizedPackageType)
+                && (originalFilename == null || !originalFilename.toLowerCase(Locale.ROOT).endsWith(".zip"))) {
+            throw new IllegalArgumentException("FULL_BUNDLE requires a .zip artifact");
+        }
         FileDistributionJob job = new FileDistributionJob();
         job.setUploadId(uploadId);
         job.setOriginalFilename(originalFilename);
@@ -165,8 +189,11 @@ public class FileDistributionOrchestrator {
         job.setCreatedAt(LocalDateTime.now());
         job.setArtifactId(artifactId);
         job.setTargetVersion(normalizeTargetVersion(targetVersion));
-        job.setSourceMode(normalizeSourceMode(sourceMode));
+        job.setSourceMode(UPDATE_PACKAGE_FULL_BUNDLE.equals(normalizedPackageType)
+                ? SOURCE_MODE_SERVER_ONLY
+                : normalizeSourceMode(sourceMode));
         job.setRampUpFactor(resolveRampUpFactor(rampUpFactor));
+        job.setUpdatePackageType(normalizedPackageType);
 
         FileDistributionJob saved = jobRepo.save(job);
 
@@ -180,6 +207,7 @@ public class FileDistributionOrchestrator {
         createdEvent.put("targetVersion", saved.getTargetVersion());
         createdEvent.put("sourceMode", saved.getSourceMode());
         createdEvent.put("rampUpFactor", saved.getRampUpFactor());
+        createdEvent.put("updatePackageType", saved.getUpdatePackageType());
         addEvent(saved, "CREATED", toJson(createdEvent));
         return saved;
     }
@@ -392,6 +420,7 @@ public class FileDistributionOrchestrator {
                 stable.getTargetVersion(),
                 stable.getSourceMode(),
                 stable.getRampUpFactor(),
+                stable.getUpdatePackageType(),
                 explicitTargets
         );
         addEvent(rollbackJob, "ROLLBACK_CREATED", toJson(Map.of(
@@ -448,6 +477,7 @@ public class FileDistributionOrchestrator {
                 targetVersion,
                 baseline.getSourceMode(),
                 baseline.getRampUpFactor(),
+                baseline.getUpdatePackageType(),
                 List.of(pc.getMacAddress())
         );
 
@@ -534,6 +564,7 @@ public class FileDistributionOrchestrator {
         out.put("targetVersion", job.getTargetVersion());
         out.put("sourceMode", job.getSourceMode());
         out.put("rampUpFactor", job.getRampUpFactor());
+        out.put("updatePackageType", normalizeUpdatePackageType(job.getUpdatePackageType()));
         out.put("totalAgents", total);
         out.put("completed", completed);
         out.put("failed", failed);
@@ -564,6 +595,7 @@ public class FileDistributionOrchestrator {
             row.put("targetVersion", job.getTargetVersion());
             row.put("sourceMode", job.getSourceMode());
             row.put("rampUpFactor", job.getRampUpFactor());
+            row.put("updatePackageType", normalizeUpdatePackageType(job.getUpdatePackageType()));
             row.put("createdAt", job.getCreatedAt());
             row.put("completedAt", job.getCompletedAt());
             row.put("cancelledAt", job.getCancelledAt());
@@ -603,13 +635,26 @@ public class FileDistributionOrchestrator {
         for (FileDistributionAgentStatus status : targets) {
             String agentId = status.getAgentId();
             try {
+                if (UPDATE_PACKAGE_FULL_BUNDLE.equals(normalizeUpdatePackageType(job.getUpdatePackageType()))) {
+                    PcMaster targetPc = pcMasterRepository.findById(agentId).orElse(null);
+                    if (targetPc == null || !isVersionAtLeast(targetPc.getAgentVersion(), 1, 1, 20)) {
+                        status.setStatus("FAILED");
+                        status.setErrorMessage("full bundle requires bootstrap agent 1.1.20 or newer");
+                        status.setCompletedAt(LocalDateTime.now());
+                        agentStatusRepo.save(status);
+                        failed++;
+                        continue;
+                    }
+                }
                 List<Map<String, Object>> peerCandidates =
                         buildPeerCandidates(job, wave, agentId, artifact.getSha256(), peerToken);
                 maxPeerCandidateCount = Math.max(maxPeerCandidateCount, peerCandidates.size());
 
                 CommandQueue command = new CommandQueue();
                 command.setMacAddress(agentId);
-                command.setCommandType("AGENT_UPDATE");
+                command.setCommandType(UPDATE_PACKAGE_FULL_BUNDLE.equals(normalizeUpdatePackageType(job.getUpdatePackageType()))
+                        ? "AGENT_BUNDLE_UPDATE"
+                        : "AGENT_UPDATE");
                 command.setScriptUrl(null);
                 command.setStatus("QUEUED");
                 command.setCreatedAt(LocalDateTime.now());
@@ -654,6 +699,7 @@ public class FileDistributionOrchestrator {
         payload.put("sha256", artifact.getSha256());
         payload.put("targetVersion", job.getTargetVersion());
         payload.put("sourceMode", normalizeSourceMode(job.getSourceMode()));
+        payload.put("updatePackageType", normalizeUpdatePackageType(job.getUpdatePackageType()));
         payload.put("peerCandidates", peerCandidates);
         payload.put("peerToken", peerToken);
 
@@ -825,6 +871,33 @@ public class FileDistributionOrchestrator {
         return SOURCE_MODE_HYBRID_PEER.equals(normalized) ? SOURCE_MODE_HYBRID_PEER : SOURCE_MODE_SERVER_ONLY;
     }
 
+    private String normalizeUpdatePackageType(String updatePackageType) {
+        if (updatePackageType == null || updatePackageType.isBlank()) {
+            return UPDATE_PACKAGE_JAR;
+        }
+        String normalized = updatePackageType.trim().toUpperCase(Locale.ROOT);
+        if (!UPDATE_PACKAGE_JAR.equals(normalized) && !UPDATE_PACKAGE_FULL_BUNDLE.equals(normalized)) {
+            throw new IllegalArgumentException("unsupported updatePackageType: " + updatePackageType);
+        }
+        return normalized;
+    }
+
+    private boolean isVersionAtLeast(String version, int requiredMajor, int requiredMinor, int requiredPatch) {
+        if (version == null || version.isBlank()) return false;
+        String[] parts = version.trim().split("[.-]", 4);
+        if (parts.length < 3) return false;
+        try {
+            int major = Integer.parseInt(parts[0]);
+            int minor = Integer.parseInt(parts[1]);
+            int patch = Integer.parseInt(parts[2]);
+            if (major != requiredMajor) return major > requiredMajor;
+            if (minor != requiredMinor) return minor > requiredMinor;
+            return patch >= requiredPatch;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
     private double resolveRampUpFactor(Double rampUpFactor) {
         double factor = rampUpFactor == null ? defaultRampUpFactor : rampUpFactor;
         if (Double.isNaN(factor) || Double.isInfinite(factor)) {
@@ -927,10 +1000,16 @@ public class FileDistributionOrchestrator {
             if (raw == null) {
                 continue;
             }
-            String trimmed = raw.trim();
-            if (!trimmed.isBlank()) {
-                deduped.add(trimmed);
+            String normalized = raw.trim().replace('-', ':').toUpperCase(java.util.Locale.ROOT);
+            if (normalized.isBlank()) {
+                continue;
             }
+            pcMasterRepository.findById(normalized)
+                    .filter(pc -> "ONLINE".equalsIgnoreCase(pc.getStatus()))
+                    .map(PcMaster::getMacAddress)
+                    .filter(id -> id != null && !id.isBlank())
+                    .map(String::trim)
+                    .ifPresent(deduped::add);
         }
         return new ArrayList<>(deduped);
     }
@@ -978,7 +1057,8 @@ public class FileDistributionOrchestrator {
                 String verification = cmd.getVerificationStatus() == null
                         ? ""
                         : cmd.getVerificationStatus().trim().toUpperCase(Locale.ROOT);
-                if ("PENDING_REBOOT_CONFIRM".equals(verification)
+                if ("PENDING_AGENT_RESTART".equals(verification)
+                        || "PENDING_REBOOT_CONFIRM".equals(verification)
                         || "CONFIRMED".equals(verification)) {
                     return true;
                 }
@@ -1047,6 +1127,7 @@ public class FileDistributionOrchestrator {
                 stable.getTargetVersion(),
                 stable.getSourceMode(),
                 stable.getRampUpFactor(),
+                stable.getUpdatePackageType(),
                 targets
         );
         addEvent(rollbackJob, "AUTO_ROLLBACK_CREATED", toJson(Map.of(

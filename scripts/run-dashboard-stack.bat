@@ -28,7 +28,7 @@ if not exist "%PROJECT_ROOT%\gradlew.bat" (
 )
 
 if "%AUTOSTART_MODE%"=="0" (
-    echo [0/3] Starting Docker server stack...
+    echo [0/2] Starting Docker server stack...
 )
 docker compose up -d --build
 if errorlevel 1 (
@@ -37,7 +37,7 @@ if errorlevel 1 (
 )
 
 if "%AUTOSTART_MODE%"=="0" (
-    echo [1/3] Waiting for backend to become reachable...
+    echo [1/2] Waiting for backend to become reachable...
 )
 for /L %%N in (1,1,12) do (
     powershell -NoProfile -Command "if (Test-NetConnection -ComputerName 127.0.0.1 -Port 8888 -WarningAction SilentlyContinue).TcpTestSucceeded { exit 0 } else { exit 1 }"
@@ -48,12 +48,7 @@ for /L %%N in (1,1,12) do (
 :BACKEND_READY
 
 if "%AUTOSTART_MODE%"=="0" (
-    echo [2/3] Starting Frontend...
-)
-start "" /D "%PROJECT_ROOT%" cmd /c gradlew.bat :frontend:run
-
-if "%AUTOSTART_MODE%"=="0" (
-    echo [3/3] Starting Agent...
+    echo [2/2] Starting Agent...
 )
 start "" /D "%PROJECT_ROOT%" cmd /c scripts\run-agent.bat
 
@@ -63,7 +58,7 @@ if "%AUTOSTART_MODE%"=="0" (
     echo === Startup complete (Docker server + detached clients)
     echo ============================================================
     echo Backend:  http://localhost:8888
-    echo Frontend: JavaFX window
+    echo Dashboard: http://localhost:8888
     echo Agent:    scripts\run-agent.bat
     echo ============================================================
     echo.

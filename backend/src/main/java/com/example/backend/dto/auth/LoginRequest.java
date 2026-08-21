@@ -22,4 +22,7 @@ public class LoginRequest {
     @Size(max = 100, message = "password는 100자를 초과할 수 없습니다.")
     @Schema(description = "비밀번호", example = "password")
     private String password;
+
+    @Schema(description = "브라우저 자동 로그인 사용 여부", example = "true")
+    private boolean autoLogin;
 }

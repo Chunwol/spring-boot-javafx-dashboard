@@ -5,18 +5,24 @@ import com.example.agent.command.PendingCommandResultStore;
 import com.example.agent.config.AgentConfig;
 import com.example.agent.config.AgentConfigLoader;
 import com.example.agent.hardware.HardwareCollector;
+import com.example.agent.scmate.ScmateController;
 import com.example.agent.update.UpdateCacheServer;
 import com.example.agent.util.SensitiveDataMasker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.jna.Library;
+import com.sun.jna.Native;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import oshi.SystemInfo;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +39,8 @@ public class HeartbeatSender {
     private static final int TRAFFIC_SAMPLE_INTERVAL_SECONDS = 2;
     private static final int LEGACY_TRAFFIC_PROBE_HEARTBEATS = 30;
     private static final int ERROR_BODY_LOG_MAX = 300;
+    private static final long SCMATE_PROBE_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(15);
+    private static final long SCMATE_TRANSIENT_GRACE_NANOS = TimeUnit.MINUTES.toNanos(2);
 
     private final AgentConfig config;
     private final AgentConfigLoader configLoader;
@@ -40,8 +48,11 @@ public class HeartbeatSender {
     private final OkHttpClient httpClient;
     private final ObjectMapper mapper;
     private final CommandExecutor commandExecutor;
+    // Process-session identity only. A changed value is not proof of an OS reboot.
     private final String agentSessionId;
+    private final long systemBootTimeEpochSeconds;
     private final String agentVersion;
+    private final String bundleVersion;
     private final ExecutorService commandExecutorService;
     private final ScheduledExecutorService trafficSamplerService;
     private volatile boolean pollerRunning = true;
@@ -49,6 +60,15 @@ public class HeartbeatSender {
     private final TrafficSampleAggregator trafficSampleAggregator = new TrafficSampleAggregator();
     private volatile boolean forceLegacyTrafficPayload = false;
     private int legacyProbeCountdown = 0;
+    private volatile Map<String, Object> cachedScmateStatus = Map.of(
+            "scmateAvailable", false,
+            "scmateMode", "UNKNOWN",
+            "scmateTransitionPending", false,
+            "scmateProductVariant", "UNKNOWN",
+            "scmateStateSource", "STATUS_UNAVAILABLE");
+    private volatile long lastScmateProbeNanos;
+    private final ScmateStatusStabilizer scmateStatusStabilizer =
+            new ScmateStatusStabilizer(SCMATE_TRANSIENT_GRACE_NANOS);
 
     public HeartbeatSender(AgentConfig config, AgentConfigLoader configLoader,
                            HardwareCollector hardware, OkHttpClient httpClient,
@@ -65,10 +85,13 @@ public class HeartbeatSender {
         this.httpClient = httpClient;
         this.mapper = mapper;
         this.agentSessionId = UUID.randomUUID().toString();
+        this.systemBootTimeEpochSeconds = resolveSystemBootTimeEpochSeconds(new SystemInfo());
         this.agentVersion = resolveAgentVersion();
+        this.bundleVersion = resolveBundleVersion();
         PendingCommandResultStore pendingResultStore = new PendingCommandResultStore(
             configLoader.getConfigPath().getParent(), mapper);
-        this.commandExecutor = new CommandExecutor(config, configLoader, httpClient, mapper, pendingResultStore, updateCacheServer);
+        this.commandExecutor = new CommandExecutor(config, configLoader, httpClient, mapper,
+                pendingResultStore, updateCacheServer, this::recordConfirmedScmateStatus);
 
         // 파일 전송은 별도 스레드에서 처리 (일반 명령이 블로킹되지 않도록)
         this.commandExecutorService = Executors.newFixedThreadPool(3, r -> {
@@ -333,7 +356,11 @@ public class HeartbeatSender {
         body.put("hostname", hostname);
         body.put("ipAddress", ipAddress);
         body.put("agentVersion", agentVersion);
-        body.put("agentSessionId", agentSessionId);
+        putRuntimeIdentity(body, agentSessionId, systemBootTimeEpochSeconds);
+        if (bundleVersion != null && !bundleVersion.isBlank()) {
+            body.put("bundleVersion", bundleVersion);
+        }
+        body.putAll(currentScmateStatus());
 
         double[] latest = trafficSamples.isEmpty()
                 ? new double[]{0.0, 0.0}
@@ -344,6 +371,73 @@ public class HeartbeatSender {
             body.put("trafficSamples", trafficSamples);
         }
         return body;
+    }
+
+    private Map<String, Object> currentScmateStatus() {
+        long now = System.nanoTime();
+        if (lastScmateProbeNanos != 0 && now - lastScmateProbeNanos < SCMATE_PROBE_INTERVAL_NANOS) {
+            return cachedScmateStatus;
+        }
+        synchronized (this) {
+            now = System.nanoTime();
+            if (lastScmateProbeNanos != 0 && now - lastScmateProbeNanos < SCMATE_PROBE_INTERVAL_NANOS) {
+                return cachedScmateStatus;
+            }
+            Map<String, Object> status = new LinkedHashMap<>();
+            ScmateController.Result result = ScmateController.execute("STATUS", null, null, mapper);
+            try {
+                if (result.exitCode() == 0) {
+                    JsonNode after = mapper.readTree(result.stdout()).path("after");
+                    status.put("scmateAvailable", after.path("available").asBoolean(false));
+                    status.put("scmateMode", after.path("mode").asText("UNKNOWN"));
+                    status.put("scmateTransitionPending", after.path("transitionPending").asBoolean(false));
+                    status.put("scmateRawState", after.path("raw").asLong(0));
+                    status.put("scmateSchedule", after.path("schedule").asText("UNKNOWN"));
+                    status.put("scmateSelectedPoint", after.path("selectedPoint").asText("UNKNOWN"));
+                    status.put("scmateAvailabilityReason",
+                            after.path("availabilityReason").asText("STATUS_UNAVAILABLE"));
+                    status.put("scmateProductVariant", after.path("productVariant").asText("UNKNOWN"));
+                    status.put("scmateStateSource", after.path("stateSource").asText("STATUS_UNAVAILABLE"));
+                    status.put("scmateError", null);
+                } else {
+                    status.put("scmateAvailable", false);
+                    status.put("scmateMode", "UNKNOWN");
+                    status.put("scmateTransitionPending", false);
+                    status.put("scmateRawState", null);
+                    status.put("scmateSchedule", "UNKNOWN");
+                    status.put("scmateSelectedPoint", "UNKNOWN");
+                    status.put("scmateAvailabilityReason", "STATUS_UNAVAILABLE");
+                    status.put("scmateProductVariant", "UNKNOWN");
+                    status.put("scmateStateSource", "STATUS_UNAVAILABLE");
+                    status.put("scmateError", result.stderr() != null
+                            && result.stderr().startsWith("SCMATE_NOT_INSTALLED") ? null : result.stderr());
+                }
+            } catch (Exception error) {
+                status.put("scmateAvailable", false);
+                status.put("scmateMode", "UNKNOWN");
+                status.put("scmateTransitionPending", false);
+                status.put("scmateRawState", null);
+                status.put("scmateSchedule", "UNKNOWN");
+                status.put("scmateSelectedPoint", "UNKNOWN");
+                status.put("scmateAvailabilityReason", "STATUS_UNAVAILABLE");
+                status.put("scmateProductVariant", "UNKNOWN");
+                status.put("scmateStateSource", "STATUS_UNAVAILABLE");
+                status.put("scmateError", "SCMATE_STATUS_PARSE_FAILED");
+            }
+            cachedScmateStatus = scmateStatusStabilizer.stabilize(status, now);
+            lastScmateProbeNanos = now;
+            return cachedScmateStatus;
+        }
+    }
+
+    private void recordConfirmedScmateStatus(Map<String, Object> confirmedStatus) {
+        long now = System.nanoTime();
+        synchronized (this) {
+            Map<String, Object> merged = new LinkedHashMap<>(cachedScmateStatus);
+            merged.putAll(confirmedStatus);
+            cachedScmateStatus = scmateStatusStabilizer.recordConfirmed(merged);
+            lastScmateProbeNanos = now;
+        }
     }
 
     private HeartbeatHttpResponse postHeartbeat(Map<String, Object> body) throws Exception {
@@ -412,8 +506,11 @@ public class HeartbeatSender {
             body.put("macAddress", effectiveMac);
             body.put("hostname", effectiveHostname);
             body.put("ipAddress", effectiveIp);
-            body.put("agentSessionId", agentSessionId);
+            putRuntimeIdentity(body, agentSessionId, systemBootTimeEpochSeconds);
             body.put("agentVersion", agentVersion);
+            if (bundleVersion != null && !bundleVersion.isBlank()) {
+                body.put("bundleVersion", bundleVersion);
+            }
             body.put("reason", (reason == null || reason.isBlank()) ? "AGENT_SHUTDOWN" : reason.trim());
 
             OkHttpClient shutdownClient = httpClient.newBuilder()
@@ -518,6 +615,57 @@ public class HeartbeatSender {
         }
 
         return "unknown";
+    }
+
+    private String resolveBundleVersion() {
+        try {
+            Path configDir = configLoader.getConfigPath().getParent();
+            if (configDir == null) return null;
+            Path marker = configDir.resolve("bundle-version.json");
+            if (!Files.isRegularFile(marker)) return null;
+            JsonNode node = mapper.readTree(marker.toFile());
+            String value = node.path("bundleVersion").asText("").trim();
+            return value.isBlank() ? null : value;
+        } catch (Exception e) {
+            log.warn("전체 번들 버전 마커를 읽지 못했습니다: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    static long resolveSystemBootTimeEpochSeconds(SystemInfo systemInfo) {
+        if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+            try {
+                long uptimeMillis = WindowsUptime.INSTANCE.GetTickCount64();
+                long bootTime = bootTimeFromUptime(Instant.now().getEpochSecond(), uptimeMillis);
+                if (bootTime > 0L) return bootTime;
+            } catch (RuntimeException | UnsatisfiedLinkError ignored) {
+            }
+        }
+        if (systemInfo == null) return 0L;
+        try {
+            long bootTime = systemInfo.getOperatingSystem().getSystemBootTime();
+            return Math.max(0L, bootTime);
+        } catch (RuntimeException ignored) {
+            return 0L;
+        }
+    }
+
+    static long bootTimeFromUptime(long nowEpochSeconds, long uptimeMillis) {
+        if (nowEpochSeconds <= 0L || uptimeMillis < 0L) return 0L;
+        return Math.max(0L, nowEpochSeconds - TimeUnit.MILLISECONDS.toSeconds(uptimeMillis));
+    }
+
+    static void putRuntimeIdentity(Map<String, Object> body,
+                                   String agentSessionId,
+                                   long systemBootTimeEpochSeconds) {
+        body.put("agentSessionId", agentSessionId);
+        body.put("systemBootTimeEpochSeconds", Math.max(0L, systemBootTimeEpochSeconds));
+    }
+
+    private interface WindowsUptime extends Library {
+        WindowsUptime INSTANCE = Native.load("kernel32", WindowsUptime.class);
+
+        long GetTickCount64();
     }
 
     /**

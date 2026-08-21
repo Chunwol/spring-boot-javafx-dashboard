@@ -11,6 +11,11 @@ try {
     $installDir = Split-Path -Parent $appDir
     $exePath    = Join-Path $installDir "PCAgent.exe"
     if (!(Test-Path $exePath)) { $exePath = "C:\Program Files\PCAgent\PCAgent.exe" }
+    $watchdogScript = Join-Path $appDir "agent-watchdog.ps1"
+    if (!(Test-Path $watchdogScript)) {
+        $watchdogScript = Join-Path $installDir "agent-watchdog.ps1"
+    }
+    $taskName = "PCAgentWatchdog"
 
     # 1. ProgramData 디렉토리 생성
     $dataDir = "C:\ProgramData\PCAgent"
@@ -24,11 +29,23 @@ try {
     }
 
     # 3. schtasks 등록 (부팅 시 SYSTEM으로 자동 실행)
-    $null = schtasks /Create /TN "PCAgent" /TR "`"$exePath`"" /SC ONSTART /RU SYSTEM /RL HIGHEST /F 2>&1
+    $null = schtasks /Delete /TN "PCAgent" /F 2>&1
+    $null = schtasks /Delete /TN "\PCAgent\Main" /F 2>&1
+    if (Test-Path $watchdogScript) {
+        $escapedWatchdogScript = $watchdogScript -replace "'", "''"
+        $escapedInstallDir = $installDir -replace "'", "''"
+        $escapedExePath = $exePath -replace "'", "''"
+        $watchdogCommand = "& '$escapedWatchdogScript' -InstallDir '$escapedInstallDir' -LauncherPath '$escapedExePath'"
+        $encodedWatchdogCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watchdogCommand))
+        $taskRun = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $encodedWatchdogCommand"
+    } else {
+        $taskRun = "`"$exePath`""
+    }
+    $null = schtasks /Create /TN $taskName /TR $taskRun /SC ONSTART /RU SYSTEM /RL HIGHEST /F 2>&1
 
     # 4. 에이전트 즉시 시작 (5초 후 — MSI 트랜잭션 완료 대기)
     Start-Sleep 5
-    $null = schtasks /Run /TN "PCAgent" 2>&1
+    $null = schtasks /Run /TN $taskName 2>&1
 
 } catch {
     # 오류 무시 — MSI 설치 실패 방지
