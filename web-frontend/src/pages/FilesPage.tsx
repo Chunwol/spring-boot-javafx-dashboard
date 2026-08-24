@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'react-router-dom'
 import {
+  ArrowRightLeft,
   CheckCircle2,
   FileArchive,
   RefreshCw,
@@ -19,11 +20,14 @@ import { getClassrooms } from '../features/classrooms/api'
 import { getPcs } from '../features/pcs/api'
 import {
   cancelDistributionJob,
+  cancelPeerTransfer,
+  createPeerTransfer,
   createDistributionJob,
   getDistributionJob,
   getDistributionJobEvents,
   getRecentDistributionJobs,
   retryFailedDistribution,
+  retryFailedPeerTransfer,
   uploadAndAssembleFile,
 } from '../features/files/api'
 import {
@@ -45,12 +49,13 @@ import {
   resolveUploadSession,
   totalChunksFor,
 } from '../features/files/model'
-import type { CreateDistributionJobInput, FileUploadProgress, UploadedArtifact } from '../features/files/types'
+import type { CreateDistributionJobInput, CreatePeerTransferInput, FileUploadProgress, UploadedArtifact } from '../features/files/types'
 
 type PendingAction =
   | { type: 'deploy'; input: CreateDistributionJobInput }
-  | { type: 'cancel'; jobId: number }
-  | { type: 'retry'; jobId: number }
+  | { type: 'peerTransfer'; input: CreatePeerTransferInput }
+  | { type: 'cancel'; jobId: number; peer: boolean }
+  | { type: 'retry'; jobId: number; peer: boolean }
 
 const styles = {
   twoColumn: {
@@ -140,7 +145,7 @@ function mutationMessage(error: unknown, fallback: string) {
 }
 
 function sourceModeLabel(mode?: string | null) {
-  return mode === 'HYBRID_PEER' ? '하이브리드 피어' : mode === 'SERVER_ONLY' ? '서버 직접' : mode || '-'
+  return mode === 'HYBRID_PEER' ? '하이브리드 피어' : mode === 'SERVER_ONLY' ? '서버 직접' : mode === 'PC_DIRECT' ? 'PC 직접' : mode || '-'
 }
 
 function uploadPercent(progress: FileUploadProgress | null) {
@@ -184,6 +189,13 @@ export function FilesPage() {
   const [sourceMode, setSourceMode] = useState<'SERVER_ONLY' | 'HYBRID_PEER'>('HYBRID_PEER')
   const [updatePackageType, setUpdatePackageType] = useState<'JAR' | 'FULL_BUNDLE'>('JAR')
   const [rampUpFactor, setRampUpFactor] = useState(1.8)
+  const [peerSourceMac, setPeerSourceMac] = useState('')
+  const [peerTargetMacs, setPeerTargetMacs] = useState<Set<string>>(new Set())
+  const [peerSourcePath, setPeerSourcePath] = useState('')
+  const [peerTargetPath, setPeerTargetPath] = useState('')
+  const [peerOverwriteExisting, setPeerOverwriteExisting] = useState(false)
+  const [peerAcknowledged, setPeerAcknowledged] = useState(false)
+  const [peerTargetSearch, setPeerTargetSearch] = useState('')
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
 
@@ -205,6 +217,13 @@ export function FilesPage() {
     if (!query) return eligibleTargetPcs
     return eligibleTargetPcs.filter((pc) => [pc.groupName, pc.pcName, pc.ipAddress, pc.macAddress].some((value) => value?.toLocaleLowerCase('ko-KR').includes(query)))
   }, [eligibleTargetPcs, targetSearch])
+  const peerSourcePc = eligibleTargetPcs.find((pc) => pc.macAddress === peerSourceMac)
+  const filteredPeerTargets = useMemo(() => {
+    const query = peerTargetSearch.trim().toLocaleLowerCase('ko-KR')
+    return eligibleTargetPcs.filter((pc) => pc.macAddress !== peerSourceMac && (
+      !query || [pc.groupName, pc.pcName, pc.ipAddress, pc.macAddress].some((value) => value?.toLocaleLowerCase('ko-KR').includes(query))
+    ))
+  }, [eligibleTargetPcs, peerSourceMac, peerTargetSearch])
   const jobsQuery = useQuery({
     queryKey: ['file-distribution', 'jobs'],
     queryFn: getRecentDistributionJobs,
@@ -281,8 +300,19 @@ export function FilesPage() {
     },
     onError: (error) => showToast(mutationMessage(error, '배포 작업을 생성하지 못했습니다.'), 'error'),
   })
+  const peerCreateMutation = useMutation({
+    mutationFn: createPeerTransfer,
+    onSuccess: async (created) => {
+      setSelectedJobId(created.jobId)
+      setPendingAction(null)
+      setPeerAcknowledged(false)
+      await invalidateJobs(created.jobId)
+      showToast(`PC 직접 전송 작업 #${created.jobId}을 생성했습니다.`)
+    },
+    onError: (error) => showToast(mutationMessage(error, 'PC 직접 전송 작업을 생성하지 못했습니다.'), 'error'),
+  })
   const cancelMutation = useMutation({
-    mutationFn: cancelDistributionJob,
+    mutationFn: ({ jobId, peer }: { jobId: number; peer: boolean }) => peer ? cancelPeerTransfer(jobId) : cancelDistributionJob(jobId),
     onSuccess: async (result) => {
       setPendingAction(null)
       await invalidateJobs(result.jobId)
@@ -291,7 +321,7 @@ export function FilesPage() {
     onError: (error) => showToast(mutationMessage(error, '배포 작업을 취소하지 못했습니다.'), 'error'),
   })
   const retryMutation = useMutation({
-    mutationFn: retryFailedDistribution,
+    mutationFn: ({ jobId, peer }: { jobId: number; peer: boolean }) => peer ? retryFailedPeerTransfer(jobId) : retryFailedDistribution(jobId),
     onSuccess: async (result) => {
       setPendingAction(null)
       await invalidateJobs(result.jobId)
@@ -299,6 +329,27 @@ export function FilesPage() {
     },
     onError: (error) => showToast(mutationMessage(error, '실패 대상을 재시도하지 못했습니다.'), 'error'),
   })
+
+  const submitPeerTransfer = (event: FormEvent) => {
+    event.preventDefault()
+    if (!peerSourceMac || !peerSourcePc) return showToast('온라인 원본 PC를 선택하세요.', 'error')
+    if (!peerTargetMacs.size) return showToast('대상 PC를 한 대 이상 선택하세요.', 'error')
+    if (!peerSourcePath.trim() || !peerTargetPath.trim()) return showToast('원본 경로와 대상 경로를 모두 입력하세요.', 'error')
+    if (!/^[A-Za-z]:\\/.test(peerSourcePath.trim()) || !/^[A-Za-z]:\\/.test(peerTargetPath.trim())) {
+      return showToast('경로는 C:\\폴더처럼 드라이브를 포함한 절대 경로로 입력하세요.', 'error')
+    }
+    if (!peerAcknowledged) return showToast('전송 방식과 덮어쓰기 정책을 확인하세요.', 'error')
+    setPendingAction({
+      type: 'peerTransfer',
+      input: {
+        sourceMac: peerSourceMac,
+        targetMacs: [...peerTargetMacs],
+        sourcePath: peerSourcePath.trim(),
+        targetPath: peerTargetPath.trim(),
+        overwriteExisting: peerOverwriteExisting,
+      },
+    })
+  }
 
   const chooseFile = (file: File | null) => {
     setUploadedArtifact(null)
@@ -385,8 +436,9 @@ export function FilesPage() {
     }
   }
 
-  const actionBusy = createMutation.isPending || cancelMutation.isPending || retryMutation.isPending
+  const actionBusy = createMutation.isPending || peerCreateMutation.isPending || cancelMutation.isPending || retryMutation.isPending
   const selectedSummary = jobs.find((job) => job.jobId === selectedJobId)
+  const selectedIsPeer = (jobStatus?.updatePackageType || selectedSummary?.updatePackageType) === 'PC_COPY'
   const progressValue = uploadPercent(uploadProgress)
 
   if (!isAdmin) {
@@ -399,13 +451,58 @@ export function FilesPage() {
   return (
     <section className="content-section">
       <header className="page-header">
-        <div><h1>에이전트 배포</h1><p>JAR 또는 전체 구성요소를 단계별로 무중단 배포</p></div>
+        <div><h1>파일 배포</h1><p>기존 에이전트로 PC 간 자료 복사 또는 에이전트 패키지 배포</p></div>
         <button className="icon-button bordered" onClick={refresh} disabled={jobsQuery.isFetching || statusQuery.isFetching} aria-label="새로고침" title="새로고침">
           <RefreshCw size={17} className={jobsQuery.isFetching || statusQuery.isFetching ? 'spin-icon' : ''} />
         </button>
       </header>
 
       {jobsQuery.isError && jobsQuery.data && <div className="form-error" role="alert">최근 작업 갱신에 실패해 마지막 데이터를 표시하고 있습니다.</div>}
+
+      <form style={{ ...styles.panel, marginBottom: 18 }} onSubmit={submitPeerTransfer}>
+        <header style={styles.panelHeader}>
+          <h2 style={styles.panelTitle}><ArrowRightLeft size={17} />PC 간 직접 자료 전송</h2>
+          <small style={styles.subtle}>에이전트 업데이트 없음 · SHA-256 검증</small>
+        </header>
+        {pcsQuery.isError && <div className="form-error" role="alert">PC 목록을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.</div>}
+        <div style={styles.formGrid}>
+          <label style={styles.fieldWide}>
+            <span style={styles.fieldLabel}>원본 PC</span>
+            <select style={styles.input} value={peerSourceMac} disabled={pcsQuery.isLoading || pcsQuery.isError} onChange={(event) => {
+              const next = event.target.value
+              setPeerSourceMac(next)
+              setPeerTargetMacs((current) => { const updated = new Set(current); updated.delete(next); return updated })
+              setPeerAcknowledged(false)
+            }}>
+              <option value="">온라인 원본 PC를 선택하세요</option>
+              {eligibleTargetPcs.map((pc) => <option key={pc.macAddress} value={pc.macAddress}>{pc.groupName || '-'} · {pc.pcName || pc.ipAddress || pc.macAddress} · {pc.ipAddress || '-'}</option>)}
+            </select>
+          </label>
+          <label style={styles.field}>
+            <span style={styles.fieldLabel}>원본 경로</span>
+            <input style={styles.input} value={peerSourcePath} maxLength={1000} onChange={(event) => { setPeerSourcePath(event.target.value); setPeerAcknowledged(false) }} placeholder="예: C:\\Rocky10" />
+          </label>
+          <label style={styles.field}>
+            <span style={styles.fieldLabel}>대상 경로</span>
+            <input style={styles.input} value={peerTargetPath} maxLength={1000} onChange={(event) => { setPeerTargetPath(event.target.value); setPeerAcknowledged(false) }} placeholder="예: C:\\Rocky10" />
+          </label>
+          <div style={styles.fieldWide}>
+            <span style={styles.fieldLabel}>대상 PC ({peerTargetMacs.size}대)</span>
+            <input style={styles.input} value={peerTargetSearch} onChange={(event) => setPeerTargetSearch(event.target.value)} placeholder="강의실, PC 이름, IP, MAC 검색" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="button secondary" disabled={!peerSourceMac} onClick={() => setPeerTargetMacs((current) => new Set([...current, ...filteredPeerTargets.map((pc) => pc.macAddress)]))}>검색 결과 선택</button>
+              <button type="button" className="button secondary" onClick={() => setPeerTargetMacs(new Set())}>선택 해제</button>
+            </div>
+            <div style={styles.targetList}>{!peerSourceMac ? <p style={{ ...styles.subtle, padding: 10 }}>원본 PC를 먼저 선택하세요.</p> : filteredPeerTargets.length ? filteredPeerTargets.map((pc, index) => <label key={pc.macAddress} style={{ ...styles.targetRow, borderBottom: index === filteredPeerTargets.length - 1 ? 0 : styles.targetRow.borderBottom }}>
+              <input type="checkbox" checked={peerTargetMacs.has(pc.macAddress)} onChange={() => setPeerTargetMacs((current) => { const next = new Set(current); if (next.has(pc.macAddress)) next.delete(pc.macAddress); else next.add(pc.macAddress); return next })} />
+              <span><strong>{pc.groupName || '-'}</strong> · {pc.pcName || pc.ipAddress || pc.macAddress} <small style={styles.subtle}>{pc.ipAddress || '-'} · {pc.macAddress}</small></span>
+            </label>) : <p style={{ ...styles.subtle, padding: 10 }}>조건에 맞는 대상 PC가 없습니다.</p>}</div>
+          </div>
+          <label style={{ ...styles.checkRow, gridColumn: '1 / -1' }}><input type="checkbox" checked={peerOverwriteExisting} onChange={(event) => { setPeerOverwriteExisting(event.target.checked); setPeerAcknowledged(false) }} />대상에 내용이 다른 파일이 있으면 덮어쓰기</label>
+          <label style={{ ...styles.checkRow, gridColumn: '1 / -1', alignItems: 'flex-start' }}><input type="checkbox" checked={peerAcknowledged} onChange={(event) => setPeerAcknowledged(event.target.checked)} />원본 PC는 읽기 전용으로 사용하고, 대상 PC에서 파일별 SHA-256 검증 후 반영하며, 임시 전송 서버와 방화벽 규칙은 작업 종료 시 자동 제거됨을 확인했습니다.</label>
+        </div>
+        <div style={styles.actions}><button className="button primary" disabled={!peerSourceMac || !peerTargetMacs.size || !peerSourcePath.trim() || !peerTargetPath.trim() || !peerAcknowledged || actionBusy}><ArrowRightLeft size={16} />직접 전송 시작</button></div>
+      </form>
 
       <div style={styles.twoColumn}>
         <section style={styles.panel}>
@@ -473,7 +570,7 @@ export function FilesPage() {
       {!jobs.length && jobsQuery.isError ? <PageError message={mutationMessage(jobsQuery.error, '최근 배포 작업을 불러오지 못했습니다.')} onRetry={() => void jobsQuery.refetch()} /> : !jobs.length ? <EmptyState message="최근 배포 작업이 없습니다." /> : (
         <div className="table-scroll"><table className="data-table"><thead><tr><th>작업</th><th>파일</th><th>범위</th><th>버전</th><th>방식</th><th>상태</th><th>생성 시각</th><th>완료 시각</th></tr></thead><tbody>
           {jobs.map((job) => <tr key={job.jobId} tabIndex={0} onClick={() => setSelectedJobId(job.jobId)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedJobId(job.jobId) } }} style={job.jobId === selectedJobId ? { background: '#eef4fb' } : undefined} aria-selected={job.jobId === selectedJobId}>
-            <td><strong>#{job.jobId}</strong></td><td>{job.originalFilename}</td><td>{job.updatePackageType === 'FULL_BUNDLE' ? '전체 번들' : 'JAR'}</td><td>{job.targetVersion || '-'}</td><td>{sourceModeLabel(job.sourceMode)}</td><td><span className={`status-badge ${jobStatusTone(job.status)}`}>{jobStatusLabel(job.status)}</span></td><td>{formatDateTime(job.createdAt)}</td><td>{formatDateTime(job.completedAt || job.cancelledAt)}</td>
+            <td><strong>#{job.jobId}</strong></td><td>{job.updatePackageType === 'PC_COPY' ? job.sourcePath || job.originalFilename : job.originalFilename}</td><td>{job.updatePackageType === 'PC_COPY' ? 'PC 자료 복사' : job.updatePackageType === 'FULL_BUNDLE' ? '전체 번들' : 'JAR'}</td><td>{job.targetVersion || '-'}</td><td>{sourceModeLabel(job.sourceMode)}</td><td><span className={`status-badge ${jobStatusTone(job.status)}`}>{jobStatusLabel(job.status)}</span></td><td>{formatDateTime(job.createdAt)}</td><td>{formatDateTime(job.completedAt || job.cancelledAt)}</td>
           </tr>)}
         </tbody></table></div>
       )}
@@ -482,8 +579,8 @@ export function FilesPage() {
         <header style={styles.panelHeader}>
           <h2 style={styles.panelTitle}>작업 #{selectedJobId} 상세 <span className={`status-badge ${jobStatusTone(jobStatus?.status || selectedSummary?.status)}`}>{jobStatusLabel(jobStatus?.status || selectedSummary?.status)}</span></h2>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="button secondary" disabled={!canRetryJob(jobStatus) || actionBusy} onClick={() => setPendingAction({ type: 'retry', jobId: selectedJobId })}><RotateCw size={15} />실패 재시도</button>
-            <button className="button danger" disabled={!canCancelJob(jobStatus?.status) || actionBusy} onClick={() => setPendingAction({ type: 'cancel', jobId: selectedJobId })}><XCircle size={15} />작업 취소</button>
+            <button className="button secondary" disabled={!canRetryJob(jobStatus) || actionBusy} onClick={() => setPendingAction({ type: 'retry', jobId: selectedJobId, peer: selectedIsPeer })}><RotateCw size={15} />실패 재시도</button>
+            <button className="button danger" disabled={!canCancelJob(jobStatus?.status) || actionBusy} onClick={() => setPendingAction({ type: 'cancel', jobId: selectedJobId, peer: selectedIsPeer })}><XCircle size={15} />작업 취소</button>
           </div>
         </header>
         {statusQuery.isLoading && !statusQuery.data ? <PageLoading label="작업 상태를 불러오는 중입니다." /> : statusQuery.isError && !statusQuery.data ? <PageError message={mutationMessage(statusQuery.error, '작업 상태를 불러오지 못했습니다.')} onRetry={() => void statusQuery.refetch()} /> : jobStatus && <>
@@ -495,8 +592,14 @@ export function FilesPage() {
             <div style={styles.metric}><span style={styles.metricLabel}>진행률</span><strong style={styles.metricValue}>{Math.round(jobStatus.progress * 100)}%</strong></div>
           </div>
           <div style={styles.progressTrack}><div style={{ ...styles.progressBar, width: `${Math.round(jobStatus.progress * 100)}%`, background: jobStatus.failed ? 'var(--orange)' : 'var(--green)' }} /></div>
+          {selectedIsPeer && <div style={{ marginTop: 14 }}>
+            <p style={{ ...styles.subtle, marginBottom: 8 }}><strong>원본</strong> {jobStatus.sourcePath || '-'} → <strong>대상</strong> {jobStatus.targetPath || '-'} · {jobStatus.overwriteExisting ? '다른 파일 덮어쓰기' : '다른 파일 발견 시 중단'}</p>
+            <div className="table-scroll"><table className="data-table"><thead><tr><th>대상 MAC</th><th>상태</th><th>검증 파일</th><th>검증 용량</th><th>오류</th></tr></thead><tbody>
+              {(jobStatus.targets || []).map((target) => <tr key={target.agentId} style={{ cursor: 'default' }}><td>{target.agentId}</td><td><span className={`status-badge ${jobStatusTone(target.status)}`}>{jobStatusLabel(target.status)}</span></td><td>{target.verifiedFiles.toLocaleString('ko-KR')}</td><td>{formatBytes(target.verifiedBytes)}</td><td>{target.errorMessage || '-'}</td></tr>)}
+            </tbody></table></div>
+          </div>}
           <div style={styles.splitDetail}>
-            <div><h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>웨이브 현황</h3>{!waves.length ? <EmptyState message="웨이브 정보가 없습니다." /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>웨이브</th><th>전체</th><th>대기</th><th>진행</th><th>완료</th><th>실패</th><th>취소</th></tr></thead><tbody>{waves.map((wave) => <tr key={wave.wave} style={{ cursor: 'default' }}><td><strong>{wave.wave + 1}</strong></td><td>{wave.total}</td><td>{wave.queued}</td><td>{wave.inProgress}</td><td>{wave.completed}</td><td>{wave.failed}</td><td>{wave.cancelled}</td></tr>)}</tbody></table></div>}</div>
+            <div><h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>{selectedIsPeer ? '대상 집계' : '웨이브 현황'}</h3>{!waves.length ? <EmptyState message={selectedIsPeer ? '대상 정보가 없습니다.' : '웨이브 정보가 없습니다.'} /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>{selectedIsPeer ? '묶음' : '웨이브'}</th><th>전체</th><th>대기</th><th>진행</th><th>완료</th><th>실패</th><th>취소</th></tr></thead><tbody>{waves.map((wave) => <tr key={wave.wave} style={{ cursor: 'default' }}><td><strong>{selectedIsPeer ? 1 : wave.wave + 1}</strong></td><td>{wave.total}</td><td>{wave.queued}</td><td>{wave.inProgress}</td><td>{wave.completed}</td><td>{wave.failed}</td><td>{wave.cancelled}</td></tr>)}</tbody></table></div>}</div>
             <div><h3 style={{ ...styles.panelTitle, marginBottom: 10 }}>최근 이벤트</h3>{eventsQuery.isError && !eventsQuery.data ? <PageError message="이벤트를 불러오지 못했습니다." onRetry={() => void eventsQuery.refetch()} /> : !events.length ? <EmptyState message="기록된 이벤트가 없습니다." /> : <div style={styles.eventList}>{events.slice(0, 30).map((event, index) => <article key={`${event.id}-${index}`} style={{ ...styles.event, borderBottom: index === Math.min(events.length, 30) - 1 ? 0 : styles.event.borderBottom }}><div style={styles.eventTop}><strong>{event.eventType}</strong><time>{formatDateTime(event.createdAt)}</time></div><p style={styles.eventDetail}>{formatEventDetail(event.detailJson)}</p></article>)}</div>}</div>
           </div>
         </>}
@@ -504,16 +607,18 @@ export function FilesPage() {
 
       <ConfirmDialog
         open={Boolean(pendingAction)}
-        title={pendingAction?.type === 'deploy' ? '파일 배포 시작' : pendingAction?.type === 'cancel' ? '배포 작업 취소' : '실패 대상 재시도'}
+        title={pendingAction?.type === 'deploy' ? '파일 배포 시작' : pendingAction?.type === 'peerTransfer' ? 'PC 직접 전송 시작' : pendingAction?.type === 'cancel' ? '배포 작업 취소' : '실패 대상 재시도'}
         description={pendingAction?.type === 'deploy'
           ? `${pendingAction.input.originalFilename} 파일을 ${pendingAction.input.targetMacs?.length ? `선택한 PC ${pendingAction.input.targetMacs.length}대` : pendingAction.input.groupId ? (classroomsQuery.data || []).find((room) => room.groupId === pendingAction.input.groupId)?.groupName || '선택한 강의실' : '전체 온라인 PC'}에 배포합니다. 초기 웨이브 ${pendingAction.input.waveSize}대로 시작하며 PC는 재부팅하지 않습니다.`
+          : pendingAction?.type === 'peerTransfer'
+            ? `${pendingAction.input.sourcePath} 자료를 선택한 PC ${pendingAction.input.targetMacs.length}대의 ${pendingAction.input.targetPath} 위치로 직접 전송합니다. 에이전트는 업데이트하지 않으며, ${pendingAction.input.overwriteExisting ? '내용이 다른 기존 파일은 덮어씁니다.' : '내용이 다른 기존 파일이 있으면 해당 PC 전송을 중단합니다.'}`
           : pendingAction?.type === 'cancel'
-            ? `작업 #${pendingAction.jobId}과 진행 중인 웨이브를 취소합니다.`
+            ? `작업 #${pendingAction.jobId}과 진행 중인 ${pendingAction.peer ? 'PC 직접 전송 워커' : '웨이브'}를 취소합니다.`
             : pendingAction?.type === 'retry'
               ? `작업 #${pendingAction.jobId}의 실패한 PC를 다시 배포 대기열에 넣습니다.`
               : ''}
-        confirmLabel={pendingAction?.type === 'deploy' ? '배포 시작' : pendingAction?.type === 'cancel' ? '작업 취소' : '다시 시도'}
-        danger={pendingAction?.type === 'cancel' || pendingAction?.type === 'deploy'}
+        confirmLabel={pendingAction?.type === 'deploy' ? '배포 시작' : pendingAction?.type === 'peerTransfer' ? '직접 전송 시작' : pendingAction?.type === 'cancel' ? '작업 취소' : '다시 시도'}
+        danger={pendingAction?.type === 'cancel' || pendingAction?.type === 'deploy' || pendingAction?.type === 'peerTransfer'}
         busy={actionBusy}
         requiredText={pendingAction?.type === 'cancel' ? `JOB-${pendingAction.jobId}` : undefined}
         requiredTextLabel={pendingAction?.type === 'cancel' ? `확인을 위해 JOB-${pendingAction.jobId} 입력` : undefined}
@@ -521,8 +626,9 @@ export function FilesPage() {
         onConfirm={() => {
           if (!pendingAction || actionBusy) return
           if (pendingAction.type === 'deploy') createMutation.mutate(pendingAction.input)
-          else if (pendingAction.type === 'cancel') cancelMutation.mutate(pendingAction.jobId)
-          else retryMutation.mutate(pendingAction.jobId)
+          else if (pendingAction.type === 'peerTransfer') peerCreateMutation.mutate(pendingAction.input)
+          else if (pendingAction.type === 'cancel') cancelMutation.mutate({ jobId: pendingAction.jobId, peer: pendingAction.peer })
+          else retryMutation.mutate({ jobId: pendingAction.jobId, peer: pendingAction.peer })
         }}
       />
     </section>

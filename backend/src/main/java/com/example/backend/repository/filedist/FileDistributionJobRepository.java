@@ -14,4 +14,6 @@ public interface FileDistributionJobRepository extends JpaRepository<FileDistrib
     Optional<FileDistributionJob> findFirstByStatusInAndArtifactIdIsNotNullAndTargetVersionIsNotNullOrderByCreatedAtDesc(List<String> statuses);
     Optional<FileDistributionJob> findFirstByStatusAndArtifactIdIsNotNullAndTargetVersionIsNotNullOrderByCompletedAtDescIdDesc(String status);
     Optional<FileDistributionJob> findFirstByStatusAndArtifactIdIsNotNullAndTargetVersionIsNotNullAndIdLessThanOrderByCompletedAtDescIdDesc(String status, Long id);
+    List<FileDistributionJob> findByUpdatePackageTypeAndStatusIn(String updatePackageType, List<String> statuses);
+    boolean existsBySourceAgentIdIgnoreCaseAndStatusIn(String sourceAgentId, List<String> statuses);
 }

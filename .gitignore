@@ -83,3 +83,4 @@ scripts/certs/
 *.plan.md
 tmp_*
 tmp-*
+outputs/

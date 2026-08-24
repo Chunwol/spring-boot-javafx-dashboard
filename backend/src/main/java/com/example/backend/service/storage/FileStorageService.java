@@ -12,6 +12,7 @@ import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 
 /**
@@ -76,6 +77,30 @@ public class FileStorageService {
             return filename;
         } catch (IOException e) {
             throw new RuntimeException("Failed to store file.", e);
+        }
+    }
+
+    /**
+     * 백엔드가 생성한 작은 실행 스크립트를 업로드 저장소에 기록한다.
+     * 사용자 입력 파일명은 기존 업로드와 동일하게 정리하며 루트 밖 경로는 허용하지 않는다.
+     */
+    public String storeBytes(String originalFilename, byte[] content) {
+        try {
+            if (content == null || content.length == 0) {
+                throw new RuntimeException("Failed to store empty content.");
+            }
+            String safeFilename = Paths.get(originalFilename == null ? "generated.ps1" : originalFilename)
+                    .getFileName().toString()
+                    .replaceAll("[^a-zA-Z0-9._-]", "_");
+            String filename = UUID.randomUUID() + "_" + safeFilename;
+            Path target = rootLocation.resolve(filename).normalize();
+            if (!target.startsWith(rootLocation)) {
+                throw new RuntimeException("Invalid file path: " + filename);
+            }
+            Files.write(target, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            return filename;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to store generated content.", e);
         }
     }
 

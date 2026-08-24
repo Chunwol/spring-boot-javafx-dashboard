@@ -21,6 +21,7 @@ public class WebFrontendController {
             "/network/{groupId}",
             "/reports",
             "/files",
+            "/script-library",
             "/settings",
             "/settings/classrooms",
             "/settings/ip-ranges", "/settings/teacher-pcs",

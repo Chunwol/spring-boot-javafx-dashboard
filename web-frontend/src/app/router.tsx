@@ -17,6 +17,7 @@ const BrokenPcsPage = lazy(() => import('../pages/BrokenPcsPage').then((module) 
 const NetworkPage = lazy(() => import('../pages/NetworkPage').then((module) => ({ default: module.NetworkPage })))
 const ReportsPage = lazy(() => import('../pages/ReportsPage').then((module) => ({ default: module.ReportsPage })))
 const FilesPage = lazy(() => import('../pages/FilesPage').then((module) => ({ default: module.FilesPage })))
+const ScriptLibraryPage = lazy(() => import('../pages/ScriptLibraryPage').then((module) => ({ default: module.ScriptLibraryPage })))
 const UsersPage = lazy(() => import('../pages/UsersPage').then((module) => ({ default: module.UsersPage })))
 const ClassroomSettingsPage = lazy(() => import('../pages/ClassroomSettingsPage').then((module) => ({ default: module.ClassroomSettingsPage })))
 const SystemSettingsPage = lazy(() => import('../pages/SystemSettingsPage').then((module) => ({ default: module.SystemSettingsPage })))
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
         { path: '/network/:groupId', element: screen(<NetworkPage />) },
         { path: '/reports', element: screen(<ReportsPage />) },
         { path: '/files', element: adminScreen(<FilesPage />) },
+        { path: '/script-library', element: adminScreen(<ScriptLibraryPage />) },
         { path: '/settings', element: <Navigate to="/settings/classrooms" replace /> },
         { path: '/settings/classrooms', element: screen(<ClassroomSettingsPage />) },
         { path: '/settings/ip-ranges', element: <Navigate to="/settings/classrooms?tab=ranges" replace /> },

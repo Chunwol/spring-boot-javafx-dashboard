@@ -106,6 +106,10 @@ export function normalizeRecentJobs(payload: unknown): DistributionJobSummary[] 
       completedAt: nullableString(row.completedAt),
       cancelledAt: nullableString(row.cancelledAt),
       errorMessage: nullableString(row.errorMessage),
+      sourceAgentId: nullableString(row.sourceAgentId),
+      sourcePath: nullableString(row.sourcePath),
+      targetPath: nullableString(row.targetPath),
+      overwriteExisting: typeof row.overwriteExisting === 'boolean' ? row.overwriteExisting : null,
     }]
   })
 }
@@ -136,6 +140,22 @@ export function normalizeJobStatus(payload: unknown): DistributionJobStatus | nu
     waves: row.waves && typeof row.waves === 'object'
       ? row.waves as DistributionJobStatus['waves']
       : undefined,
+    sourceAgentId: nullableString(row.sourceAgentId),
+    sourcePath: nullableString(row.sourcePath),
+    targetPath: nullableString(row.targetPath),
+    overwriteExisting: typeof row.overwriteExisting === 'boolean' ? row.overwriteExisting : null,
+    targets: Array.isArray(row.targets) ? row.targets.flatMap((raw) => {
+      if (!raw || typeof raw !== 'object') return []
+      const target = raw as Record<string, unknown>
+      return [{
+        agentId: stringValue(target.agentId),
+        status: stringValue(target.status, 'UNKNOWN').toUpperCase(),
+        verifiedFiles: Math.max(0, numberValue(target.verifiedFiles)),
+        verifiedBytes: Math.max(0, numberValue(target.verifiedBytes)),
+        errorMessage: nullableString(target.errorMessage),
+        updatedAt: nullableString(target.updatedAt),
+      }]
+    }) : undefined,
   }
 }
 

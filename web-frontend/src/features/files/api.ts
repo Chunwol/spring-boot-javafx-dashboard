@@ -4,6 +4,8 @@ import type {
   AssembleResult,
   ChunkUploadResult,
   CreateDistributionJobInput,
+  CreatePeerTransferInput,
+  CreatedPeerTransfer,
   CreatedDistributionJob,
   DistributionJobEvent,
   DistributionJobStatus,
@@ -144,4 +146,16 @@ export function cancelDistributionJob(jobId: number) {
 
 export function retryFailedDistribution(jobId: number) {
   return api.post<{ jobId: number; resetCount?: number; waves?: number[] }>(`/file-distribution/jobs/${jobId}/retry-failed`, {})
+}
+
+export function createPeerTransfer(input: CreatePeerTransferInput) {
+  return api.post<CreatedPeerTransfer>('/file-distribution/peer-jobs', input)
+}
+
+export function cancelPeerTransfer(jobId: number) {
+  return api.post<{ jobId: number; status: string }>(`/file-distribution/peer-jobs/${jobId}/cancel`)
+}
+
+export function retryFailedPeerTransfer(jobId: number) {
+  return api.post<{ jobId: number; resetCount?: number; status: string }>(`/file-distribution/peer-jobs/${jobId}/retry-failed`)
 }

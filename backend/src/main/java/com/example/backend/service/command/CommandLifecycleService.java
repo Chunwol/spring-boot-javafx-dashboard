@@ -324,6 +324,10 @@ public class CommandLifecycleService {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("queued", taskIds.size());
         response.put("taskIds", taskIds);
+        response.put("tasks", saved.stream().map(command -> Map.of(
+                "taskId", command.getTaskId(),
+                "macAddress", command.getMacAddress()
+        )).toList());
         response.put("duplicateSkipped", duplicateSkipped);
         response.put("offlineSkipped", offlineSkipped);
         response.put("requested", requestedTargets);

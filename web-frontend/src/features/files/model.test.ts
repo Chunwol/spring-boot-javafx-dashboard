@@ -53,6 +53,26 @@ describe('file distribution model', () => {
     expect(normalizeWaves(status)[0]).toMatchObject({ total: 3, completed: 3, failed: 0 })
   })
 
+  it('normalizes PC direct-copy metadata and target verification progress', () => {
+    const status = normalizeJobStatus({
+      jobId: 91,
+      status: 'in_progress',
+      updatePackageType: 'PC_COPY',
+      sourceAgentId: 'AA:BB:CC:DD:EE:01',
+      sourcePath: 'C:\\Rocky10',
+      targetPath: 'C:\\Rocky10',
+      overwriteExisting: true,
+      targets: [{ agentId: 'AA:BB:CC:DD:EE:02', status: 'completed', verifiedFiles: '38', verifiedBytes: '1024' }],
+    })
+    expect(status).toMatchObject({
+      updatePackageType: 'PC_COPY',
+      sourceAgentId: 'AA:BB:CC:DD:EE:01',
+      sourcePath: 'C:\\Rocky10',
+      overwriteExisting: true,
+    })
+    expect(status?.targets?.[0]).toMatchObject({ status: 'COMPLETED', verifiedFiles: 38, verifiedBytes: 1024 })
+  })
+
   it('permits only meaningful cancel and retry actions', () => {
     expect(canCancelJob('QUEUED')).toBe(true)
     expect(canCancelJob('COMPLETED')).toBe(false)

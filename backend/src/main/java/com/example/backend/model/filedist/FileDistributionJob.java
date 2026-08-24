@@ -97,4 +97,24 @@ public class FileDistributionJob {
     @Schema(description = "업데이트 패키지 유형", allowableValues = {"JAR", "FULL_BUNDLE"})
     @Column(name = "update_package_type", length = 24)
     private String updatePackageType;
+
+    /** PC 간 직접 전송의 원본 에이전트 MAC. */
+    @Column(name = "source_agent_id", length = 50)
+    private String sourceAgentId;
+
+    /** 원본 PC에서 읽을 절대 경로. */
+    @Column(name = "source_path", length = 1000)
+    private String sourcePath;
+
+    /** 대상 PC에 반영할 절대 경로. */
+    @Column(name = "target_path", length = 1000)
+    private String targetPath;
+
+    /** 기존 대상 파일 덮어쓰기 허용 여부. */
+    @Column(name = "overwrite_existing")
+    private Boolean overwriteExisting;
+
+    /** 원본 PC의 임시 읽기 전용 HTTP 포트. */
+    @Column(name = "peer_port")
+    private Integer peerPort;
 }

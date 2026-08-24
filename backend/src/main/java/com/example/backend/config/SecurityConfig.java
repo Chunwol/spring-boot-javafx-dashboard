@@ -69,7 +69,7 @@ public class SecurityConfig {
                     "/", "/index.html", "/assets/**",              // Browser dashboard static resources
                     "/login", "/classrooms", "/classrooms/**",     // Browser dashboard routes
                     "/pcs", "/pc", "/pc/**", "/commands", "/tokens", "/broken",
-                    "/network", "/network/**", "/reports", "/files",
+                    "/network", "/network/**", "/reports", "/files", "/script-library",
                     "/settings", "/settings/**", "/forbidden",
                     "/favicon.ico", "/favicon.svg", "/icons.svg", "/error",
                     "/swagger-ui/**",                                 // Swagger UI: 인증 불필요

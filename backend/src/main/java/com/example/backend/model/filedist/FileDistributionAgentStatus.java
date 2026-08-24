@@ -58,4 +58,20 @@ public class FileDistributionAgentStatus {
     /** 오류 메시지 */
     @Schema(description = "오류 메시지")
     private String errorMessage;
+
+    /** 백그라운드 전송 워커를 시작한 RUN_PS1 task ID. */
+    @Column(name = "launcher_task_id")
+    private Long launcherTaskId;
+
+    /** 가장 최근 진행 상태 조회 RUN_PS1 task ID. */
+    @Column(name = "audit_task_id")
+    private Long auditTaskId;
+
+    /** 대상 PC에서 SHA-256 검증을 마친 파일 수. */
+    @Column(name = "verified_files")
+    private Long verifiedFiles;
+
+    /** 대상 PC에서 SHA-256 검증을 마친 바이트 수. */
+    @Column(name = "verified_bytes")
+    private Long verifiedBytes;
 }

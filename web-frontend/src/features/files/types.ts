@@ -74,6 +74,10 @@ export interface DistributionJobSummary {
   completedAt?: string | null
   cancelledAt?: string | null
   errorMessage?: string | null
+  sourceAgentId?: string | null
+  sourcePath?: string | null
+  targetPath?: string | null
+  overwriteExisting?: boolean | null
 }
 
 export interface DistributionWaveStatus {
@@ -105,6 +109,38 @@ export interface DistributionJobStatus {
   completedAt?: string | null
   cancelledAt?: string | null
   waves?: { items?: Record<string, Record<string, unknown>> }
+  sourceAgentId?: string | null
+  sourcePath?: string | null
+  targetPath?: string | null
+  overwriteExisting?: boolean | null
+  targets?: PeerTransferTargetStatus[]
+}
+
+export interface PeerTransferTargetStatus {
+  agentId: string
+  status: string
+  verifiedFiles: number
+  verifiedBytes: number
+  errorMessage?: string | null
+  updatedAt?: string | null
+}
+
+export interface CreatePeerTransferInput {
+  sourceMac: string
+  targetMacs: string[]
+  sourcePath: string
+  targetPath: string
+  overwriteExisting: boolean
+}
+
+export interface CreatedPeerTransfer {
+  jobId: number
+  status: string
+  sourceMac: string
+  sourcePath: string
+  targetPath: string
+  targetCount: number
+  updatePackageType: 'PC_COPY'
 }
 
 export interface DistributionJobEvent {

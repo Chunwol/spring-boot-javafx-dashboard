@@ -66,6 +66,7 @@ public class FileDistributionOrchestrator {
     private static final String SOURCE_MODE_HYBRID_PEER = "HYBRID_PEER";
     private static final String UPDATE_PACKAGE_JAR = "JAR";
     private static final String UPDATE_PACKAGE_FULL_BUNDLE = "FULL_BUNDLE";
+    private static final String UPDATE_PACKAGE_PC_COPY = "PC_COPY";
 
     private final FileDistributionJobRepository jobRepo;
     private final FileDistributionAgentStatusRepository agentStatusRepo;
@@ -565,6 +566,10 @@ public class FileDistributionOrchestrator {
         out.put("sourceMode", job.getSourceMode());
         out.put("rampUpFactor", job.getRampUpFactor());
         out.put("updatePackageType", normalizeUpdatePackageType(job.getUpdatePackageType()));
+        out.put("sourceAgentId", job.getSourceAgentId());
+        out.put("sourcePath", job.getSourcePath());
+        out.put("targetPath", job.getTargetPath());
+        out.put("overwriteExisting", job.getOverwriteExisting());
         out.put("totalAgents", total);
         out.put("completed", completed);
         out.put("failed", failed);
@@ -575,6 +580,16 @@ public class FileDistributionOrchestrator {
         out.put("completedAt", job.getCompletedAt());
         out.put("cancelledAt", job.getCancelledAt());
         out.put("waves", waveSummary);
+        out.put("targets", all.stream().map(status -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("agentId", status.getAgentId());
+            row.put("status", status.getStatus());
+            row.put("verifiedFiles", status.getVerifiedFiles());
+            row.put("verifiedBytes", status.getVerifiedBytes());
+            row.put("errorMessage", status.getErrorMessage());
+            row.put("updatedAt", status.getCompletedAt() == null ? status.getStartedAt() : status.getCompletedAt());
+            return row;
+        }).toList());
         return out;
     }
 
@@ -596,6 +611,10 @@ public class FileDistributionOrchestrator {
             row.put("sourceMode", job.getSourceMode());
             row.put("rampUpFactor", job.getRampUpFactor());
             row.put("updatePackageType", normalizeUpdatePackageType(job.getUpdatePackageType()));
+            row.put("sourceAgentId", job.getSourceAgentId());
+            row.put("sourcePath", job.getSourcePath());
+            row.put("targetPath", job.getTargetPath());
+            row.put("overwriteExisting", job.getOverwriteExisting());
             row.put("createdAt", job.getCreatedAt());
             row.put("completedAt", job.getCompletedAt());
             row.put("cancelledAt", job.getCancelledAt());
@@ -876,7 +895,9 @@ public class FileDistributionOrchestrator {
             return UPDATE_PACKAGE_JAR;
         }
         String normalized = updatePackageType.trim().toUpperCase(Locale.ROOT);
-        if (!UPDATE_PACKAGE_JAR.equals(normalized) && !UPDATE_PACKAGE_FULL_BUNDLE.equals(normalized)) {
+        if (!UPDATE_PACKAGE_JAR.equals(normalized)
+                && !UPDATE_PACKAGE_FULL_BUNDLE.equals(normalized)
+                && !UPDATE_PACKAGE_PC_COPY.equals(normalized)) {
             throw new IllegalArgumentException("unsupported updatePackageType: " + updatePackageType);
         }
         return normalized;

@@ -138,6 +138,10 @@ app:
       shared-secret: ${FD_SHARED_SECRET:change-me-file-distribution-secret}
       max-skew-seconds: ${FD_SIGNATURE_MAX_SKEW_SECONDS:60}
       require-https: ${FD_REQUIRE_HTTPS:true}
+  peer-transfer:
+    poll-interval-seconds: ${PEER_TRANSFER_POLL_INTERVAL_SECONDS:30}
+    command-timeout-minutes: ${PEER_TRANSFER_COMMAND_TIMEOUT_MINUTES:10}
+    job-timeout-hours: ${PEER_TRANSFER_JOB_TIMEOUT_HOURS:24}
   cache:
     provider: ${CACHE_PROVIDER:redis}
     ip-range:
