@@ -70,6 +70,12 @@ function initialTileState(pc: PcStatus): TileState {
   return 'queued'
 }
 
+function screenWallPcLabel(pc: PcStatus) {
+  return pc.role?.toUpperCase() === 'TEACHER'
+    ? `교사 PC · ${pc.pcName}`
+    : `${seatLabel(pc)}번 · ${pc.pcName}`
+}
+
 function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
   pc: PcStatus
   enabled: boolean
@@ -190,7 +196,7 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
   return (
     <article className={`screen-wall-tile state-${state}`}>
       <header>
-        <strong title={pc.pcName}>{seatLabel(pc)}번 · {pc.pcName}</strong>
+        <strong title={pc.pcName}>{screenWallPcLabel(pc)}</strong>
         <span>{tileStateLabel[state]}</span>
       </header>
       <div className="screen-wall-frame" ref={targetRef} aria-label={`${pc.pcName} 화면`} />
@@ -262,6 +268,8 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
   const connected = Object.values(states).filter((state) => state === 'connected').length
   const failed = Object.values(states).filter((state) => state === 'failed').length
   const eligible = wallPcs.filter(canStartScreenWallPc).length
+  const teacherCount = wallPcs.filter((pc) => pc.role?.toUpperCase() === 'TEACHER').length
+  const studentCount = wallPcs.length - teacherCount
 
   const toggleFullscreen = async () => {
     try {
@@ -278,7 +286,7 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
         <header className="screen-wall-header">
           <div>
             <h2 id="screen-wall-title">{room.groupName} 화면 모니터링</h2>
-            <p>학생 PC {wallPcs.length}대 · 연결 {connected}/{eligible}{failed > 0 ? ` · 실패 ${failed}` : ''}</p>
+            <p>교사 PC {teacherCount}대 · 학생 PC {studentCount}대 · 연결 {connected}/{eligible}{failed > 0 ? ` · 실패 ${failed}` : ''}</p>
           </div>
           <div className="screen-wall-tools">
             <button className="icon-button" onClick={() => setGeneration((current) => current + 1)} aria-label="전체 다시 연결" title="전체 다시 연결"><RefreshCw size={17} /></button>
@@ -297,7 +305,7 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
               onSessionChange={onSessionChange}
             />
           ))}
-          {!wallPcs.length && <div className="screen-wall-empty">등록된 학생 PC가 없습니다.</div>}
+          {!wallPcs.length && <div className="screen-wall-empty">등록된 PC가 없습니다.</div>}
         </div>
       </section>
     </div>

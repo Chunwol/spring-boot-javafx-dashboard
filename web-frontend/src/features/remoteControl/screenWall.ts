@@ -8,7 +8,7 @@ export const SCREEN_WALL_STATUS_POLL_INITIAL_MS = 1_000
 export const SCREEN_WALL_STATUS_POLL_MAX_MS = 3_000
 
 export function screenWallPcs(pcs: PcStatus[]) {
-  return sortPcs(pcs.filter((pc) => pc.role?.toUpperCase() !== 'TEACHER'))
+  return sortPcs(pcs)
     .slice(0, SCREEN_WALL_MAX_PCS)
 }
 

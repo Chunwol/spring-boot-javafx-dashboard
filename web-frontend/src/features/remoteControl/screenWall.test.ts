@@ -20,16 +20,17 @@ function pc(index: number, overrides: Partial<PcStatus> = {}): PcStatus {
 }
 
 describe('screenWall', () => {
-  it('selects up to fifty student PCs in seat order', () => {
+  it('selects the teacher PC first, followed by students in seat order', () => {
     const pcs = [pc(0, { pcName: '214_T', role: 'TEACHER' })]
-    for (let index = 55; index >= 1; index--) pcs.push(pc(index))
+    for (let index = 49; index >= 1; index--) pcs.push(pc(index))
 
     const selected = screenWallPcs(pcs)
 
     expect(selected).toHaveLength(SCREEN_WALL_MAX_PCS)
-    expect(selected[0].pcName).toBe('214-1')
-    expect(selected[49].pcName).toBe('214-50')
-    expect(selected.every((item) => item.role === 'STUDENT')).toBe(true)
+    expect(selected[0].pcName).toBe('214_T')
+    expect(selected[0].role).toBe('TEACHER')
+    expect(selected[1].pcName).toBe('214-1')
+    expect(selected[49].pcName).toBe('214-49')
   })
 
   it('starts only healthy online PCs with a MAC address', () => {

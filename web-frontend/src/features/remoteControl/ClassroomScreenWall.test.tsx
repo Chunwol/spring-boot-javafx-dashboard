@@ -63,6 +63,14 @@ const pc = {
   role: 'STUDENT',
 }
 
+const teacherPc = {
+  ...pc,
+  macAddress: 'AA:BB:CC:DD:EE:01',
+  pcName: '214_T',
+  ipAddress: '223.194.167.60',
+  role: 'TEACHER',
+}
+
 describe('ClassroomScreenWall', () => {
   afterEach(cleanup)
 
@@ -108,5 +116,15 @@ describe('ClassroomScreenWall', () => {
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
     expect(mocks.rfbCreated).toHaveBeenCalledTimes(1)
+  })
+
+  it('includes the teacher PC as the first view-only monitoring tile', async () => {
+    render(<ClassroomScreenWall room={room} pcs={[pc, teacherPc]} onClose={vi.fn()} />)
+
+    expect(await screen.findByText('교사 PC · 214_T')).toBeInTheDocument()
+    expect(screen.getByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
+    expect(mocks.create.mock.calls.map(([macAddress]) => macAddress)).toContain(teacherPc.macAddress)
+    expect(mocks.rfbCreated.mock.calls.every(([client]) => client.viewOnly)).toBe(true)
   })
 })
