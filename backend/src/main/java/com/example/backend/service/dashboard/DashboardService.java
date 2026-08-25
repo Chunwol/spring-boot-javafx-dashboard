@@ -7,6 +7,7 @@ import com.example.backend.model.dashboard.DashboardWidgetItem;
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.dashboard.DashboardWidgetItemRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.service.traffic.TrafficLogFlushService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -44,6 +45,7 @@ public class DashboardService {
     private final DashboardWidgetItemRepository dashboardWidgetItemRepository;
     private final ClassroomService classroomService;
     private final TrafficLogsRepository trafficLogsRepository;
+    private final TrafficLogFlushService trafficLogFlushService;
     private final ObjectMapper objectMapper;
 
     @Value("${app.dashboard.traffic-lookback-seconds:0}")
@@ -58,10 +60,12 @@ public class DashboardService {
     public DashboardService(DashboardWidgetItemRepository dashboardWidgetItemRepository,
                            ClassroomService classroomService,
                            TrafficLogsRepository trafficLogsRepository,
+                           TrafficLogFlushService trafficLogFlushService,
                            ObjectMapper objectMapper) {
         this.dashboardWidgetItemRepository = dashboardWidgetItemRepository;
         this.classroomService = classroomService;
         this.trafficLogsRepository = trafficLogsRepository;
+        this.trafficLogFlushService = trafficLogFlushService;
         this.objectMapper = objectMapper;
     }
 
@@ -91,6 +95,18 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public NetworkTrafficDto getNetworkTraffic() {
         try {
+            Map<String, TrafficLogFlushService.LiveTraffic> liveTraffic =
+                    trafficLogFlushService.getLiveTrafficSnapshot();
+            if (liveTraffic != null && !liveTraffic.isEmpty()) {
+                long inboundKbps = liveTraffic.values().stream()
+                        .mapToLong(TrafficLogFlushService.LiveTraffic::inboundKbps)
+                        .sum();
+                long outboundKbps = liveTraffic.values().stream()
+                        .mapToLong(TrafficLogFlushService.LiveTraffic::outboundKbps)
+                        .sum();
+                return toNetworkTrafficDto(inboundKbps, outboundKbps);
+            }
+
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime since = now.minusSeconds(resolveTrafficLookbackSeconds());
             List<TrafficLog> recentLogs = trafficLogsRepository.findByTimestampBetween(since, now);
@@ -117,23 +133,29 @@ public class DashboardService {
                 return new NetworkTrafficDto(0.0, 0.0);
             }
 
-            double inboundMbps = latestByMac.values().stream()
+            long inboundKbps = latestByMac.values().stream()
                     .map(TrafficLog::getInboundKbps)
                     .filter(Objects::nonNull)
                     .mapToLong(Long::longValue)
-                    .sum() / 1024.0;
-            double outboundMbps = latestByMac.values().stream()
+                    .sum();
+            long outboundKbps = latestByMac.values().stream()
                     .map(TrafficLog::getOutboundKbps)
                     .filter(Objects::nonNull)
                     .mapToLong(Long::longValue)
-                    .sum() / 1024.0;
-            return new NetworkTrafficDto(
-                    Math.round(inboundMbps * 100.0) / 100.0,
-                    Math.round(outboundMbps * 100.0) / 100.0);
+                    .sum();
+            return toNetworkTrafficDto(inboundKbps, outboundKbps);
         } catch (Exception e) {
             logger.warn("트래픽 데이터 조회 실패: {}", e.getMessage());
             return new NetworkTrafficDto(0.0, 0.0);
         }
+    }
+
+    private NetworkTrafficDto toNetworkTrafficDto(long inboundKbps, long outboundKbps) {
+        double inboundMbps = inboundKbps / 1024.0;
+        double outboundMbps = outboundKbps / 1024.0;
+        return new NetworkTrafficDto(
+                Math.round(inboundMbps * 100.0) / 100.0,
+                Math.round(outboundMbps * 100.0) / 100.0);
     }
 
     private boolean isNewerTrafficLog(TrafficLog candidate, TrafficLog current) {

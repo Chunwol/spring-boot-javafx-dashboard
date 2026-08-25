@@ -2,9 +2,12 @@ package com.example.backend.service.traffic;
 
 import com.example.backend.model.traffic.TrafficLog;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.util.DeviceAddressUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -13,8 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -109,16 +115,97 @@ public class TrafficLogFlushService {
         return buckets.size();
     }
 
+    /**
+     * Redis에 남아 있는 PC별 최신 트래픽 스냅샷을 반환한다.
+     * Redis가 없거나 조회에 실패하면 호출자가 DB 폴백을 사용할 수 있도록 빈 맵을 반환한다.
+     */
+    public Map<String, LiveTraffic> getLiveTrafficSnapshot() {
+        if (redis == null) return Map.of();
+        try {
+            List<String> keys = new ArrayList<>();
+            ScanOptions options = ScanOptions.scanOptions()
+                    .match(REDIS_LIVE_KEY + "*")
+                    .count(1000)
+                    .build();
+            try (Cursor<String> cursor = redis.scan(options)) {
+                while (cursor.hasNext()) {
+                    keys.add(cursor.next());
+                }
+            }
+            if (keys.isEmpty()) return Map.of();
+
+            List<String> values = redis.opsForValue().multiGet(keys);
+            if (values == null || values.isEmpty()) return Map.of();
+
+            Map<String, LiveTraffic> snapshot = new LinkedHashMap<>();
+            for (int i = 0; i < keys.size() && i < values.size(); i++) {
+                String key = keys.get(i);
+                if (key == null || !key.startsWith(REDIS_LIVE_KEY)) continue;
+                String normalizedMac = DeviceAddressUtil.normalizeMac(key.substring(REDIS_LIVE_KEY.length()));
+                LiveTraffic traffic = parseLiveTraffic(values.get(i));
+                if (normalizedMac == null || traffic == null) continue;
+
+                LiveTraffic existing = snapshot.get(normalizedMac);
+                if (existing == null || isNewer(traffic, existing)) {
+                    snapshot.put(normalizedMac, traffic);
+                }
+            }
+            return snapshot;
+        } catch (Exception ex) {
+            log.debug("Redis 라이브 트래픽 조회 실패 (DB 폴백): {}", ex.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** 요청한 MAC 주소에 해당하는 라이브 트래픽만 반환한다. */
+    public Map<String, LiveTraffic> getLiveTrafficSnapshot(Collection<String> macAddresses) {
+        if (macAddresses == null || macAddresses.isEmpty()) return Map.of();
+        Set<String> requested = macAddresses.stream()
+                .map(DeviceAddressUtil::normalizeMac)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        if (requested.isEmpty()) return Map.of();
+
+        Map<String, LiveTraffic> all = getLiveTrafficSnapshot();
+        if (all.isEmpty()) return Map.of();
+        Map<String, LiveTraffic> filtered = new LinkedHashMap<>();
+        requested.forEach(mac -> {
+            LiveTraffic traffic = all.get(mac);
+            if (traffic != null) filtered.put(mac, traffic);
+        });
+        return filtered;
+    }
+
     private void updateLive(TrafficLog t) {
         if (redis == null) return;
         try {
             String key = REDIS_LIVE_KEY + t.getMacAddress();
             String value = (t.getInboundKbps() != null ? t.getInboundKbps() : 0L)
-                    + "," + (t.getOutboundKbps() != null ? t.getOutboundKbps() : 0L);
+                    + "," + (t.getOutboundKbps() != null ? t.getOutboundKbps() : 0L)
+                    + "," + LocalDateTime.now();
             redis.opsForValue().set(key, value, LIVE_TTL);
         } catch (Exception ex) {
             log.debug("Redis 라이브 트래픽 기록 실패 (무시): {}", ex.getMessage());
         }
+    }
+
+    private LiveTraffic parseLiveTraffic(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            String[] parts = value.split(",", 3);
+            if (parts.length < 2) return null;
+            LocalDateTime updatedAt = parts.length == 3 && !parts[2].isBlank()
+                    ? LocalDateTime.parse(parts[2])
+                    : null;
+            return new LiveTraffic(Long.parseLong(parts[0]), Long.parseLong(parts[1]), updatedAt);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private boolean isNewer(LiveTraffic candidate, LiveTraffic current) {
+        if (candidate.updatedAt() == null) return current.updatedAt() == null;
+        return current.updatedAt() == null || candidate.updatedAt().isAfter(current.updatedAt());
     }
 
     private void accumulate(TrafficLog t) {
@@ -137,4 +224,6 @@ public class TrafficLogFlushService {
         long outboundSum;
         int sampleCount;
     }
+
+    public record LiveTraffic(long inboundKbps, long outboundKbps, LocalDateTime updatedAt) {}
 }

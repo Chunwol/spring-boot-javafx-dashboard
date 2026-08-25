@@ -12,6 +12,7 @@ import com.example.backend.repository.classroom.ClassroomTeacherDeviceRepository
 import com.example.backend.repository.command.CommandQueueRepository;
 import com.example.backend.repository.pc.PcMasterRepository;
 import com.example.backend.repository.traffic.TrafficLogsRepository;
+import com.example.backend.service.traffic.TrafficLogFlushService;
 import com.example.backend.util.DeviceAddressUtil;
 import com.example.backend.util.PaginationUtil;
 import org.slf4j.Logger;
@@ -48,19 +49,22 @@ public class ClassroomService {
     private final ClassroomTeacherDeviceRepository teacherDeviceRepository;
     private final TrafficLogsRepository trafficLogsRepository;
     private final CommandQueueRepository commandQueueRepository;
+    private final TrafficLogFlushService trafficLogFlushService;
 
     public ClassroomService(ClassroomGroupRepository classroomGroupRepository,
                             PcMasterRepository pcMasterRepository,
                             ClassroomIpRangeRepository ipRangeRepository,
                             ClassroomTeacherDeviceRepository teacherDeviceRepository,
                             TrafficLogsRepository trafficLogsRepository,
-                            CommandQueueRepository commandQueueRepository) {
+                            CommandQueueRepository commandQueueRepository,
+                            TrafficLogFlushService trafficLogFlushService) {
         this.classroomGroupRepository = classroomGroupRepository;
         this.pcMasterRepository = pcMasterRepository;
         this.ipRangeRepository = ipRangeRepository;
         this.teacherDeviceRepository = teacherDeviceRepository;
         this.trafficLogsRepository = trafficLogsRepository;
         this.commandQueueRepository = commandQueueRepository;
+        this.trafficLogFlushService = trafficLogFlushService;
     }
 
     /**
@@ -228,24 +232,29 @@ public class ClassroomService {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime from = now.minusMinutes(10);
         var logs = trafficLogsRepository.findByMacAddressInAndTimestampBetween(macAddresses, from, now);
+        Map<String, TrafficLogFlushService.LiveTraffic> liveByMac =
+                trafficLogFlushService.getLiveTrafficSnapshot(macAddresses);
 
         Map<String, TrafficLog> latestByMac = new HashMap<>();
         for (var log : logs) {
-            if (log.getMacAddress() == null) {
-                continue;
-            }
-            var current = latestByMac.get(log.getMacAddress());
+            String mac = DeviceAddressUtil.normalizeMac(log.getMacAddress());
+            if (mac == null) continue;
+            var current = latestByMac.get(mac);
             if (current == null || (log.getTimestamp() != null && current.getTimestamp() != null && log.getTimestamp().isAfter(current.getTimestamp()))
                     || (current.getTimestamp() == null && log.getTimestamp() != null)) {
-                latestByMac.put(log.getMacAddress(), log);
+                latestByMac.put(mac, log);
             }
         }
 
         List<Map<String, Object>> rows = new ArrayList<>();
         for (PcMaster pc : pcs) {
-            var log = latestByMac.get(pc.getMacAddress());
-            double inboundMbps = log != null && log.getInboundKbps() != null ? log.getInboundKbps() / 1024.0 : 0.0;
-            double outboundMbps = log != null && log.getOutboundKbps() != null ? log.getOutboundKbps() / 1024.0 : 0.0;
+            String normalizedMac = DeviceAddressUtil.normalizeMac(pc.getMacAddress());
+            var live = liveByMac.get(normalizedMac);
+            var log = latestByMac.get(normalizedMac);
+            double inboundMbps = live != null ? live.inboundKbps() / 1024.0
+                    : log != null && log.getInboundKbps() != null ? log.getInboundKbps() / 1024.0 : 0.0;
+            double outboundMbps = live != null ? live.outboundKbps() / 1024.0
+                    : log != null && log.getOutboundKbps() != null ? log.getOutboundKbps() / 1024.0 : 0.0;
 
             Map<String, Object> row = new HashMap<>();
             row.put("pcName", pc.getPcName());
@@ -254,7 +263,7 @@ public class ClassroomService {
             row.put("status", pc.getStatus());
             row.put("inboundMbps", inboundMbps);
             row.put("outboundMbps", outboundMbps);
-            row.put("updatedAt", log != null ? log.getTimestamp() : null);
+            row.put("updatedAt", live != null ? live.updatedAt() : log != null ? log.getTimestamp() : null);
             rows.add(row);
         }
 
@@ -281,6 +290,8 @@ public class ClassroomService {
         List<TrafficLog> logs = macAddresses.isEmpty()
                 ? List.of()
                 : trafficLogsRepository.findByMacAddressInAndTimestampBetween(macAddresses, now.minusMinutes(10), now);
+        Map<String, TrafficLogFlushService.LiveTraffic> liveByMac =
+                trafficLogFlushService.getLiveTrafficSnapshot(macAddresses);
 
         Map<String, TrafficLog> latestByMac = new HashMap<>();
         for (TrafficLog log : logs) {
@@ -297,13 +308,18 @@ public class ClassroomService {
         Map<Long, LocalDateTime> updatedAtByGroup = new HashMap<>();
         for (PcMaster pc : pcs) {
             if (pc.getGroupId() == null) continue;
-            TrafficLog log = latestByMac.get(DeviceAddressUtil.normalizeMac(pc.getMacAddress()));
-            if (log == null) continue;
+            String normalizedMac = DeviceAddressUtil.normalizeMac(pc.getMacAddress());
+            TrafficLogFlushService.LiveTraffic live = liveByMac.get(normalizedMac);
+            TrafficLog log = latestByMac.get(normalizedMac);
+            if (live == null && log == null) continue;
             double[] totals = totalsByGroup.computeIfAbsent(pc.getGroupId(), ignored -> new double[2]);
-            totals[0] += log.getInboundKbps() == null ? 0.0 : log.getInboundKbps() / 1024.0;
-            totals[1] += log.getOutboundKbps() == null ? 0.0 : log.getOutboundKbps() / 1024.0;
-            if (log.getTimestamp() != null) {
-                updatedAtByGroup.merge(pc.getGroupId(), log.getTimestamp(),
+            totals[0] += live != null ? live.inboundKbps() / 1024.0
+                    : log.getInboundKbps() == null ? 0.0 : log.getInboundKbps() / 1024.0;
+            totals[1] += live != null ? live.outboundKbps() / 1024.0
+                    : log.getOutboundKbps() == null ? 0.0 : log.getOutboundKbps() / 1024.0;
+            LocalDateTime updatedAt = live != null ? live.updatedAt() : log.getTimestamp();
+            if (updatedAt != null) {
+                updatedAtByGroup.merge(pc.getGroupId(), updatedAt,
                         (left, right) -> left.isAfter(right) ? left : right);
             }
         }
