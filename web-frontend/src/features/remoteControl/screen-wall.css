@@ -100,6 +100,18 @@
   scrollbar-gutter: stable;
 }
 
+.screen-wall-grid.compact-1 { grid-template-columns: minmax(0, 1fr); }
+.screen-wall-grid.compact-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.screen-wall-grid.compact-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.screen-wall-grid.compact-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.screen-wall-grid.compact-1,
+.screen-wall-grid.compact-2,
+.screen-wall-grid.compact-3,
+.screen-wall-grid.compact-4 {
+  grid-auto-rows: minmax(0, 1fr);
+}
+
 .screen-wall-tile {
   position: relative;
   display: grid;

@@ -318,6 +318,9 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
   const eligible = wallPcs.filter(canStartScreenWallPc).length
   const teacherCount = wallPcs.filter((pc) => pc.role?.toUpperCase() === 'TEACHER').length
   const studentCount = wallPcs.length - teacherCount
+  const compactGridClass = wallPcs.length > 0 && wallPcs.length <= 4
+    ? ` compact-${wallPcs.length}`
+    : ''
 
   const toggleFullscreen = async () => {
     try {
@@ -357,7 +360,7 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
           </div>
         </header>
         {!visible && <div className="screen-wall-paused">다른 탭을 보는 동안 연결을 정리했습니다. 이 탭으로 돌아오면 자동으로 다시 연결합니다.</div>}
-        <div className="screen-wall-grid">
+        <div className={`screen-wall-grid${compactGridClass}`}>
           {wallPcs.map((pc, index) => (
             <ScreenWallTile
               key={`${generation}-${pc.macAddress}`}

@@ -140,6 +140,7 @@ describe('ClassroomScreenWall', () => {
     expect(await screen.findByText('교사 PC 1대 · 학생 PC 0대 · 연결 1/1')).toBeInTheDocument()
     expect(screen.queryByText('1번 · 214-1')).not.toBeInTheDocument()
     expect(screen.getByText('교사 PC · 214_T')).toBeInTheDocument()
+    expect(screen.getByLabelText('214_T 화면').closest('.screen-wall-grid')).toHaveClass('compact-1')
   })
 
   it('automatically recreates a student screen session after an unexpected disconnect', async () => {
