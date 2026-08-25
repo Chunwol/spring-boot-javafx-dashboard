@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -45,7 +47,8 @@ import tools.jackson.databind.ObjectMapper;
  * 각 스케줄러 메서드는 {@code @Transactional} 없이 AtomicBoolean으로 중복 실행을 방지한다.
  * {@code @Transactional} + {@code finally { atomicBoolean.set(false) }} 를 함께 쓰면,
  * finally 블록이 트랜잭션 커밋 전에 실행되어 다른 스레드가 조기 진입할 수 있는
- * race condition이 발생한다. JPA repository 각 호출은 개별 트랜잭션으로 처리된다.
+ * race condition이 발생한다. 여러 DB 쓰기를 묶어야 하는 작업은 스케줄러 메서드 안에서
+ * {@link TransactionTemplate}로 트랜잭션 완료 시점까지 실행 잠금을 유지한다.
  */
 @Service
 public class SchedulerService {
@@ -62,6 +65,7 @@ public class SchedulerService {
     private final ObjectMapper objectMapper;
     private final FileDistributionOrchestrator fileDistributionOrchestrator;
     private final WebSocketService webSocketService;
+    private final TransactionTemplate transactionTemplate;
 
     /** application.yml: app.traffic.alert-threshold-mbps (기본 100) */
     @Value("${app.traffic.alert-threshold-mbps:100}")
@@ -143,7 +147,8 @@ public class SchedulerService {
                             ApplicationEventPublisher eventPublisher,
                             ObjectMapper objectMapper,
                             FileDistributionOrchestrator fileDistributionOrchestrator,
-                            WebSocketService webSocketService) {
+                            WebSocketService webSocketService,
+                            PlatformTransactionManager transactionManager) {
         this.trafficRepo = trafficRepo;
         this.pcRepo = pcRepo;
         this.commandQueueRepository = commandQueueRepository;
@@ -154,6 +159,7 @@ public class SchedulerService {
         this.objectMapper = objectMapper;
         this.fileDistributionOrchestrator = fileDistributionOrchestrator;
         this.webSocketService = webSocketService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     // ─── 트래픽 이상 감지 (1분 주기) ────────────────────────────────────
@@ -248,7 +254,7 @@ public class SchedulerService {
     // ─── 명령 타임아웃 재시도 (1분 주기) ───────────────────────────────────
     //
     // WHY: @Transactional 제거 — AtomicBoolean과의 race condition 방지.
-    // 실제 DB 접근(reconcileStaleCommandsNow)은 자체 @Transactional로 처리된다.
+    // 명시적 TransactionTemplate을 사용해 커밋 완료 뒤에만 실행 잠금을 해제한다.
     /**
      * DELIVERED/ACKED 상태에서 commandTimeoutSeconds를 초과한 명령을 재큐잉하거나 FAILED 처리한다.
      * 최대 재시도 횟수(maxCommandRetries)에 도달하면 FAILED로 확정한다.
@@ -260,7 +266,7 @@ public class SchedulerService {
             return;
         }
         try {
-            reconcileStaleCommandsNow();
+            transactionTemplate.executeWithoutResult(status -> reconcileStaleCommandsNow());
         } finally {
             staleCommandRetryRunning.set(false);
         }

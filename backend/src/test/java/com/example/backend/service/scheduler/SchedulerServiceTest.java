@@ -20,6 +20,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -49,6 +52,8 @@ class SchedulerServiceTest {
     @Mock ObjectMapper objectMapper;
     @Mock FileDistributionOrchestrator fileDistributionOrchestrator;
     @Mock WebSocketService webSocketService;
+    @Mock PlatformTransactionManager transactionManager;
+    @Mock TransactionStatus transactionStatus;
 
     @InjectMocks SchedulerService schedulerService;
 
@@ -67,6 +72,26 @@ class SchedulerServiceTest {
                 .thenAnswer(invocation -> realMapper.readTree(invocation.getArgument(0, String.class)));
         lenient().when(operationalMetricsService.snapshot()).thenReturn(java.util.Map.of());
         lenient().when(operationalMetricsService.snapshotRecent(anyInt())).thenReturn(java.util.Map.of());
+        lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transactionStatus);
+    }
+
+    @Test
+    void retryStaleCommands_runsReconciliationInsideTransaction() {
+        when(commandQueueRepository.findTop200ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+                org.mockito.ArgumentMatchers.eq("QUEUED"), any(LocalDateTime.class))).thenReturn(List.of());
+        when(commandQueueRepository.findTop200ByStatusAndDeliveredAtBeforeOrderByDeliveredAtAsc(
+                org.mockito.ArgumentMatchers.eq("DELIVERED"), any(LocalDateTime.class))).thenReturn(List.of());
+        when(commandQueueRepository.findTop200ByStatusAndAckedAtBeforeOrderByAckedAtAsc(
+                org.mockito.ArgumentMatchers.eq("ACKED"), any(LocalDateTime.class))).thenReturn(List.of());
+        when(commandQueueRepository.findTop200ByVerificationStatusInOrderByVerificationDeadlineAtAsc(
+                List.of("PENDING_OFFLINE", "PENDING_ONLINE", "PENDING_AGENT_RESTART", "PENDING_REBOOT_CONFIRM")))
+                .thenReturn(List.of());
+
+        schedulerService.retryStaleCommands();
+
+        verify(transactionManager).getTransaction(any(TransactionDefinition.class));
+        verify(transactionManager).commit(transactionStatus);
     }
 
     @Test
