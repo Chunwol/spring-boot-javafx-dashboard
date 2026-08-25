@@ -14,12 +14,16 @@ import {
 } from './api'
 import {
   canStartScreenWallPc,
+  canAutoReconnectScreenWallPc,
   nextScreenWallPollDelay,
   nextScreenWallStartCount,
   screenWallPcs,
   SCREEN_WALL_BATCH_INTERVAL_MS,
   SCREEN_WALL_BATCH_SIZE,
+  SCREEN_WALL_RECONNECT_DELAY_MS,
+  SCREEN_WALL_RECONNECT_LIMIT,
   SCREEN_WALL_STATUS_POLL_INITIAL_MS,
+  type ScreenWallScope,
 } from './screenWall'
 import './screen-wall.css'
 
@@ -86,9 +90,13 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
   const rfbRef = useRef<RfbClient | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const closingRef = useRef(false)
+  const retryingRef = useRef(false)
+  const retryAttemptsRef = useRef(0)
   const [state, setState] = useState<TileState>(() => initialTileState(pc))
   const [message, setMessage] = useState('')
+  const [connectionGeneration, setConnectionGeneration] = useState(0)
   const connectable = canStartScreenWallPc(pc)
+  const autoReconnectable = canAutoReconnectScreenWallPc(pc, 0)
 
   const updateState = useCallback((next: TileState, detail = '') => {
     setState(next)
@@ -105,7 +113,41 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
 
     const controller = new AbortController()
     closingRef.current = false
+    retryingRef.current = false
     updateState('starting')
+
+    const scheduleReconnect = () => {
+      if (retryingRef.current) return
+      if (!autoReconnectable || retryAttemptsRef.current >= SCREEN_WALL_RECONNECT_LIMIT) {
+        const sessionId = sessionIdRef.current
+        sessionIdRef.current = null
+        onSessionChange(pc.macAddress, null)
+        rfbRef.current = null
+        if (sessionId) void closeRemoteControlSession(sessionId).catch(() => undefined)
+        updateState('failed', '연결 끊김')
+        return
+      }
+
+      retryingRef.current = true
+      retryAttemptsRef.current += 1
+      const attempt = retryAttemptsRef.current
+      updateState('waiting', `연결이 끊겨 다시 연결합니다. (${attempt}/${SCREEN_WALL_RECONNECT_LIMIT})`)
+
+      const sessionId = sessionIdRef.current
+      sessionIdRef.current = null
+      onSessionChange(pc.macAddress, null)
+      rfbRef.current = null
+
+      void (async () => {
+        if (sessionId) {
+          await closeRemoteControlSession(sessionId).catch(() => undefined)
+        }
+        await wait(SCREEN_WALL_RECONNECT_DELAY_MS, controller.signal)
+        if (!controller.signal.aborted) {
+          setConnectionGeneration((current) => current + 1)
+        }
+      })().catch(() => undefined)
+    }
 
     const connect = async () => {
       let password = ''
@@ -163,7 +205,7 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
           updateState('failed', reason || '화면 인증 실패')
         })
         client.addEventListener('disconnect', () => {
-          if (!closingRef.current) updateState('failed', '연결 끊김')
+          if (!closingRef.current) scheduleReconnect()
         })
       } catch (error) {
         if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
@@ -191,7 +233,7 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
       onSessionChange(pc.macAddress, null)
       if (sessionId) void closeRemoteControlSession(sessionId).catch(() => undefined)
     }
-  }, [connectable, enabled, onSessionChange, pc.macAddress, updateState])
+  }, [autoReconnectable, connectable, connectionGeneration, enabled, onSessionChange, pc.macAddress, updateState])
 
   return (
     <article className={`screen-wall-tile state-${state}`}>
@@ -212,7 +254,10 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
 
 export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
   const { token } = useAuth()
-  const wallPcs = useMemo(() => screenWallPcs(pcs), [pcs])
+  const [scope, setScope] = useState<ScreenWallScope>('all')
+  const wallPcs = useMemo(() => screenWallPcs(pcs, scope), [pcs, scope])
+  const wallPcKey = useMemo(() => wallPcs.map((pc) => pc.macAddress).join('|'), [wallPcs])
+  const wallMacs = useMemo(() => new Set(wallPcs.map((pc) => pc.macAddress)), [wallPcs])
   const [generation, setGeneration] = useState(0)
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
   const [startCount, setStartCount] = useState(() => Math.min(SCREEN_WALL_BATCH_SIZE, wallPcs.length))
@@ -237,7 +282,10 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
   }, [])
 
   useEffect(() => {
-    setStates({})
+    const activeMacs = new Set(wallPcKey.split('|').filter(Boolean))
+    setStates((current) => Object.fromEntries(
+      Object.entries(current).filter(([macAddress]) => activeMacs.has(macAddress)),
+    ))
     setStartCount(visible ? Math.min(SCREEN_WALL_BATCH_SIZE, wallPcs.length) : 0)
     if (!visible) return
     const timer = window.setInterval(() => {
@@ -248,7 +296,7 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
       })
     }, SCREEN_WALL_BATCH_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [generation, visible, wallPcs.length])
+  }, [generation, scope, visible, wallPcKey, wallPcs.length])
 
   useEffect(() => {
     const onFullscreenChange = () => setFullscreen(document.fullscreenElement === dialogRef.current)
@@ -265,8 +313,8 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
     return () => window.removeEventListener('pagehide', onPageHide)
   }, [token])
 
-  const connected = Object.values(states).filter((state) => state === 'connected').length
-  const failed = Object.values(states).filter((state) => state === 'failed').length
+  const connected = Object.entries(states).filter(([macAddress, state]) => wallMacs.has(macAddress) && state === 'connected').length
+  const failed = Object.entries(states).filter(([macAddress, state]) => wallMacs.has(macAddress) && state === 'failed').length
   const eligible = wallPcs.filter(canStartScreenWallPc).length
   const teacherCount = wallPcs.filter((pc) => pc.role?.toUpperCase() === 'TEACHER').length
   const studentCount = wallPcs.length - teacherCount
@@ -289,6 +337,20 @@ export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
             <p>교사 PC {teacherCount}대 · 학생 PC {studentCount}대 · 연결 {connected}/{eligible}{failed > 0 ? ` · 실패 ${failed}` : ''}</p>
           </div>
           <div className="screen-wall-tools">
+            <div className="screen-wall-scope" role="group" aria-label="모니터링 대상">
+              {([
+                ['all', '둘 다'],
+                ['teacher', '교사 PC'],
+                ['student', '학생 PC'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  className={scope === value ? 'active' : ''}
+                  onClick={() => setScope(value)}
+                  aria-pressed={scope === value}
+                >{label}</button>
+              ))}
+            </div>
             <button className="icon-button" onClick={() => setGeneration((current) => current + 1)} aria-label="전체 다시 연결" title="전체 다시 연결"><RefreshCw size={17} /></button>
             <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? '전체화면 종료' : '전체화면'} title={fullscreen ? '전체화면 종료' : '전체화면'}>{fullscreen ? <Minimize2 size={17} /> : <Expand size={17} />}</button>
             <button className="icon-button close" onClick={onClose} aria-label="화면 모니터링 닫기" title="닫기"><X size={19} /></button>

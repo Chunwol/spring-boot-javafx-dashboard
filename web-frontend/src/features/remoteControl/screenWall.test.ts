@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { PcStatus } from '../../types/dashboard'
 import {
   canStartScreenWallPc,
+  canAutoReconnectScreenWallPc,
   nextScreenWallPollDelay,
   nextScreenWallStartCount,
   screenWallPcs,
   SCREEN_WALL_STATUS_POLL_MAX_MS,
   SCREEN_WALL_MAX_PCS,
+  SCREEN_WALL_RECONNECT_LIMIT,
 } from './screenWall'
 
 function pc(index: number, overrides: Partial<PcStatus> = {}): PcStatus {
@@ -38,6 +40,22 @@ describe('screenWall', () => {
     expect(canStartScreenWallPc(pc(2, { online: false, status: 'OFFLINE' }))).toBe(false)
     expect(canStartScreenWallPc(pc(3, { status: 'BROKEN' }))).toBe(false)
     expect(canStartScreenWallPc(pc(4, { macAddress: '' }))).toBe(false)
+  })
+
+  it('filters teacher, student, or both monitoring targets', () => {
+    const teacher = pc(0, { pcName: '214_T', role: 'TEACHER' })
+    const student = pc(1)
+
+    expect(screenWallPcs([student, teacher], 'all')).toEqual([teacher, student])
+    expect(screenWallPcs([student, teacher], 'teacher')).toEqual([teacher])
+    expect(screenWallPcs([student, teacher], 'student')).toEqual([student])
+  })
+
+  it('automatically reconnects only eligible student PCs within the retry limit', () => {
+    expect(canAutoReconnectScreenWallPc(pc(1), 0)).toBe(true)
+    expect(canAutoReconnectScreenWallPc(pc(1), SCREEN_WALL_RECONNECT_LIMIT)).toBe(false)
+    expect(canAutoReconnectScreenWallPc(pc(2, { role: 'TEACHER' }), 0)).toBe(false)
+    expect(canAutoReconnectScreenWallPc(pc(3, { online: false }), 0)).toBe(false)
   })
 
   it('advances connection starts four at a time without exceeding the room size', () => {
