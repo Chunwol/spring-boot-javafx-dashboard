@@ -8,6 +8,7 @@ export const SCREEN_WALL_STATUS_POLL_INITIAL_MS = 1_000
 export const SCREEN_WALL_STATUS_POLL_MAX_MS = 3_000
 export const SCREEN_WALL_RECONNECT_DELAY_MS = 2_000
 export const SCREEN_WALL_RECONNECT_LIMIT = 3
+export const SCREEN_WALL_RECONNECT_RESET_MS = 15_000
 
 export type ScreenWallScope = 'all' | 'teacher' | 'student'
 

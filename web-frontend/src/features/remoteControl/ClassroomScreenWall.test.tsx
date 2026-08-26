@@ -125,7 +125,7 @@ describe('ClassroomScreenWall', () => {
     render(<ClassroomScreenWall room={room} pcs={[pc, teacherPc]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('교사 PC · 214_T')).toBeInTheDocument()
-    expect(screen.getByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
+    expect(await screen.findByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
     expect(mocks.create.mock.calls.map(([macAddress]) => macAddress)).toContain(teacherPc.macAddress)
     expect(mocks.rfbCreated.mock.calls.every(([client]) => client.viewOnly)).toBe(true)
@@ -156,5 +156,17 @@ describe('ClassroomScreenWall', () => {
     })
     expect(mocks.close).toHaveBeenCalledWith('wall-session')
     expect(mocks.rfbCreated).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a transient student session creation failure', async () => {
+    mocks.create.mockRejectedValueOnce(new Error('temporary gateway failure'))
+
+    render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+
+    expect(await screen.findByText('연결에 실패해 다시 연결합니다. (1/3)')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2), {
+      timeout: SCREEN_WALL_RECONNECT_DELAY_MS + 2_000,
+    })
+    expect(await screen.findByText('연결됨')).toBeInTheDocument()
   })
 })

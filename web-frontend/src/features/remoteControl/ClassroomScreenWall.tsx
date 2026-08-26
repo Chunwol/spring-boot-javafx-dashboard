@@ -22,6 +22,7 @@ import {
   SCREEN_WALL_BATCH_SIZE,
   SCREEN_WALL_RECONNECT_DELAY_MS,
   SCREEN_WALL_RECONNECT_LIMIT,
+  SCREEN_WALL_RECONNECT_RESET_MS,
   SCREEN_WALL_STATUS_POLL_INITIAL_MS,
   type ScreenWallScope,
 } from './screenWall'
@@ -112,26 +113,31 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
     }
 
     const controller = new AbortController()
+    let stableConnectionTimer: number | null = null
     closingRef.current = false
     retryingRef.current = false
     updateState('starting')
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (detail = '연결이 끊겨') => {
       if (retryingRef.current) return
+      if (stableConnectionTimer !== null) {
+        window.clearTimeout(stableConnectionTimer)
+        stableConnectionTimer = null
+      }
       if (!autoReconnectable || retryAttemptsRef.current >= SCREEN_WALL_RECONNECT_LIMIT) {
         const sessionId = sessionIdRef.current
         sessionIdRef.current = null
         onSessionChange(pc.macAddress, null)
         rfbRef.current = null
         if (sessionId) void closeRemoteControlSession(sessionId).catch(() => undefined)
-        updateState('failed', '연결 끊김')
+        updateState('failed', detail === '연결에 실패해' ? '연결 실패' : '연결 끊김')
         return
       }
 
       retryingRef.current = true
       retryAttemptsRef.current += 1
       const attempt = retryAttemptsRef.current
-      updateState('waiting', `연결이 끊겨 다시 연결합니다. (${attempt}/${SCREEN_WALL_RECONNECT_LIMIT})`)
+      updateState('waiting', `${detail} 다시 연결합니다. (${attempt}/${SCREEN_WALL_RECONNECT_LIMIT})`)
 
       const sessionId = sessionIdRef.current
       sessionIdRef.current = null
@@ -199,6 +205,10 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
           password = ''
           credentials.password = ''
           updateState('connected')
+          stableConnectionTimer = window.setTimeout(() => {
+            retryAttemptsRef.current = 0
+            stableConnectionTimer = null
+          }, SCREEN_WALL_RECONNECT_RESET_MS)
         })
         client.addEventListener('securityfailure', (event) => {
           const reason = (event as CustomEvent<{ reason?: string }>).detail?.reason
@@ -209,17 +219,19 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
         })
       } catch (error) {
         if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
-        updateState('failed', error instanceof Error ? error.message : '연결 실패')
         const sessionId = sessionIdRef.current
         sessionIdRef.current = null
         onSessionChange(pc.macAddress, null)
         if (sessionId) void closeRemoteControlSession(sessionId).catch(() => undefined)
+        if (autoReconnectable) scheduleReconnect('연결에 실패해')
+        else updateState('failed', error instanceof Error ? error.message : '연결 실패')
       }
     }
 
     const startTimer = window.setTimeout(() => void connect(), 0)
     return () => {
       window.clearTimeout(startTimer)
+      if (stableConnectionTimer !== null) window.clearTimeout(stableConnectionTimer)
       controller.abort()
       closingRef.current = true
       try {

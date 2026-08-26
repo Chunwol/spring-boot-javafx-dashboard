@@ -55,7 +55,7 @@ public class VncRelayWebSocketHandler extends BinaryWebSocketHandler implements 
         this.properties = properties;
         this.relayRegistry = relayRegistry;
         this.readers = Executors.newFixedThreadPool(
-                Math.max(1, properties.getMaxSessions()),
+                Math.max(1, properties.getMaxViewerSessions()),
                 Thread.ofPlatform().daemon().name("vnc-relay-reader-", 0).factory());
         this.timeouts = new ScheduledThreadPoolExecutor(
                 1, Thread.ofPlatform().daemon().name("vnc-relay-timeout-", 0).factory());

@@ -26,9 +26,10 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
-import java.util.List;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -50,8 +51,9 @@ public class RemoteControlSessionService {
     private final RemoteControlRelayRegistry relayRegistry;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final Map<UUID, SessionEntry> sessions = new ConcurrentHashMap<>();
-    private final Map<String, UUID> activeSessionByMac = new ConcurrentHashMap<>();
+    private final Map<UUID, ViewerEntry> sessions = new ConcurrentHashMap<>();
+    private final Map<UUID, StreamEntry> streams = new ConcurrentHashMap<>();
+    private final Map<String, UUID> activeStreamByMac = new ConcurrentHashMap<>();
     private final Object registryLock = new Object();
 
     @Autowired
@@ -98,214 +100,290 @@ public class RemoteControlSessionService {
         ensureEnabled();
         PcMaster pc = requireOnlinePc(requestedMac);
         String canonicalMac = canonicalMac(pc.getMacAddress());
-        UUID sessionId = UUID.randomUUID();
         Instant now = clock.instant();
-        SessionEntry entry = new SessionEntry(
-                sessionId,
-                pc.getMacAddress(),
-                canonicalMac,
-                owner,
-                now,
-                now.plus(properties.getSessionTtl()),
-                now.plus(properties.getCommandTimeout()));
+        UUID viewerId = UUID.randomUUID();
+        StreamEntry stream;
+        boolean createdStream = false;
 
         synchronized (registryLock) {
-            if (activeSessionByMac.size() >= Math.max(1, properties.getMaxSessions())) {
-                throw new ConflictException("Maximum remote-control sessions reached");
+            if (activeViewerCount() >= Math.max(1, properties.getMaxViewerSessions())) {
+                throw new ConflictException("Maximum remote-control viewer sessions reached");
             }
-            UUID existing = activeSessionByMac.putIfAbsent(canonicalMac, sessionId);
-            if (existing != null) {
-                throw new ConflictException("Remote-control session already active for this PC");
+            UUID streamId = activeStreamByMac.get(canonicalMac);
+            stream = streamId == null ? null : streams.get(streamId);
+            if (stream != null && !isActive(stream.state)) {
+                activeStreamByMac.remove(canonicalMac, stream.streamId);
+                stream = null;
             }
-            sessions.put(sessionId, entry);
+            if (stream == null) {
+                if (activeStreamByMac.size() >= Math.max(1, properties.getMaxSessions())) {
+                    throw new ConflictException("Maximum remote-control PC streams reached");
+                }
+                stream = new StreamEntry(
+                        viewerId,
+                        pc.getMacAddress(),
+                        canonicalMac,
+                        now,
+                        now.plus(properties.getSessionTtl()),
+                        now.plus(properties.getCommandTimeout()));
+                streams.put(stream.streamId, stream);
+                activeStreamByMac.put(canonicalMac, stream.streamId);
+                createdStream = true;
+            } else if (stream.viewerIds.size() >= Math.max(1, properties.getMaxViewersPerPc())) {
+                throw new ConflictException("Maximum viewers reached for this PC");
+            }
+
+            ViewerEntry viewer = new ViewerEntry(
+                    viewerId, owner, stream, now, now.plus(properties.getReadyTtl()));
+            stream.viewerIds.add(viewerId);
+            stream.noViewerDeadline = null;
+            sessions.put(viewerId, viewer);
         }
 
-        try {
-            if (completedTaskId == null) {
-                entry.taskId = enqueue(pc.getMacAddress(), START, sessionId);
-            } else {
-                entry.taskId = completedTaskId;
-                applyValidatedResult(entry, requireCompletedStartTask(entry, completedTaskId, pc));
+        if (createdStream) {
+            try {
+                if (completedTaskId == null) {
+                    stream.taskId = enqueue(pc.getMacAddress(), START, stream.streamId);
+                } else {
+                    stream.taskId = completedTaskId;
+                    applyValidatedResult(stream, requireCompletedStartTask(stream, completedTaskId, pc));
+                }
+            } catch (RuntimeException exception) {
+                failStream(stream, exception.getMessage());
+                sessions.remove(viewerId);
+                throw exception;
             }
-            return toView(entry);
-        } catch (RuntimeException exception) {
-            sessions.remove(sessionId);
-            activeSessionByMac.remove(canonicalMac, sessionId);
-            throw exception;
         }
+        return toView(requireSession(viewerId));
     }
 
     public RemoteControlSessionView getSession(UUID sessionId, String owner) {
-        SessionEntry entry = requireOwnedSession(sessionId, owner);
-        synchronized (entry) {
-            refreshPending(entry);
-            return toView(entry);
-        }
+        ViewerEntry viewer = requireOwnedSession(sessionId, owner);
+        refreshPending(viewer.stream);
+        refreshExpiredTicket(viewer);
+        return toView(viewer);
     }
 
     public RemoteControlTicketResponse issueTicket(UUID sessionId, String owner) {
-        SessionEntry entry = requireOwnedSession(sessionId, owner);
-        synchronized (entry) {
-            refreshPending(entry);
-            if (entry.state != State.READY && entry.state != State.TICKET_ISSUED) {
-                throw new ConflictException("Remote-control session is not ready: " + entry.state);
-            }
+        ViewerEntry viewer = requireOwnedSession(sessionId, owner);
+        StreamEntry stream = viewer.stream;
+        refreshPending(stream);
+
+        String ticket;
+        Instant ticketExpiresAt;
+        String password;
+        synchronized (stream) {
             Instant now = clock.instant();
-            if (!now.isBefore(entry.expiresAt)
-                    || entry.readyDeadline == null
-                    || !now.isBefore(entry.readyDeadline)) {
-                expire(entry, "Remote-control session expired");
-                throw new ConflictException("Remote-control session expired");
+            if (stream.state != StreamState.READY && stream.state != StreamState.CONNECTED) {
+                throw new ConflictException("Remote-control stream is not ready: " + stream.state);
             }
-            String ticket = newTicket();
-            entry.ticketHash = hashTicket(ticket);
-            entry.ticketExpiresAt = min(min(now.plus(properties.getTicketTtl()), entry.expiresAt),
-                    entry.readyDeadline);
-            entry.state = State.TICKET_ISSUED;
-            return new RemoteControlTicketResponse(
-                    entry.sessionId,
-                    entry.taskId,
-                    "/vnc-relay/" + entry.sessionId + "?ticket=" + ticket,
-                    entry.oneTimePassword,
-                    entry.ticketExpiresAt);
+            if (!now.isBefore(stream.expiresAt)
+                    || (stream.state == StreamState.READY
+                    && stream.readyDeadline != null
+                    && !now.isBefore(stream.readyDeadline))) {
+                closeStream(stream, "Remote-control stream expired");
+                throw new ConflictException("Remote-control stream expired");
+            }
+            synchronized (viewer) {
+                if (!viewer.active) {
+                    throw new ConflictException("Remote-control viewer session is closed");
+                }
+                ticket = newTicket();
+                viewer.ticketHash = hashTicket(ticket);
+                viewer.ticketExpiresAt = min(now.plus(properties.getTicketTtl()), stream.expiresAt);
+                viewer.state = ViewerState.TICKET_ISSUED;
+                ticketExpiresAt = viewer.ticketExpiresAt;
+                password = stream.oneTimePassword;
+            }
         }
+        return new RemoteControlTicketResponse(
+                viewer.sessionId,
+                stream.taskId,
+                "/vnc-relay/" + viewer.sessionId + "?ticket=" + ticket,
+                password,
+                ticketExpiresAt);
     }
 
     public RemoteControlRelayGrant consumeTicket(UUID sessionId, String ticket) {
-        SessionEntry entry = requireSession(sessionId);
-        synchronized (entry) {
-            Instant now = clock.instant();
-            if (entry.state != State.TICKET_ISSUED
-                    || entry.ticketHash == null
-                    || entry.ticketExpiresAt == null
-                    || !now.isBefore(entry.ticketExpiresAt)
-                    || !MessageDigest.isEqual(entry.ticketHash, hashTicket(ticket))) {
-                throw new ApplicationException("REMOTE_CONTROL_TICKET_INVALID",
-                        "Invalid or expired remote-control ticket", 401);
+        ViewerEntry viewer = requireSession(sessionId);
+        StreamEntry stream = viewer.stream;
+        synchronized (stream) {
+            if (stream.state != StreamState.READY && stream.state != StreamState.CONNECTED) {
+                throw new ApplicationException("REMOTE_CONTROL_STREAM_UNAVAILABLE",
+                        "Remote-control stream is unavailable", 409);
             }
-            entry.ticketHash = null;
-            entry.ticketExpiresAt = null;
-            entry.state = State.CONNECTING;
+            synchronized (viewer) {
+                Instant now = clock.instant();
+                if (!viewer.active
+                        || viewer.state != ViewerState.TICKET_ISSUED
+                        || viewer.ticketHash == null
+                        || viewer.ticketExpiresAt == null
+                        || !now.isBefore(viewer.ticketExpiresAt)
+                        || !MessageDigest.isEqual(viewer.ticketHash, hashTicket(ticket))) {
+                    throw new ApplicationException("REMOTE_CONTROL_TICKET_INVALID",
+                            "Invalid or expired remote-control ticket", 401);
+                }
+                viewer.ticketHash = null;
+                viewer.ticketExpiresAt = null;
+                viewer.state = ViewerState.CONNECTING;
+            }
             return new RemoteControlRelayGrant(
-                    entry.sessionId,
-                    entry.macAddress,
-                    entry.targetAddress,
-                    entry.targetPort,
-                    entry.expiresAt);
+                    viewer.sessionId,
+                    stream.macAddress,
+                    stream.targetAddress,
+                    stream.targetPort,
+                    stream.expiresAt);
         }
     }
 
     public void markConnected(UUID sessionId) {
-        SessionEntry entry = requireSession(sessionId);
-        synchronized (entry) {
-            if (entry.state != State.CONNECTING) {
-                throw new ConflictException("Remote-control relay is not connecting");
+        ViewerEntry viewer = requireSession(sessionId);
+        StreamEntry stream = viewer.stream;
+        synchronized (stream) {
+            synchronized (viewer) {
+                if (!viewer.active || viewer.state != ViewerState.CONNECTING) {
+                    throw new ConflictException("Remote-control relay is not connecting");
+                }
+                if (stream.state != StreamState.READY && stream.state != StreamState.CONNECTED) {
+                    throw new ConflictException("Remote-control stream is unavailable");
+                }
+                viewer.state = ViewerState.CONNECTED;
+                stream.state = StreamState.CONNECTED;
+                stream.readyDeadline = null;
             }
-            entry.state = State.CONNECTED;
         }
     }
 
     public void connectionFailed(UUID sessionId, String reason) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
-            return;
+        ViewerEntry viewer = sessions.get(sessionId);
+        if (viewer == null) return;
+        String failure = reason == null || reason.isBlank()
+                ? "Unable to connect to the target VNC server" : reason;
+        synchronized (viewer) {
+            if (!viewer.active || viewer.state != ViewerState.CONNECTING) return;
         }
-        synchronized (entry) {
-            if (entry.state == State.CONNECTING) {
-                fail(entry, reason == null || reason.isBlank()
-                        ? "Unable to connect to the target VNC server" : reason);
-            }
+        failViewer(viewer, failure);
+        if (!hasConnectedViewer(viewer.stream)) {
+            failStream(viewer.stream, failure);
         }
     }
 
     public void closeSession(UUID sessionId, String owner) {
-        SessionEntry entry = requireOwnedSession(sessionId, owner);
-        closeEntry(entry, "Closed by administrator");
-    }
-
-    public void closeSessions(List<UUID> sessionIds, String owner) {
-        List<SessionEntry> ownedEntries = new LinkedHashSet<>(sessionIds).stream()
-                .map(sessionId -> requireOwnedSession(sessionId, owner))
-                .toList();
-        ownedEntries.forEach(entry -> closeEntry(entry, "Closed by administrator"));
-    }
-
-    public void relayClosed(UUID sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry != null) {
-            closeEntry(entry, "Relay disconnected");
+        ViewerEntry viewer = requireOwnedSession(sessionId, owner);
+        if (!closeViewer(viewer, ViewerState.CLOSED, "Closed by administrator")
+                && !isActive(viewer.stream.state)) {
+            tryIssueStop(viewer.stream);
         }
     }
 
-    @Scheduled(fixedDelayString = "${app.remote-control.cleanup-interval-ms:30000}")
+    public void closeSessions(List<UUID> sessionIds, String owner) {
+        List<ViewerEntry> ownedEntries = new LinkedHashSet<>(sessionIds).stream()
+                .map(sessionId -> requireOwnedSession(sessionId, owner))
+                .toList();
+        ownedEntries.forEach(viewer -> closeViewer(viewer, ViewerState.CLOSED, "Closed by administrator"));
+    }
+
+    public void relayClosed(UUID sessionId) {
+        ViewerEntry viewer = sessions.get(sessionId);
+        if (viewer != null) {
+            closeViewer(viewer, ViewerState.CLOSED, "Relay disconnected");
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${app.remote-control.cleanup-interval-ms:5000}")
     public void cleanupExpiredSessions() {
         Instant now = clock.instant();
-        for (SessionEntry entry : sessions.values()) {
-            synchronized (entry) {
-                if (entry.state == State.PENDING && !now.isBefore(entry.commandDeadline)) {
-                    expire(entry, "Remote-control start command timed out");
-                } else if (isActive(entry.state) && !now.isBefore(entry.expiresAt)) {
-                    expire(entry, "Remote-control session expired");
-                } else if (isWaitingForConnection(entry.state)
-                        && entry.readyDeadline != null
-                        && !now.isBefore(entry.readyDeadline)) {
-                    expire(entry, "Remote-control connection window expired");
-                } else if (entry.state == State.TICKET_ISSUED
-                        && entry.ticketExpiresAt != null
-                        && !now.isBefore(entry.ticketExpiresAt)) {
-                    entry.ticketHash = null;
-                    entry.ticketExpiresAt = null;
-                    entry.state = State.READY;
-                } else if (entry.state == State.CLOSED || entry.state == State.FAILED) {
-                    tryIssueStop(entry);
-                    if (entry.closedAt != null
-                            && ((entry.stopIssued && now.isAfter(entry.closedAt.plusSeconds(300)))
-                            || now.isAfter(entry.closedAt.plusSeconds(3600)))) {
-                        sessions.remove(entry.sessionId, entry);
-                    }
+        for (StreamEntry stream : streams.values()) {
+            StreamState state = stream.state;
+            if (state == StreamState.PENDING && !now.isBefore(stream.commandDeadline)) {
+                failStream(stream, "Remote-control start command timed out");
+            } else if (isActive(state) && !now.isBefore(stream.expiresAt)) {
+                closeStream(stream, "Remote-control stream expired");
+            } else if (state == StreamState.READY
+                    && stream.readyDeadline != null
+                    && !now.isBefore(stream.readyDeadline)) {
+                closeStream(stream, "Remote-control connection window expired");
+            } else if (isActive(state)
+                    && stream.noViewerDeadline != null
+                    && !now.isBefore(stream.noViewerDeadline)) {
+                closeStream(stream, "No remote-control viewers remain");
+            } else if (state == StreamState.CLOSED || state == StreamState.FAILED) {
+                tryIssueStop(stream);
+                if (stream.closedAt != null
+                        && ((stream.stopIssued && now.isAfter(stream.closedAt.plusSeconds(300)))
+                        || now.isAfter(stream.closedAt.plusSeconds(3600)))) {
+                    streams.remove(stream.streamId, stream);
+                }
+            }
+        }
+
+        for (ViewerEntry viewer : sessions.values()) {
+            refreshExpiredTicket(viewer);
+            boolean idle;
+            synchronized (viewer) {
+                idle = viewer.active
+                        && (viewer.state == ViewerState.OPEN || viewer.state == ViewerState.TICKET_ISSUED)
+                        && !now.isBefore(viewer.readyDeadline);
+            }
+            if (idle) closeViewer(viewer, ViewerState.CLOSED, "Remote-control viewer expired");
+            if (!viewer.active && viewer.closedAt != null && now.isAfter(viewer.closedAt.plusSeconds(3600))) {
+                sessions.remove(viewer.sessionId, viewer);
+            }
+        }
+    }
+
+    private void refreshPending(StreamEntry stream) {
+        synchronized (stream) {
+            if (stream.state != StreamState.PENDING) return;
+            if (!clock.instant().isBefore(stream.commandDeadline)) {
+                failStream(stream, "Remote-control start command timed out");
+                return;
+            }
+            if (stream.taskId == null) return;
+            CommandQueue task = commandQueueRepository.findById(stream.taskId)
+                    .orElseThrow(() -> new ResourceNotFoundException("taskId not found: " + stream.taskId));
+            String status = normalize(task.getStatus());
+            if ("FAILED".equals(status) || "CANCELLED".equals(status)) {
+                failStream(stream, task.getStderr() == null || task.getStderr().isBlank()
+                        ? "Remote-control start command failed" : task.getStderr());
+                return;
+            }
+            if ("COMPLETED".equals(status)) {
+                try {
+                    PcMaster pc = requireOnlinePc(stream.macAddress);
+                    applyValidatedResult(stream, validateCompletedStartTask(stream, task, pc));
+                } catch (ApplicationException exception) {
+                    failStream(stream, exception.getMessage());
                 }
             }
         }
     }
 
-    private void refreshPending(SessionEntry entry) {
-        if (entry.state != State.PENDING) {
-            return;
-        }
-        if (!clock.instant().isBefore(entry.commandDeadline)) {
-            expire(entry, "Remote-control start command timed out");
-            return;
-        }
-        CommandQueue task = commandQueueRepository.findById(entry.taskId)
-                .orElseThrow(() -> new ResourceNotFoundException("taskId not found: " + entry.taskId));
-        String status = normalize(task.getStatus());
-        if ("FAILED".equals(status) || "CANCELLED".equals(status)) {
-            fail(entry, task.getStderr() == null || task.getStderr().isBlank()
-                    ? "Remote-control start command failed" : task.getStderr());
-            return;
-        }
-        if ("COMPLETED".equals(status)) {
-            try {
-                PcMaster pc = requireOnlinePc(entry.macAddress);
-                applyValidatedResult(entry, validateCompletedStartTask(entry, task, pc));
-            } catch (ApplicationException exception) {
-                fail(entry, exception.getMessage());
+    private void refreshExpiredTicket(ViewerEntry viewer) {
+        synchronized (viewer) {
+            if (viewer.active
+                    && viewer.state == ViewerState.TICKET_ISSUED
+                    && viewer.ticketExpiresAt != null
+                    && !clock.instant().isBefore(viewer.ticketExpiresAt)) {
+                viewer.ticketHash = null;
+                viewer.ticketExpiresAt = null;
+                viewer.state = ViewerState.OPEN;
             }
         }
     }
 
-    private CommandQueue requireCompletedStartTask(SessionEntry entry, Long taskId, PcMaster pc) {
+    private CommandQueue requireCompletedStartTask(StreamEntry stream, Long taskId, PcMaster pc) {
         CommandQueue task = commandQueueRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("taskId not found: " + taskId));
-        return validateCompletedStartTask(entry, task, pc);
+        return validateCompletedStartTask(stream, task, pc);
     }
 
-    private CommandQueue validateCompletedStartTask(SessionEntry entry, CommandQueue task, PcMaster pc) {
+    private CommandQueue validateCompletedStartTask(StreamEntry stream, CommandQueue task, PcMaster pc) {
         if (!START.equalsIgnoreCase(task.getCommandType())) {
             throw new InvalidRequestException("taskId is not a REMOTE_CONTROL_START command");
         }
-        if (!entry.canonicalMac.equals(canonicalMac(task.getMacAddress()))
-                || !entry.canonicalMac.equals(canonicalMac(pc.getMacAddress()))) {
+        if (!stream.canonicalMac.equals(canonicalMac(task.getMacAddress()))
+                || !stream.canonicalMac.equals(canonicalMac(pc.getMacAddress()))) {
             throw new InvalidRequestException("taskId does not belong to the requested PC");
         }
         if (!"COMPLETED".equalsIgnoreCase(task.getStatus())
@@ -319,7 +397,7 @@ public class RemoteControlSessionService {
         return task;
     }
 
-    private void applyValidatedResult(SessionEntry entry, CommandQueue task) {
+    private void applyValidatedResult(StreamEntry stream, CommandQueue task) {
         try {
             JsonNode result = objectMapper.readTree(task.getStdout() == null ? "" : task.getStdout());
             long resultTaskId = result.path("taskId").asLong(-1L);
@@ -334,13 +412,13 @@ public class RemoteControlSessionService {
             if (!password.matches("^[A-Za-z0-9]{8}$")) {
                 throw new InvalidRequestException("Remote-control result password is invalid");
             }
-            PcMaster pc = requireOnlinePc(entry.macAddress);
+            PcMaster pc = requireOnlinePc(stream.macAddress);
             InetAddress address = validateDestination(pc.getIpAddress());
-            entry.targetAddress = address;
-            entry.targetPort = port;
-            entry.oneTimePassword = password;
-            entry.readyDeadline = min(clock.instant().plus(properties.getReadyTtl()), entry.expiresAt);
-            entry.state = State.READY;
+            stream.targetAddress = address;
+            stream.targetPort = port;
+            stream.oneTimePassword = password;
+            stream.readyDeadline = min(clock.instant().plus(properties.getReadyTtl()), stream.expiresAt);
+            stream.state = StreamState.READY;
         } catch (ApplicationException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -469,12 +547,12 @@ public class RemoteControlSessionService {
                 .findFirst();
     }
 
-    private long enqueue(String macAddress, String type, UUID sessionId) {
+    private long enqueue(String macAddress, String type, UUID streamId) {
         CommandRequestDto request = new CommandRequestDto();
         request.setScope("SINGLE");
         request.setMacAddress(macAddress);
         request.setType(type);
-        request.setPayloadJson("{\"sessionId\":\"" + sessionId + "\"}");
+        request.setPayloadJson("{\"sessionId\":\"" + streamId + "\"}");
         Map<String, Object> response = commandLifecycleService.enqueue(request);
         Object taskIds = response.get("taskIds");
         if (!(taskIds instanceof List<?> ids) || ids.size() != 1 || !(ids.getFirst() instanceof Number taskId)) {
@@ -483,75 +561,154 @@ public class RemoteControlSessionService {
         return taskId.longValue();
     }
 
-    private void closeEntry(SessionEntry entry, String reason) {
-        boolean changed = false;
-        synchronized (entry) {
-            if (entry.state != State.CLOSED) {
-                entry.state = State.CLOSED;
-                entry.failureReason = reason;
-                entry.closedAt = clock.instant();
-                entry.ticketHash = null;
-                entry.oneTimePassword = null;
-                activeSessionByMac.remove(entry.canonicalMac, entry.sessionId);
-                changed = true;
+    private boolean closeViewer(ViewerEntry viewer, ViewerState state, String reason) {
+        synchronized (viewer) {
+            if (!viewer.active) return false;
+            viewer.active = false;
+            viewer.state = state;
+            viewer.failureReason = reason;
+            viewer.closedAt = clock.instant();
+            viewer.ticketHash = null;
+            viewer.ticketExpiresAt = null;
+        }
+        relayRegistry.close(viewer.sessionId);
+        synchronized (registryLock) {
+            StreamEntry stream = viewer.stream;
+            stream.viewerIds.remove(viewer.sessionId);
+            if (stream.viewerIds.isEmpty() && isActive(stream.state)) {
+                stream.noViewerDeadline = clock.instant().plus(properties.getViewerGraceTtl());
             }
         }
-        if (changed) relayRegistry.close(entry.sessionId);
-        tryIssueStop(entry);
+        return true;
     }
 
-    private void expire(SessionEntry entry, String reason) {
-        closeEntry(entry, reason);
+    private void failViewer(ViewerEntry viewer, String reason) {
+        closeViewer(viewer, ViewerState.FAILED, reason);
     }
 
-    private void fail(SessionEntry entry, String reason) {
-        entry.state = State.FAILED;
-        entry.failureReason = reason;
-        entry.closedAt = clock.instant();
-        entry.ticketHash = null;
-        entry.oneTimePassword = null;
-        activeSessionByMac.remove(entry.canonicalMac, entry.sessionId);
-        relayRegistry.close(entry.sessionId);
-        tryIssueStop(entry);
+    private void closeStream(StreamEntry stream, String reason) {
+        finishStream(stream, StreamState.CLOSED, ViewerState.CLOSED, reason);
     }
 
-    private void tryIssueStop(SessionEntry entry) {
-        synchronized (entry) {
-            if (entry.stopIssued) return;
+    private void failStream(StreamEntry stream, String reason) {
+        finishStream(stream, StreamState.FAILED, ViewerState.FAILED,
+                reason == null || reason.isBlank() ? "Remote-control stream failed" : reason);
+    }
+
+    private void finishStream(StreamEntry stream, StreamState streamState, ViewerState viewerState, String reason) {
+        boolean changed;
+        synchronized (stream) {
+            changed = isActive(stream.state);
+            if (changed) {
+                stream.state = streamState;
+                stream.failureReason = reason;
+                stream.closedAt = clock.instant();
+                stream.oneTimePassword = null;
+                stream.noViewerDeadline = null;
+            }
+        }
+        if (!changed) {
+            tryIssueStop(stream);
+            return;
+        }
+        activeStreamByMac.remove(stream.canonicalMac, stream.streamId);
+        List<UUID> viewerIds;
+        synchronized (registryLock) {
+            viewerIds = new ArrayList<>(stream.viewerIds);
+        }
+        for (UUID viewerId : viewerIds) {
+            ViewerEntry viewer = sessions.get(viewerId);
+            if (viewer != null) closeViewer(viewer, viewerState, reason);
+        }
+        tryIssueStop(stream);
+    }
+
+    private boolean hasConnectedViewer(StreamEntry stream) {
+        List<UUID> viewerIds;
+        synchronized (registryLock) {
+            viewerIds = new ArrayList<>(stream.viewerIds);
+        }
+        for (UUID viewerId : viewerIds) {
+            ViewerEntry viewer = sessions.get(viewerId);
+            if (viewer == null) continue;
+            synchronized (viewer) {
+                if (viewer.active && viewer.state == ViewerState.CONNECTED) return true;
+            }
+        }
+        return false;
+    }
+
+    private void tryIssueStop(StreamEntry stream) {
+        synchronized (stream) {
+            if (stream.stopIssued) return;
             try {
-                enqueue(entry.macAddress, STOP, entry.sessionId);
-                entry.stopIssued = true;
+                enqueue(stream.macAddress, STOP, stream.streamId);
+                stream.stopIssued = true;
             } catch (RuntimeException exception) {
-                log.warn("Failed to queue remote-control stop for session {} (will retry): {}",
-                        entry.sessionId, exception.getMessage());
+                log.warn("Failed to queue remote-control stop for stream {} (will retry): {}",
+                        stream.streamId, exception.getMessage());
             }
         }
     }
 
-    private SessionEntry requireOwnedSession(UUID sessionId, String owner) {
-        SessionEntry entry = requireSession(sessionId);
-        if (owner == null || !owner.equals(entry.owner)) {
+    private ViewerEntry requireOwnedSession(UUID sessionId, String owner) {
+        ViewerEntry viewer = requireSession(sessionId);
+        if (owner == null || !owner.equals(viewer.owner)) {
             throw new ApplicationException("FORBIDDEN", "Remote-control session owner mismatch", 403);
         }
-        return entry;
+        return viewer;
     }
 
-    private SessionEntry requireSession(UUID sessionId) {
-        SessionEntry entry = sessions.get(sessionId);
-        if (entry == null) {
+    private ViewerEntry requireSession(UUID sessionId) {
+        ViewerEntry viewer = sessions.get(sessionId);
+        if (viewer == null) {
             throw new ResourceNotFoundException("Remote-control session not found: " + sessionId);
         }
-        return entry;
+        return viewer;
     }
 
-    private RemoteControlSessionView toView(SessionEntry entry) {
+    private RemoteControlSessionView toView(ViewerEntry viewer) {
+        ViewerState viewerState;
+        boolean active;
+        String viewerFailure;
+        synchronized (viewer) {
+            viewerState = viewer.state;
+            active = viewer.active;
+            viewerFailure = viewer.failureReason;
+        }
+        StreamEntry stream = viewer.stream;
+        StreamState streamState;
+        String streamFailure;
+        synchronized (stream) {
+            streamState = stream.state;
+            streamFailure = stream.failureReason;
+        }
+
+        String status;
+        if (!active) {
+            status = viewerState.name();
+        } else if (streamState == StreamState.PENDING) {
+            status = "PENDING";
+        } else if (streamState == StreamState.CLOSED || streamState == StreamState.FAILED) {
+            status = streamState.name();
+        } else {
+            status = viewerState == ViewerState.OPEN ? "READY" : viewerState.name();
+        }
         return new RemoteControlSessionView(
-                entry.sessionId,
-                entry.taskId,
-                entry.macAddress,
-                entry.state.name(),
-                entry.expiresAt,
-                entry.failureReason);
+                viewer.sessionId,
+                stream.taskId,
+                stream.macAddress,
+                status,
+                stream.expiresAt,
+                viewerFailure == null ? streamFailure : viewerFailure);
+    }
+
+    private int activeViewerCount() {
+        return activeStreamByMac.values().stream()
+                .map(streams::get)
+                .filter(java.util.Objects::nonNull)
+                .mapToInt(stream -> stream.viewerIds.size())
+                .sum();
     }
 
     private void ensureEnabled() {
@@ -588,18 +745,20 @@ public class RemoteControlSessionService {
         return left.isBefore(right) ? left : right;
     }
 
-    private boolean isActive(State state) {
-        return state == State.PENDING || state == State.READY || state == State.TICKET_ISSUED
-                || state == State.CONNECTING || state == State.CONNECTED;
+    private boolean isActive(StreamState state) {
+        return state == StreamState.PENDING || state == StreamState.READY || state == StreamState.CONNECTED;
     }
 
-    private boolean isWaitingForConnection(State state) {
-        return state == State.READY || state == State.TICKET_ISSUED || state == State.CONNECTING;
-    }
-
-    private enum State {
+    private enum StreamState {
         PENDING,
         READY,
+        CONNECTED,
+        CLOSED,
+        FAILED
+    }
+
+    private enum ViewerState {
+        OPEN,
         TICKET_ISSUED,
         CONNECTING,
         CONNECTED,
@@ -607,35 +766,56 @@ public class RemoteControlSessionService {
         FAILED
     }
 
-    private static final class SessionEntry {
-        private final UUID sessionId;
+    private static final class StreamEntry {
+        private final UUID streamId;
         private final String macAddress;
         private final String canonicalMac;
-        private final String owner;
         private final Instant createdAt;
         private final Instant expiresAt;
         private final Instant commandDeadline;
+        private final LinkedHashSet<UUID> viewerIds = new LinkedHashSet<>();
+        private volatile StreamState state = StreamState.PENDING;
+        private volatile Instant noViewerDeadline;
         private Long taskId;
-        private State state = State.PENDING;
         private InetAddress targetAddress;
         private int targetPort;
         private String oneTimePassword;
-        private byte[] ticketHash;
-        private Instant ticketExpiresAt;
         private Instant readyDeadline;
         private String failureReason;
         private Instant closedAt;
         private boolean stopIssued;
 
-        private SessionEntry(UUID sessionId, String macAddress, String canonicalMac, String owner,
-                             Instant createdAt, Instant expiresAt, Instant commandDeadline) {
-            this.sessionId = sessionId;
+        private StreamEntry(UUID streamId, String macAddress, String canonicalMac,
+                            Instant createdAt, Instant expiresAt, Instant commandDeadline) {
+            this.streamId = streamId;
             this.macAddress = macAddress;
             this.canonicalMac = canonicalMac;
-            this.owner = owner;
             this.createdAt = createdAt;
             this.expiresAt = expiresAt;
             this.commandDeadline = commandDeadline;
+        }
+    }
+
+    private static final class ViewerEntry {
+        private final UUID sessionId;
+        private final String owner;
+        private final StreamEntry stream;
+        private final Instant createdAt;
+        private final Instant readyDeadline;
+        private boolean active = true;
+        private ViewerState state = ViewerState.OPEN;
+        private byte[] ticketHash;
+        private Instant ticketExpiresAt;
+        private String failureReason;
+        private Instant closedAt;
+
+        private ViewerEntry(UUID sessionId, String owner, StreamEntry stream,
+                            Instant createdAt, Instant readyDeadline) {
+            this.sessionId = sessionId;
+            this.owner = owner;
+            this.stream = stream;
+            this.createdAt = createdAt;
+            this.readyDeadline = readyDeadline;
         }
     }
 }

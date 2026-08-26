@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -190,7 +191,8 @@ class RemoteControlSessionServiceTest {
     }
 
     @Test
-    void retriesRemoteStopImmediatelyWhenAnAlreadyClosedSessionIsClosedAgain() {
+    void retriesRemoteStopAfterTheLastViewerGracePeriod() {
+        properties.setViewerGraceTtl(java.time.Duration.ZERO);
         when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));
         when(commands.enqueue(any(CommandRequestDto.class)))
                 .thenThrow(new IllegalStateException("temporary database outage"))
@@ -198,10 +200,79 @@ class RemoteControlSessionServiceTest {
         RemoteControlSessionView session = service.createSession(MAC, 42L, "admin");
 
         service.closeSession(session.sessionId(), "admin");
-        service.closeSession(session.sessionId(), "admin");
+        service.cleanupExpiredSessions();
+        service.cleanupExpiredSessions();
 
         verify(commands, times(2)).enqueue(any(CommandRequestDto.class));
         assertThat(service.getSession(session.sessionId(), "admin").status()).isEqualTo("CLOSED");
+    }
+
+    @Test
+    void sharesOnePcStreamAcrossIndependentBrowserViewers() {
+        properties.setViewerGraceTtl(java.time.Duration.ZERO);
+        when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));
+        when(commands.enqueue(any(CommandRequestDto.class))).thenReturn(Map.of("taskIds", List.of(100L)));
+
+        RemoteControlSessionView first = service.createSession(MAC, 42L, "admin-a");
+        connect(first, "admin-a");
+        RemoteControlSessionView second = service.createSession(MAC, null, "admin-b");
+        connect(second, "admin-b");
+        Runnable firstRelay = mock(Runnable.class);
+        Runnable secondRelay = mock(Runnable.class);
+        relayRegistry.register(first.sessionId(), firstRelay);
+        relayRegistry.register(second.sessionId(), secondRelay);
+
+        assertThat(second.sessionId()).isNotEqualTo(first.sessionId());
+        assertThat(second.taskId()).isEqualTo(first.taskId());
+        assertThat(service.getSession(first.sessionId(), "admin-a").status()).isEqualTo("CONNECTED");
+        assertThat(service.getSession(second.sessionId(), "admin-b").status()).isEqualTo("CONNECTED");
+        verify(commands, never()).enqueue(any(CommandRequestDto.class));
+
+        service.closeSession(first.sessionId(), "admin-a");
+
+        verify(firstRelay).run();
+        verify(secondRelay, never()).run();
+        assertThat(service.getSession(first.sessionId(), "admin-a").status()).isEqualTo("CLOSED");
+        assertThat(service.getSession(second.sessionId(), "admin-b").status()).isEqualTo("CONNECTED");
+        verify(commands, never()).enqueue(any(CommandRequestDto.class));
+
+        service.closeSession(second.sessionId(), "admin-b");
+        service.cleanupExpiredSessions();
+
+        ArgumentCaptor<CommandRequestDto> request = ArgumentCaptor.forClass(CommandRequestDto.class);
+        verify(commands).enqueue(request.capture());
+        assertThat(request.getValue().getType()).isEqualTo("REMOTE_CONTROL_STOP");
+        assertThat(request.getValue().getPayloadJson()).contains(first.sessionId().toString());
+    }
+
+    @Test
+    void capsTheNumberOfViewersPerPcWithoutRestartingTheStream() {
+        properties.setMaxViewersPerPc(2);
+        when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));
+
+        RemoteControlSessionView first = service.createSession(MAC, 42L, "admin-a");
+        RemoteControlSessionView second = service.createSession(MAC, null, "admin-b");
+
+        assertThat(second.taskId()).isEqualTo(first.taskId());
+        assertThatThrownBy(() -> service.createSession(MAC, null, "admin-c"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("Maximum viewers");
+        verify(commands, never()).enqueue(any(CommandRequestDto.class));
+    }
+
+    @Test
+    void reconnectsWithinTheGracePeriodWithoutRestartingVnc() {
+        when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));
+        RemoteControlSessionView first = service.createSession(MAC, 42L, "admin");
+        connect(first, "admin");
+
+        service.relayClosed(first.sessionId());
+        RemoteControlSessionView replacement = service.createSession(MAC, null, "admin");
+
+        assertThat(service.getSession(first.sessionId(), "admin").status()).isEqualTo("CLOSED");
+        assertThat(replacement.taskId()).isEqualTo(first.taskId());
+        assertThat(replacement.status()).isEqualTo("READY");
+        verify(commands, never()).enqueue(any(CommandRequestDto.class));
     }
 
     @Test
@@ -259,5 +330,12 @@ class RemoteControlSessionServiceTest {
         task.setStdout("{\"status\":\"started\",\"port\":" + port
                 + ",\"oneTimePassword\":\"AbCd2345\",\"taskId\":" + taskId + "}");
         return task;
+    }
+
+    private void connect(RemoteControlSessionView session, String owner) {
+        RemoteControlTicketResponse ticket = service.issueTicket(session.sessionId(), owner);
+        String rawTicket = ticket.webSocketPath().substring(ticket.webSocketPath().indexOf("ticket=") + 7);
+        service.consumeTicket(session.sessionId(), rawTicket);
+        service.markConnected(session.sessionId());
     }
 }

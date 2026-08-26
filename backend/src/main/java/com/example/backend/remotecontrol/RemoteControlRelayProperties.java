@@ -15,6 +15,8 @@ public class RemoteControlRelayProperties {
 
     private boolean enabled = true;
     private int maxSessions = 64;
+    private int maxViewerSessions = 192;
+    private int maxViewersPerPc = 5;
     private int maxClientMessageBytes = 256 * 1024;
     private long maxSessionBytes = 2L * 1024 * 1024 * 1024;
     private int tcpReadBufferBytes = 16 * 1024;
@@ -23,6 +25,7 @@ public class RemoteControlRelayProperties {
     private Duration onlineFreshness = Duration.ofMinutes(3);
     private Duration ticketTtl = Duration.ofSeconds(30);
     private Duration readyTtl = Duration.ofMinutes(2);
+    private Duration viewerGraceTtl = Duration.ofSeconds(10);
     private Duration sessionTtl = Duration.ofMinutes(30);
     private Duration tcpConnectTimeout = Duration.ofSeconds(5);
     private Duration tcpIdleTimeout = Duration.ofMinutes(2);
@@ -43,6 +46,22 @@ public class RemoteControlRelayProperties {
 
     public void setMaxSessions(int maxSessions) {
         this.maxSessions = maxSessions;
+    }
+
+    public int getMaxViewerSessions() {
+        return maxViewerSessions;
+    }
+
+    public void setMaxViewerSessions(int maxViewerSessions) {
+        this.maxViewerSessions = maxViewerSessions;
+    }
+
+    public int getMaxViewersPerPc() {
+        return maxViewersPerPc;
+    }
+
+    public void setMaxViewersPerPc(int maxViewersPerPc) {
+        this.maxViewersPerPc = maxViewersPerPc;
     }
 
     public int getMaxClientMessageBytes() {
@@ -111,6 +130,14 @@ public class RemoteControlRelayProperties {
 
     public void setReadyTtl(Duration readyTtl) {
         this.readyTtl = readyTtl;
+    }
+
+    public Duration getViewerGraceTtl() {
+        return viewerGraceTtl;
+    }
+
+    public void setViewerGraceTtl(Duration viewerGraceTtl) {
+        this.viewerGraceTtl = viewerGraceTtl;
     }
 
     public void setSessionTtl(Duration sessionTtl) {
