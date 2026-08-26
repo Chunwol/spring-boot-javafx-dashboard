@@ -27,7 +27,7 @@ export function LoginPage() {
       username: rememberedUsername,
       password: '',
       rememberUsername: Boolean(rememberedUsername),
-      autoLogin: false,
+      autoLogin: true,
     },
   })
 

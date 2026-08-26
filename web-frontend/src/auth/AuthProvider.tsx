@@ -6,6 +6,8 @@ import type { AuthUser, LoginResponse, StoredSession, UserRole } from './types'
 
 const SESSION_KEY = 'classroom-dashboard.session'
 const REMEMBERED_USERNAME_KEY = 'classroom-dashboard.username'
+const RESTORE_RETRY_MS = 5_000
+const REFRESH_RETRY_MS = 30_000
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -106,13 +108,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     setApiAccessTokenRefresher(refreshSession)
+    let cancelled = false
+    let retryTimer: number | undefined
+
     if (session) {
       setIsRestoring(false)
     } else {
-      void refreshSession().catch(() => null).finally(() => setIsRestoring(false))
+      const restore = async () => {
+        try {
+          await refreshSession()
+          if (!cancelled) setIsRestoring(false)
+        } catch {
+          if (!cancelled) retryTimer = window.setTimeout(restore, RESTORE_RETRY_MS)
+        }
+      }
+      void restore()
     }
-    return () => setApiAccessTokenRefresher(null)
-    // Restore from the cookie once when the provider is mounted.
+    return () => {
+      cancelled = true
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+      setApiAccessTokenRefresher(null)
+    }
+    // Start cookie restoration when the provider is mounted and retry transient failures.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSession])
 
@@ -121,8 +138,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const expiresAt = tokenExpiresAt(session.token)
     if (expiresAt === null) return
     const refreshDelay = Math.max(0, expiresAt - Date.now() - 60_000)
-    const timer = window.setTimeout(() => { void refreshSession().catch(() => null) }, refreshDelay)
-    return () => window.clearTimeout(timer)
+    let cancelled = false
+    let timer: number
+    const refreshAndRetry = async () => {
+      try {
+        await refreshSession()
+      } catch {
+        if (!cancelled) timer = window.setTimeout(refreshAndRetry, REFRESH_RETRY_MS)
+      }
+    }
+    timer = window.setTimeout(refreshAndRetry, refreshDelay)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [session, refreshSession])
 
   const logout = useCallback(() => {

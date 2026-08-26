@@ -7,6 +7,8 @@ export interface ManagedUser {
   username: string
   email: string
   role: UserRole
+  active: boolean
+  failedLoginAttempts: number
 }
 
 export interface CreateUserInput {

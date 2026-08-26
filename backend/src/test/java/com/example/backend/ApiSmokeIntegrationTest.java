@@ -2,19 +2,25 @@ package com.example.backend;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.backend.model.user.User;
+import com.example.backend.repository.user.UserRepository;
+import com.example.backend.service.audit.AuditService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -26,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -59,12 +66,25 @@ class ApiSmokeIntegrationTest {
     @LocalServerPort
     private int port;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AuditService auditService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @DynamicPropertySource
     static void registerProps(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + normalizePathForJdbc(SMOKE_DB_PATH));
         registry.add("app.scripts.dir", () -> SMOKE_UPLOAD_DIR.toString());
         registry.add("agent.install-key", () -> INSTALL_KEY);
         registry.add("app.jwt.secret", () -> JWT_SECRET);
+        registry.add("app.audit.flush-interval-ms", () -> "600000");
         registry.add("DEFAULT_ADMIN_USERNAME", () -> ADMIN_USERNAME);
         registry.add("DEFAULT_ADMIN_PASSWORD", () -> ADMIN_PASSWORD);
         registry.add("DEFAULT_ADMIN_EMAIL", () -> "smoke-admin@example.com");
@@ -146,6 +166,49 @@ class ApiSmokeIntegrationTest {
                 String.class);
         Assertions.assertEquals(204, logout.getStatusCode().value());
         Assertions.assertTrue(logout.getHeaders().getFirst(HttpHeaders.SET_COOKIE).contains("Max-Age=0"));
+    }
+
+    @Test
+    void smoke_loginFailuresPersistLockAndDisableAccount() {
+        String username = "smoke-lockout-" + System.nanoTime();
+        String password = "smoke-lockout-password-123!";
+        User user = userRepository.save(new User(
+                username, passwordEncoder.encode(password), username + "@example.com", "USER"));
+        Map<String, Object> wrongCredentials = Map.of(
+                "username", username,
+                "password", "definitely-wrong",
+                "autoLogin", true);
+
+        try {
+            for (int attempt = 1; attempt <= 4; attempt++) {
+                expectLoginRejected(wrongCredentials);
+            }
+            expectLoginRejected(wrongCredentials);
+
+            User temporarilyLocked = userRepository.findById(user.getId()).orElseThrow();
+            Assertions.assertEquals(5, temporarilyLocked.getFailedLoginAttempts());
+            Assertions.assertTrue(temporarilyLocked.getLoginLockedUntil().isAfter(LocalDateTime.now()));
+            temporarilyLocked.setLoginLockedUntil(LocalDateTime.now().minusSeconds(1));
+            userRepository.save(temporarilyLocked);
+
+            for (int attempt = 6; attempt <= 9; attempt++) {
+                expectLoginRejected(wrongCredentials);
+            }
+            expectLoginRejected(wrongCredentials);
+
+            User disabled = userRepository.findById(user.getId()).orElseThrow();
+            Assertions.assertEquals(10, disabled.getFailedLoginAttempts());
+            Assertions.assertFalse(disabled.isActive());
+            auditService.flushQueue();
+            Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = ? AND target_id = ?",
+                    Integer.class, "LOGIN_TEMPORARILY_LOCKED", username));
+            Assertions.assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = ? AND target_id = ?",
+                    Integer.class, "LOGIN_ACCOUNT_DISABLED", username));
+        } finally {
+            userRepository.deleteById(user.getId());
+        }
     }
 
     @Test
@@ -589,6 +652,15 @@ class ApiSmokeIntegrationTest {
     private Map<String, Object> parseMap(String json) throws Exception {
         return objectMapper.readValue(json == null ? "{}" : json, new TypeReference<>() {
         });
+    }
+
+    private void expectLoginRejected(Map<String, Object> payload) {
+        try {
+            restTemplate.postForEntity(baseUrl() + "/auth/login", jsonEntity(payload, null), String.class);
+            throw new AssertionError("잘못된 비밀번호 로그인이 성공했습니다.");
+        } catch (HttpStatusCodeException ex) {
+            Assertions.assertEquals(401, ex.getStatusCode().value());
+        }
     }
 
     private List<Long> parseLongList(Object value) {

@@ -4,6 +4,7 @@ import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.service.auth.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.when;
 class AuthControllerTest {
 
     @Mock AuthService authService;
+    @Mock HttpServletRequest servletRequest;
     private AuthController controller;
 
     @BeforeEach
@@ -28,6 +30,7 @@ class AuthControllerTest {
         controller = new AuthController(authService);
         ReflectionTestUtils.setField(controller, "refreshExpirationMs", 7776000000L);
         ReflectionTestUtils.setField(controller, "refreshCookieSecure", false);
+        org.mockito.Mockito.lenient().when(servletRequest.getRemoteAddr()).thenReturn("192.0.2.20");
     }
 
     @Test
@@ -36,10 +39,10 @@ class AuthControllerTest {
         ReflectionTestUtils.setField(request, "username", "admin");
         ReflectionTestUtils.setField(request, "password", "secret");
         ReflectionTestUtils.setField(request, "autoLogin", true);
-        when(authService.login(request)).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
+        when(authService.login(request, "192.0.2.20")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
         when(authService.issueRefreshToken("admin")).thenReturn("refresh");
 
-        ResponseEntity<LoginResponse> response = controller.login(request);
+        ResponseEntity<LoginResponse> response = controller.login(request, servletRequest);
 
         String cookie = response.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
         assertThat(cookie).contains("classroom_refresh=refresh", "HttpOnly", "SameSite=Strict",
@@ -49,9 +52,9 @@ class AuthControllerTest {
     @Test
     void loginWithoutAutoLoginAndLogoutClearCookie() {
         LoginRequest request = new LoginRequest();
-        when(authService.login(request)).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
+        when(authService.login(request, "192.0.2.20")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
 
-        assertThat(controller.login(request).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
+        assertThat(controller.login(request, servletRequest).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");
         assertThat(controller.logout().getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");

@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -48,8 +49,9 @@ public class AuthController {
     )
     @ApiResponse(responseCode = "400", description = "잘못된 자격증명 (사용자명 또는 비밀번호 오류)")
     @ApiResponse(responseCode = "401", description = "인증 실패")
-    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest loginRequest) {
-        LoginResponse response = authService.login(loginRequest);
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest loginRequest,
+                                                HttpServletRequest request) {
+        LoginResponse response = authService.login(loginRequest, request.getRemoteAddr());
         ResponseCookie cookie = loginRequest.isAutoLogin()
                 ? refreshCookie(authService.issueRefreshToken(response.getUsername()))
                 : clearRefreshCookie();

@@ -174,7 +174,11 @@ export function UsersPage() {
                 <td><strong>{managedUser.username}</strong></td>
                 <td>{managedUser.email}</td>
                 <td><span className={`status-badge ${roleClass}`}>{roleLabel(managedUser.role)}</span></td>
-                <td>{current ? <span className="status-badge running">현재 로그인</span> : '-'}</td>
+                <td>{current
+                  ? <span className="status-badge running">현재 로그인</span>
+                  : managedUser.active
+                    ? <span className="status-badge online">활성</span>
+                    : <span className="status-badge offline">비활성화 (오류 {managedUser.failedLoginAttempts}회)</span>}</td>
                 <td><div className="row-actions">
                   <button className="icon-button bordered" onClick={() => setEditor({ mode: 'edit', user: managedUser })} title="사용자 수정" aria-label={`${managedUser.username} 수정`}><Pencil size={15} /></button>
                   <button className="icon-button danger-icon" onClick={() => !current && setDeleting(managedUser)} disabled={current} title={current ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'} aria-label={`${managedUser.username} 삭제`}><Trash2 size={15} /></button>

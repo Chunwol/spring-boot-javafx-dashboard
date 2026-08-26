@@ -1,6 +1,7 @@
 package com.example.backend.service.auth;
 
 import com.example.backend.repository.user.UserRepository;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -43,13 +44,17 @@ public class CustomUserDetailsService implements UserDetailsService {
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         return userRepository.findByUsername(username)
-                .map(user -> org.springframework.security.core.userdetails.User
+                .map(user -> {
+                    if (!user.isActive()) {
+                        throw new DisabledException("Account is disabled");
+                    }
+                    return org.springframework.security.core.userdetails.User
                         .builder()
                         .username(user.getUsername())
                         .password(user.getPassword())
                         .roles(resolveSpringRoles(user))
-                        .build()
-                )
+                        .build();
+                })
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }
 

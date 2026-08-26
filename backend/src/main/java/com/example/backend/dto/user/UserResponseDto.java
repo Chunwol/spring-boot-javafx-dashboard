@@ -13,6 +13,8 @@ public class UserResponseDto {
     private String username;
     private String email;
     private String role;
+    private boolean active;
+    private int failedLoginAttempts;
 
     public static UserResponseDto from(User user) {
         return from(user, user.getRole());
@@ -24,6 +26,8 @@ public class UserResponseDto {
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .role(role)
+                .active(user.isActive())
+                .failedLoginAttempts(user.getFailedLoginAttempts())
                 .build();
     }
 }
