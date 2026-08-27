@@ -214,7 +214,16 @@ h1, h2, h3, p { margin-top: 0; }
 .data-table tbody tr { cursor: pointer; }
 .data-table tbody tr:hover { background: #f8fafc; }
 .data-table tbody tr:last-child td { border-bottom: 0; }
-.classroom-table { min-width: 940px; }
+.classroom-table { min-width: 1100px; }
+.teacher-control-cell { min-width: 190px; }
+.teacher-control { display: flex; align-items: center; gap: 7px; min-height: 30px; font-size: 11px; }
+.teacher-control + .teacher-control { margin-top: 4px; }
+.teacher-control > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.teacher-control-empty { color: var(--muted); font-size: 11px; }
+.teacher-power-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 56px; height: 28px; margin-left: auto; padding: 0 8px; color: #17633b; background: #eaf8f0; border: 1px solid #b8e5ca; border-radius: 6px; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.teacher-power-button:hover:not(:disabled) { background: #dff4e8; }
+.teacher-power-button.danger { color: #b23a46; background: #fff0f1; border-color: #f0c4c8; }
+.teacher-power-button.danger:hover:not(:disabled) { background: #ffe5e8; }
 .room-status-cell { width: 34%; min-width: 280px; }
 .room-status-summary { display: grid; gap: 5px; width: 100%; min-width: 0; }
 .room-status-bar { display: flex; width: 100%; height: 9px; overflow: hidden; background: #e8edf3; border-radius: 4px; }

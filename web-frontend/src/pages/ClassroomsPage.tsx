@@ -22,6 +22,7 @@ import { useToast } from '../components/ui/ToastProvider'
 import { useDialogFocus } from '../components/ui/useDialogFocus'
 import { getClassroomDashboard, sendRoomCommand } from '../features/classrooms/api'
 import { routerWolFailureMessage } from '../features/commands/routerWolMessage'
+import { sendPcCommands } from '../features/pcs/api'
 import { ClassroomScreenWall } from '../features/remoteControl/ClassroomScreenWall'
 import {
   type RoomCounts,
@@ -37,7 +38,9 @@ import type { ClassroomSummary, CommandResult, PcStatus, RoomStatus } from '../t
 
 type ViewMode = 'grid' | 'table'
 type CommandType = 'WOL' | 'SHUTDOWN'
+type TeacherCommandType = 'PCON' | 'SHUTDOWN'
 interface PendingCommand { room: ClassroomSummary; type: CommandType }
+interface PendingTeacherCommand { room: ClassroomSummary; pc: PcStatus; type: TeacherCommandType }
 
 function asNumber(value: unknown, fallback = 0) {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -175,25 +178,59 @@ function RoomCard({ room, pcs, onOpen }: { room: ClassroomSummary; pcs: PcStatus
   )
 }
 
-function RoomTable({ rooms, pcMap, onOpen }: {
+function RoomTable({ rooms, pcMap, isAdmin, commandBusy, onOpen, onTeacherCommand }: {
   rooms: ClassroomSummary[]
   pcMap: Map<number, PcStatus[]>
+  isAdmin: boolean
+  commandBusy: boolean
   onOpen: (room: ClassroomSummary) => void
+  onTeacherCommand: (room: ClassroomSummary, pc: PcStatus, type: TeacherCommandType) => void
 }) {
   return (
     <div className="table-scroll">
       <table className="data-table classroom-table">
-        <thead><tr><th>강의실</th><th>상태</th><th>PC 현황</th><th>전체 PC</th><th>온라인</th><th>고장</th><th>마지막 하트비트</th></tr></thead>
+        <thead><tr><th>강의실</th><th>상태</th><th>교사 PC</th><th>PC 현황</th><th>전체 PC</th><th>온라인</th><th>고장</th><th>마지막 하트비트</th></tr></thead>
         <tbody>
           {rooms.map((room) => {
-            const counts = getRoomCounts(room, pcMap.get(room.groupId) || [])
+            const roomPcs = pcMap.get(room.groupId) || []
+            const counts = getRoomCounts(room, roomPcs)
             const state = roomStatus(room, counts)
+            const teachers = sortPcs(roomPcs.filter((pc) => pc.role?.toUpperCase() === 'TEACHER'))
             return (
               <tr key={room.groupId} onClick={() => onOpen(room)} tabIndex={0} onKeyDown={(event) => {
+                if ((event.target as HTMLElement).closest('button')) return
                 if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(room) }
               }}>
                 <td><strong>{room.groupName}</strong></td>
                 <td><span className={`status-badge ${state}`}>{roomStatusLabel[state]}</span></td>
+                <td className="teacher-control-cell">
+                  {teachers.length ? teachers.map((teacher) => {
+                    const online = isOnlinePc(teacher)
+                    const broken = isBrokenPc(teacher)
+                    const label = teacher.pcName || '교사 PC'
+                    return (
+                      <div className="teacher-control" key={teacher.macAddress || `${teacher.pcName}-${teacher.ipAddress}`} title={`${label} · ${online ? '온라인' : broken ? '고장' : '오프라인'}`}>
+                        <span className={`pc-state-mark ${broken ? 'broken' : online ? 'online' : 'offline'}`} />
+                        <span>{label}</span>
+                        {isAdmin && teacher.macAddress?.trim() && !broken && (
+                          <button
+                            className={`teacher-power-button ${online ? 'danger' : ''}`}
+                            type="button"
+                            disabled={commandBusy}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onTeacherCommand(room, teacher, online ? 'SHUTDOWN' : 'PCON')
+                            }}
+                            aria-label={`${label} ${online ? '끄기' : '켜기'}`}
+                          >
+                            {online ? <PowerOff size={13} /> : <Power size={13} />}
+                            {online ? '끄기' : '켜기'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  }) : <span className="teacher-control-empty">등록 없음</span>}
+                </td>
                 <td className="room-status-cell"><RoomStatusBar counts={counts} /></td>
                 <td>{counts.total}</td><td>{counts.online}</td><td>{counts.broken}</td>
                 <td>{room.lastHeartbeat ? new Date(room.lastHeartbeat).toLocaleString('ko-KR') : '-'}</td>
@@ -274,6 +311,7 @@ export function ClassroomsPage() {
   const [search, setSearch] = useState(searchParams.get('q') || '')
   const [statusFilter, setStatusFilter] = useState<RoomStatus | 'all'>('all')
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null)
+  const [pendingTeacherCommand, setPendingTeacherCommand] = useState<PendingTeacherCommand | null>(null)
   const [screenWallRoomId, setScreenWallRoomId] = useState<number | null>(null)
 
   useEffect(() => {
@@ -342,6 +380,27 @@ export function ClassroomsPage() {
     },
     onError: (error) => showToast(error instanceof Error ? error.message : '명령을 전송하지 못했습니다.', 'error'),
   })
+  const teacherCommandMutation = useMutation({
+    mutationFn: ({ pc, type }: PendingTeacherCommand) => sendPcCommands([pc], type),
+    onSuccess: (summary, command) => {
+      const label = command.type === 'PCON' ? '켜기' : '끄기'
+      if (summary.queued > 0 && summary.failed === 0) {
+        showToast(`${command.room.groupName} ${command.pc.pcName || '교사 PC'} ${label} 명령을 전송했습니다.`)
+      } else if (summary.queued > 0) {
+        showToast(`${command.pc.pcName || '교사 PC'} ${label} 명령 전송 중 ${summary.failed}건이 실패했습니다.`, 'error')
+      } else if (summary.duplicateSkipped > 0) {
+        showToast('동일한 전원 명령이 이미 진행 중입니다.', 'error')
+      } else {
+        showToast(summary.messages[0] || `${command.pc.pcName || '교사 PC'} ${label} 명령을 전송하지 못했습니다.`, 'error')
+      }
+      setPendingTeacherCommand(null)
+      void queryClient.invalidateQueries({ queryKey: ['classrooms', 'dashboard'] })
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ['classrooms', 'dashboard'] })
+      }, 2_000)
+    },
+    onError: (error) => showToast(error instanceof Error ? error.message : '교사 PC 전원 명령을 전송하지 못했습니다.', 'error'),
+  })
 
   const refresh = () => {
     void dashboardQuery.refetch()
@@ -399,7 +458,14 @@ export function ClassroomsPage() {
         <div className="room-grid">
           {filteredRooms.map((room) => <RoomCard key={room.groupId} room={room} pcs={pcMap.get(room.groupId) || []} onOpen={() => navigate(routeWithSearch(`/classrooms/${room.groupId}`))} />)}
         </div>
-      ) : <RoomTable rooms={filteredRooms} pcMap={pcMap} onOpen={(room) => navigate(routeWithSearch(`/classrooms/${room.groupId}`))} />}
+      ) : <RoomTable
+        rooms={filteredRooms}
+        pcMap={pcMap}
+        isAdmin={isAdmin}
+        commandBusy={teacherCommandMutation.isPending}
+        onOpen={(room) => navigate(routeWithSearch(`/classrooms/${room.groupId}`))}
+        onTeacherCommand={(room, pc, type) => setPendingTeacherCommand({ room, pc, type })}
+      />}
 
       {selectedRoom && <RoomDetail room={selectedRoom} pcs={pcMap.get(selectedRoom.groupId) || []} isAdmin={isAdmin} onClose={() => navigate(routeWithSearch('/classrooms'))} onCommand={(type) => setPendingCommand({ room: selectedRoom, type })} onOpenScreenWall={() => setScreenWallRoomId(selectedRoom.groupId)} />}
       {screenWallRoomId != null && rooms.find((room) => room.groupId === screenWallRoomId) && (
@@ -418,6 +484,16 @@ export function ClassroomsPage() {
         busy={commandMutation.isPending}
         onCancel={() => { if (!commandMutation.isPending) setPendingCommand(null) }}
         onConfirm={() => { if (pendingCommand && !commandMutation.isPending) commandMutation.mutate(pendingCommand) }}
+      />
+      <ConfirmDialog
+        open={Boolean(pendingTeacherCommand)}
+        title={`교사 PC ${pendingTeacherCommand?.type === 'SHUTDOWN' ? '끄기' : '켜기'} 확인`}
+        description={pendingTeacherCommand ? `${pendingTeacherCommand.room.groupName}의 ${pendingTeacherCommand.pc.pcName || '교사 PC'} 한 대에 ${pendingTeacherCommand.type === 'SHUTDOWN' ? '종료 명령을 전송합니다. 작업 중인 내용이 사라질 수 있습니다.' : 'Wake-on-LAN 신호를 전송합니다.'}` : ''}
+        confirmLabel={pendingTeacherCommand?.type === 'SHUTDOWN' ? '끄기' : '켜기'}
+        danger={pendingTeacherCommand?.type === 'SHUTDOWN'}
+        busy={teacherCommandMutation.isPending}
+        onCancel={() => { if (!teacherCommandMutation.isPending) setPendingTeacherCommand(null) }}
+        onConfirm={() => { if (pendingTeacherCommand && !teacherCommandMutation.isPending) teacherCommandMutation.mutate(pendingTeacherCommand) }}
       />
     </section>
   )
