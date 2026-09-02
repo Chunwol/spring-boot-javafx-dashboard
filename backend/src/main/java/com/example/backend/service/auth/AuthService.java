@@ -44,30 +44,46 @@ public class AuthService {
 
     @Transactional(noRollbackFor = UnauthorizedException.class)
     public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
-        var user = userRepository.findByUsernameForLogin(request.getUsername())
-                .orElseThrow(() -> invalidCredentials());
+        String safeUsername = sanitize(request.getUsername(), 50);
+        String safeIpAddress = sanitize(ipAddress, 64);
+        String safeUserAgent = sanitize(userAgent, 500);
+        var user = userRepository.findByUsernameForLogin(request.getUsername()).orElse(null);
+        if (user == null) {
+            auditService.logAccess(safeUsername, "LOGIN_FAILED", "USER", safeUsername,
+                    "{\"reason\":\"UNKNOWN_USERNAME\"}", safeIpAddress, safeUserAgent);
+            throw invalidCredentials();
+        }
         LocalDateTime now = LocalDateTime.now();
 
         if (!user.isActive()) {
+            auditService.logAccess(user.getUsername(), "LOGIN_BLOCKED", "USER", user.getUsername(),
+                    "{\"reason\":\"ACCOUNT_DISABLED\"}", safeIpAddress, safeUserAgent);
             throw new UnauthorizedException("비활성화된 계정입니다. 관리자에게 문의해 주세요.");
         }
         if (user.isLoginLockedAt(now)) {
+            auditService.logAccess(user.getUsername(), "LOGIN_BLOCKED", "USER", user.getUsername(),
+                    "{\"reason\":\"TEMPORARY_LOCK\",\"failedAttempts\":" + user.getFailedLoginAttempts() + "}",
+                    safeIpAddress, safeUserAgent);
             throw new UnauthorizedException("로그인 실패 횟수 초과로 로그인이 잠시 제한되어 있습니다.");
         }
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            handleFailedLogin(user, now, ipAddress);
+            handleFailedLogin(user, now, safeIpAddress, safeUserAgent);
         }
 
         user.resetLoginFailures();
+        if (user.getActiveSessionId() != null) {
+            auditService.logAccess(user.getUsername(), "LOGOUT", "USER", user.getUsername(),
+                    "{\"reason\":\"SESSION_REPLACED\"}", user.getLoginIpAddress(), user.getLoginUserAgent());
+        }
         webSocketSessions.closeUserSessions(user.getUsername());
         remoteControlSessions.closeOwnerSessions(user.getUsername());
         LocalDateTime loggedInAt = LocalDateTime.now();
         String sessionId = UUID.randomUUID().toString();
-        user.startLoginSession(sessionId, sanitize(ipAddress, 64), sanitize(userAgent, 500), loggedInAt);
+        user.startLoginSession(sessionId, safeIpAddress, safeUserAgent, loggedInAt);
         String token = jwtUtil.generateToken(user.getUsername(), sessionId);
         String role = userRoleResolver.resolveRole(user);
-        auditService.log(user.getUsername(), "LOGIN_SUCCESS", "USER", user.getUsername(),
-                "{\"singleSession\":true}", sanitize(ipAddress, 64));
+        auditService.logAccess(user.getUsername(), "LOGIN_SUCCESS", "USER", user.getUsername(),
+                "{\"singleSession\":true}", safeIpAddress, safeUserAgent);
         return LoginResponse.of(user.getUsername(), token, role, featurePermissionService.resolveCodes(user, role));
     }
 
@@ -109,7 +125,7 @@ public class AuthService {
         }
     }
 
-    public void logout(String accessToken, String refreshToken) {
+    public void logout(String accessToken, String refreshToken, String ipAddress, String userAgent) {
         Claims claims = null;
         try {
             if (accessToken != null && !accessToken.isBlank()) {
@@ -130,6 +146,8 @@ public class AuthService {
         String username = claims.getSubject();
         String sessionId = jwtUtil.getSessionId(claims);
         if (loginSessions.revoke(username, sessionId)) {
+            auditService.logAccess(username, "LOGOUT", "USER", username,
+                    "{\"reason\":\"USER_REQUEST\"}", sanitize(ipAddress, 64), sanitize(userAgent, 500));
             webSocketSessions.closeUserSessions(username);
             remoteControlSessions.closeOwnerSessions(username);
         }
@@ -137,8 +155,12 @@ public class AuthService {
 
     private void handleFailedLogin(User user,
                                    LocalDateTime now,
-                                   String ipAddress) {
+                                   String ipAddress,
+                                   String userAgent) {
         int failures = user.recordFailedLogin();
+        auditService.logAccess(user.getUsername(), "LOGIN_FAILED", "USER", user.getUsername(),
+                "{\"reason\":\"WRONG_PASSWORD\",\"failedAttempts\":" + failures + "}",
+                ipAddress, userAgent);
         if (failures >= DISABLE_THRESHOLD) {
             user.deactivate();
             auditService.log(user.getUsername(), "LOGIN_ACCOUNT_DISABLED", "USER", user.getUsername(),

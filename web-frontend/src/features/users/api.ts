@@ -19,6 +19,16 @@ export interface ManagedUser {
   lastActivityAt?: string | null
 }
 
+export interface UserAccessHistory {
+  id: number
+  username: string
+  eventType: string
+  ipAddress?: string | null
+  userAgent?: string | null
+  detailJson?: string | null
+  occurredAt: string
+}
+
 export interface CreateUserInput {
   username: string
   password: string
@@ -38,6 +48,7 @@ export interface UpdateUserInput {
 
 export const usersApi = {
   list: () => api.get<ManagedUser[]>('/users'),
+  accessHistory: () => api.get<UserAccessHistory[]>('/users/access-history'),
   create: (input: CreateUserInput) => api.post<ManagedUser>('/users', input),
   update: (id: number, input: UpdateUserInput) => api.put<ManagedUser>(`/users/${id}`, input),
   delete: (id: number) => api.delete<void>(`/users/${id}`),

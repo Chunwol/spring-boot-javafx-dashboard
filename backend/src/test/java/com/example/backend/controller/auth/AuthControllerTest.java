@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class AuthControllerTest {
@@ -57,8 +58,9 @@ class AuthControllerTest {
 
         assertThat(controller.login(request, servletRequest).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");
-        assertThat(controller.logout(null, null).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
+        assertThat(controller.logout(null, null, servletRequest).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");
+        verify(authService).logout(null, null, "192.0.2.20", "test-browser");
     }
 
     @Test

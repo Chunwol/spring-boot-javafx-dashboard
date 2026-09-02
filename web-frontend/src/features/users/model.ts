@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CreateUserInput, ManagedUser, UpdateUserInput, UserRole } from './api'
+import type { CreateUserInput, ManagedUser, UpdateUserInput, UserAccessHistory, UserRole } from './api'
 import { ALL_FEATURE_PERMISSIONS, type FeaturePermission } from '../../auth/permissions'
 
 export const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string; description: string }> = [
@@ -98,4 +98,48 @@ export function filterAndSortUsers(users: ManagedUser[], search: string) {
 export function isCurrentAccount(user: Pick<ManagedUser, 'username'>, currentUsername?: string | null) {
   return Boolean(currentUsername)
     && user.username.trim().toLocaleLowerCase('ko-KR') === currentUsername?.trim().toLocaleLowerCase('ko-KR')
+}
+
+function accessDetail(history: UserAccessHistory) {
+  try {
+    return history.detailJson ? JSON.parse(history.detailJson) as { reason?: string; failedAttempts?: number } : {}
+  } catch {
+    return {}
+  }
+}
+
+export function accessEventLabel(eventType: string) {
+  switch (eventType) {
+    case 'LOGIN_SUCCESS': return '로그인 성공'
+    case 'LOGOUT': return '로그아웃'
+    case 'LOGIN_FAILED': return '로그인 실패'
+    case 'LOGIN_BLOCKED': return '로그인 차단'
+    case 'LOGIN_TEMPORARILY_LOCKED': return '5분 로그인 제한'
+    case 'LOGIN_ACCOUNT_DISABLED': return '계정 비활성화'
+    default: return eventType || '-'
+  }
+}
+
+export function accessEventTone(eventType: string) {
+  if (eventType === 'LOGIN_SUCCESS') return 'online'
+  if (eventType === 'LOGOUT') return 'offline'
+  return 'warning'
+}
+
+export function accessEventDescription(history: UserAccessHistory) {
+  const detail = accessDetail(history)
+  if (history.eventType === 'LOGIN_SUCCESS') return '인증 완료'
+  if (history.eventType === 'LOGOUT') {
+    return detail.reason === 'SESSION_REPLACED' ? '다른 장소 로그인으로 기존 세션 종료' : '사용자 로그아웃'
+  }
+  if (history.eventType === 'LOGIN_FAILED') {
+    if (detail.reason === 'UNKNOWN_USERNAME') return '등록되지 않은 사용자명'
+    return Number.isFinite(detail.failedAttempts) ? `비밀번호 오류 ${detail.failedAttempts}회` : '비밀번호 오류'
+  }
+  if (history.eventType === 'LOGIN_BLOCKED') {
+    return detail.reason === 'ACCOUNT_DISABLED' ? '비활성화된 계정의 로그인 시도' : '5분 제한 중 로그인 시도'
+  }
+  if (history.eventType === 'LOGIN_TEMPORARILY_LOCKED') return '비밀번호 오류 5회 누적'
+  if (history.eventType === 'LOGIN_ACCOUNT_DISABLED') return '비밀번호 오류 10회 누적'
+  return '-'
 }

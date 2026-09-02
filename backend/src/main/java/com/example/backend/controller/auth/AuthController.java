@@ -81,10 +81,12 @@ public class AuthController {
     @Operation(summary = "로그아웃", description = "브라우저의 자동 로그인 쿠키를 삭제합니다.")
     public ResponseEntity<Void> logout(
             @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
-            @CookieValue(name = REFRESH_COOKIE_NAME, required = false) String refreshToken) {
+            @CookieValue(name = REFRESH_COOKIE_NAME, required = false) String refreshToken,
+            HttpServletRequest request) {
         String accessToken = authorization != null && authorization.startsWith("Bearer ")
                 ? authorization.substring(7) : null;
-        authService.logout(accessToken, refreshToken);
+        authService.logout(accessToken, refreshToken,
+                request.getRemoteAddr(), request.getHeader(HttpHeaders.USER_AGENT));
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
                 .build();

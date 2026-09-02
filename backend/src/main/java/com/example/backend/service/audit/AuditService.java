@@ -53,6 +53,17 @@ public class AuditService {
      */
     public void log(String actor, String action, String targetType, String targetId,
                     String detailJson, String ipAddress) {
+        enqueue(actor, action, targetType, targetId, detailJson, ipAddress, null);
+    }
+
+    /** 사용자 인증 감사 로그에 접속 환경을 함께 기록한다. */
+    public void logAccess(String actor, String action, String targetType, String targetId,
+                          String detailJson, String ipAddress, String userAgent) {
+        enqueue(actor, action, targetType, targetId, detailJson, ipAddress, userAgent);
+    }
+
+    private void enqueue(String actor, String action, String targetType, String targetId,
+                         String detailJson, String ipAddress, String userAgent) {
         AuditLog entry = new AuditLog();
         entry.setActor(actor != null ? actor : "system");
         entry.setAction(action);
@@ -60,6 +71,7 @@ public class AuditService {
         entry.setTargetId(targetId);
         entry.setDetailJson(detailJson);
         entry.setIpAddress(ipAddress);
+        entry.setUserAgent(userAgent);
         entry.setCreatedAt(LocalDateTime.now());
 
         int current = queueSize.incrementAndGet();

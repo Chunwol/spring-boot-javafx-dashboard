@@ -166,10 +166,14 @@ class ApiSmokeIntegrationTest {
                 String.class);
         Assertions.assertEquals(204, logout.getStatusCode().value());
         Assertions.assertTrue(logout.getHeaders().getFirst(HttpHeaders.SET_COOKIE).contains("Max-Age=0"));
+        auditService.flushQueue();
+        Assertions.assertTrue(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_logs WHERE action = ? AND actor = ?",
+                Integer.class, "LOGOUT", ADMIN_USERNAME) >= 1);
     }
 
     @Test
-    void smoke_loginFailuresPersistLockAndDisableAccount() {
+    void smoke_loginFailuresPersistLockAndDisableAccount() throws Exception {
         String username = "smoke-lockout-" + System.nanoTime();
         String password = "smoke-lockout-password-123!";
         User user = userRepository.save(new User(
@@ -206,6 +210,22 @@ class ApiSmokeIntegrationTest {
             Assertions.assertEquals(1, jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM audit_logs WHERE action = ? AND target_id = ?",
                     Integer.class, "LOGIN_ACCOUNT_DISABLED", username));
+            Assertions.assertEquals(10, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = ? AND target_id = ?",
+                    Integer.class, "LOGIN_FAILED", username));
+
+            String adminToken = loginAndGetBearerToken();
+            HttpHeaders historyHeaders = new HttpHeaders();
+            historyHeaders.setBearerAuth(adminToken);
+            ResponseEntity<String> history = restTemplate.exchange(
+                    baseUrl() + "/users/access-history",
+                    HttpMethod.GET,
+                    new HttpEntity<>(historyHeaders),
+                    String.class);
+            Assertions.assertEquals(200, history.getStatusCode().value());
+            Assertions.assertTrue(history.getBody() != null
+                    && history.getBody().contains(username)
+                    && history.getBody().contains("LOGIN_FAILED"));
         } finally {
             userRepository.deleteById(user.getId());
         }

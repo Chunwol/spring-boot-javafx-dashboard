@@ -11,7 +11,6 @@ import {
   ALL_FEATURE_PERMISSIONS,
   DEFAULT_FEATURE_PERMISSIONS,
   FEATURE_PERMISSION_GROUPS,
-  FEATURE_PERMISSION_OPTIONS,
   VIEWER_FEATURE_PERMISSIONS,
   type FeaturePermission,
 } from '../auth/permissions'
@@ -19,10 +18,14 @@ import {
   usersApi,
   type CreateUserInput,
   type ManagedUser,
+  type UserAccessHistory,
   type UpdateUserInput,
   type UserRole,
 } from '../features/users/api'
 import {
+  accessEventDescription,
+  accessEventLabel,
+  accessEventTone,
   filterAndSortUsers,
   isCurrentAccount,
   ROLE_OPTIONS,
@@ -172,11 +175,22 @@ export function UsersPage() {
     enabled: isAdmin,
     refetchInterval: 10_000,
   })
+  const accessHistoryQuery = useQuery({
+    queryKey: ['users', 'access-history'],
+    queryFn: usersApi.accessHistory,
+    enabled: isAdmin,
+    refetchInterval: 10_000,
+  })
   const displayedUsers = useMemo(
     () => filterAndSortUsers(usersQuery.data || [], search),
     [search, usersQuery.data],
   )
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['users'] })
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['users'], exact: true }),
+      queryClient.invalidateQueries({ queryKey: ['users', 'access-history'] }),
+    ])
+  }
 
   const saveMutation = useMutation({
     mutationFn: (action: SaveAction) => action.mode === 'create'
@@ -217,7 +231,7 @@ export function UsersPage() {
       <header className="page-header">
         <div><h1>사용자 관리</h1><p>대시보드 계정 {usersQuery.data?.length || 0}개</p></div>
         <div className="toolbar-actions">
-          <button className="icon-button bordered" onClick={() => void refresh()} disabled={usersQuery.isFetching} aria-label="새로고침"><RefreshCw className={usersQuery.isFetching ? 'spin-icon' : ''} size={17} /></button>
+          <button className="icon-button bordered" onClick={() => void refresh()} disabled={usersQuery.isFetching || accessHistoryQuery.isFetching} aria-label="새로고침"><RefreshCw className={usersQuery.isFetching || accessHistoryQuery.isFetching ? 'spin-icon' : ''} size={17} /></button>
           <button className="button primary" onClick={() => setEditor({ mode: 'create' })}><Plus size={16} />사용자 추가</button>
         </div>
       </header>
@@ -230,7 +244,7 @@ export function UsersPage() {
       {!displayedUsers.length ? <EmptyState message={search.trim() ? '검색 조건에 맞는 사용자가 없습니다.' : '등록된 사용자가 없습니다.'} /> : (
         <div className="table-scroll">
           <table className="data-table">
-            <thead><tr><th>사용자명</th><th>이메일</th><th>역할</th><th>기능 권한</th><th>계정 상태</th><th>현재 로그인</th><th>접속 시각</th><th>비고</th><th aria-label="관리" /></tr></thead>
+            <thead><tr><th>사용자명</th><th>이메일</th><th>역할</th><th>계정 상태</th><th>현재 로그인</th><th>접속 시각</th><th>비고</th><th aria-label="관리" /></tr></thead>
             <tbody>{displayedUsers.map((managedUser) => {
               const current = isCurrentAccount(managedUser, signedInUser?.username)
               const roleClass = managedUser.role === 'ADMIN' ? 'warning' : managedUser.role === 'VIEWER' ? 'offline' : 'online'
@@ -238,7 +252,6 @@ export function UsersPage() {
                 <td><strong>{managedUser.username}</strong></td>
                 <td>{managedUser.email}</td>
                 <td><span className={`status-badge ${roleClass}`}>{roleLabel(managedUser.role)}</span></td>
-                <td><span className="stacked-cell"><strong>{managedUser.role === 'ADMIN' ? '전체 세부 권한' : `${managedUser.permissions.length}개 세부 권한`}</strong><small>{managedUser.permissions.map((value) => FEATURE_PERMISSION_OPTIONS.find((option) => option.value === value)?.label).filter(Boolean).join(', ') || '부여된 기능 없음'}</small></span></td>
                 <td>{managedUser.active
                   ? <span className="status-badge online">활성</span>
                   : <span className="status-badge offline">비활성화 (오류 {managedUser.failedLoginAttempts}회)</span>}</td>
@@ -256,6 +269,27 @@ export function UsersPage() {
           </table>
         </div>
       )}
+
+      <div className="section-toolbar">
+        <div><h2>접속 기록</h2><p>최근 {accessHistoryQuery.data?.length || 0}건 · 로그인, 로그아웃과 실패 기록은 서버에 계속 보관됩니다.</p></div>
+      </div>
+
+      {accessHistoryQuery.isLoading ? <PageLoading /> : accessHistoryQuery.isError
+        ? <PageError message={accessHistoryQuery.error instanceof Error ? accessHistoryQuery.error.message : '접속 기록을 불러오지 못했습니다.'} onRetry={() => void accessHistoryQuery.refetch()} />
+        : !accessHistoryQuery.data?.length ? <EmptyState message="아직 저장된 접속 기록이 없습니다." />
+          : <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>접속 시각</th><th>사용자명</th><th>구분</th><th>상세 결과</th><th>접속 IP</th><th>접속 환경</th></tr></thead>
+              <tbody>{accessHistoryQuery.data.map((history: UserAccessHistory) => <tr key={history.id}>
+                <td>{formatUserDate(history.occurredAt)}</td>
+                <td><strong>{history.username || '-'}</strong></td>
+                <td><span className={`status-badge ${accessEventTone(history.eventType)}`}>{accessEventLabel(history.eventType)}</span></td>
+                <td>{accessEventDescription(history)}</td>
+                <td>{history.ipAddress || '-'}</td>
+                <td><span className="stacked-cell"><strong>{clientEnvironmentLabel(history.userAgent)}</strong><small title={history.userAgent || ''}>{history.userAgent || '-'}</small></span></td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
 
       {editor && <UserEditor key={editor.mode === 'edit' ? editor.user.id : 'create'} state={editor} busy={saveMutation.isPending} onCancel={() => setEditor(null)} onSave={(action) => saveMutation.mutate(action)} />}
       <ConfirmDialog

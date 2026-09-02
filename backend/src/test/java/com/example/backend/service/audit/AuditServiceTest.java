@@ -58,6 +58,19 @@ class AuditServiceTest {
     }
 
     @Test
+    void accessLogPersistsBrowserEnvironment() {
+        auditService.logAccess("admin", "LOGIN_SUCCESS", "USER", "admin", null,
+                "192.0.2.20", "test-browser");
+
+        auditService.flushQueue();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AuditLog>> captor = ArgumentCaptor.forClass(List.class);
+        verify(auditLogRepository).saveAll(captor.capture());
+        assertThat(captor.getValue().get(0).getUserAgent()).isEqualTo("test-browser");
+    }
+
+    @Test
     void flush_noEntries_doesNotCallSave() {
         auditService.flushQueue();
 

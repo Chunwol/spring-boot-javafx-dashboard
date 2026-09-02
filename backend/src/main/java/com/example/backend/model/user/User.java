@@ -58,7 +58,7 @@ public class User {
     @Column(name = "note", length = 500)
     private String note;
 
-    /** 운영자에게 명시적으로 부여한 화면 단위 기능 권한(CSV). null은 역할 기본값을 뜻한다. */
+    /** 운영자에게 명시적으로 부여한 세부 기능 권한(CSV). null은 역할 기본값을 뜻한다. */
     @Column(name = "feature_permissions", length = 2000)
     private String featurePermissions;
 

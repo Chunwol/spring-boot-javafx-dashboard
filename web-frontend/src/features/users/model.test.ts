@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ManagedUser } from './api'
 import {
+  accessEventDescription,
+  accessEventLabel,
+  accessEventTone,
   filterAndSortUsers,
   isCurrentAccount,
   roleLabel,
@@ -78,5 +81,17 @@ describe('user management model', () => {
     expect(roleLabel('UNKNOWN')).toBe('알 수 없음 (UNKNOWN)')
     expect(isCurrentAccount(user({ username: 'Admin' }), 'admin')).toBe(true)
     expect(isCurrentAccount(user({ username: 'operator' }), 'admin')).toBe(false)
+  })
+
+  it('describes successful, replaced and wrong-password access events', () => {
+    const base = { id: 1, username: 'operator', occurredAt: '2026-09-02T20:00:00' }
+    expect(accessEventLabel('LOGIN_SUCCESS')).toBe('로그인 성공')
+    expect(accessEventTone('LOGIN_SUCCESS')).toBe('online')
+    expect(accessEventDescription({ ...base, eventType: 'LOGOUT', detailJson: '{"reason":"SESSION_REPLACED"}' }))
+      .toBe('다른 장소 로그인으로 기존 세션 종료')
+    expect(accessEventDescription({ ...base, eventType: 'LOGIN_FAILED', detailJson: '{"reason":"WRONG_PASSWORD","failedAttempts":3}' }))
+      .toBe('비밀번호 오류 3회')
+    expect(accessEventDescription({ ...base, eventType: 'LOGIN_FAILED', detailJson: '{"reason":"UNKNOWN_USERNAME"}' }))
+      .toBe('등록되지 않은 사용자명')
   })
 })

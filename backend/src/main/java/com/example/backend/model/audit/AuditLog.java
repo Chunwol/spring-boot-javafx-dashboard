@@ -62,6 +62,10 @@ public class AuditLog {
     @Column(name = "ip_address")
     private String ipAddress;
 
+    /** 로그인 시도에 사용된 브라우저 User-Agent. */
+    @Column(name = "user_agent", length = 500)
+    private String userAgent;
+
     /** 로그 생성 일시 (@PrePersist 에서 자동 설정) */
     @Schema(description = "로그 생성 일시")
     @Column(name = "created_at", nullable = false)

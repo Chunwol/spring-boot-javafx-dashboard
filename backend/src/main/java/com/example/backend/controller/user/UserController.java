@@ -1,6 +1,7 @@
 package com.example.backend.controller.user;
 
 import com.example.backend.dto.user.UserResponseDto;
+import com.example.backend.dto.user.UserAccessHistoryResponseDto;
 import com.example.backend.dto.user.UserSaveRequestDto;
 import com.example.backend.dto.user.UserUpdateRequestDto;
 import com.example.backend.service.user.UserService;
@@ -32,6 +33,12 @@ public class UserController {
     @ApiResponse(responseCode = "403", description = "ADMIN 권한 없음")
     public List<UserResponseDto> findAll() {
         return userService.findAll();
+    }
+
+    @GetMapping("/access-history")
+    @Operation(summary = "사용자 접속 기록 조회", description = "최근 로그인, 로그아웃과 로그인 실패 기록 200건을 조회합니다.")
+    public List<UserAccessHistoryResponseDto> findAccessHistory() {
+        return userService.findAccessHistory();
     }
 
     @GetMapping("/{id}")

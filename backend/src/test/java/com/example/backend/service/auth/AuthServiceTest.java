@@ -96,6 +96,20 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(request, null))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("아이디 또는 비밀번호가 올바르지 않습니다.");
+        verify(auditService).logAccess("admin", "LOGIN_FAILED", "USER", "admin",
+                "{\"reason\":\"WRONG_PASSWORD\",\"failedAttempts\":1}", null, null);
+    }
+
+    @Test
+    void unknownUsernameAttemptIsRecorded() {
+        LoginRequest request = loginRequest("missing", "wrong-password");
+        when(userRepository.findByUsernameForLogin("missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.login(request, "192.0.2.44", "test-browser"))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verify(auditService).logAccess("missing", "LOGIN_FAILED", "USER", "missing",
+                "{\"reason\":\"UNKNOWN_USERNAME\"}", "192.0.2.44", "test-browser");
     }
 
     @Test
@@ -233,6 +247,21 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh("refresh-token"))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("비활성화된 계정입니다. 관리자에게 문의해 주세요.");
+    }
+
+    @Test
+    void logoutRecordsTheEndedSession() {
+        var claims = Jwts.claims().setSubject("admin");
+        when(jwtUtil.validateAndGetClaims("access-token")).thenReturn(claims);
+        when(jwtUtil.getSessionId(claims)).thenReturn("session-1");
+        when(loginSessions.revoke("admin", "session-1")).thenReturn(true);
+
+        authService.logout("access-token", null, "192.0.2.20", "test-browser");
+
+        verify(auditService).logAccess("admin", "LOGOUT", "USER", "admin",
+                "{\"reason\":\"USER_REQUEST\"}", "192.0.2.20", "test-browser");
+        verify(webSocketSessions).closeUserSessions("admin");
+        verify(remoteControlSessions).closeOwnerSessions("admin");
     }
 
     private LoginRequest loginRequest(String username, String password) {
