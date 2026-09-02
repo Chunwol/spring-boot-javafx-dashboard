@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../auth/AuthProvider', () => ({
-  useAuth: () => ({ isAdmin: mocks.isAdmin }),
+  useAuth: () => ({ hasPermission: () => mocks.isAdmin }),
 }))
 
 vi.mock('../components/ui/ToastProvider', () => ({

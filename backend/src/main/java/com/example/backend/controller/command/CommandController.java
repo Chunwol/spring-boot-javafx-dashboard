@@ -5,6 +5,7 @@ import com.example.backend.dto.command.CommandStatusBatchRequestDto;
 import com.example.backend.service.command.CommandLifecycleService;
 import com.example.backend.service.command.CommandPollRegistry;
 import com.example.backend.service.heartbeat.HeartbeatService;
+import com.example.backend.security.FeaturePermissionGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -47,6 +48,7 @@ public class CommandController {
     private final CommandLifecycleService commandLifecycleService;
     private final HeartbeatService heartbeatService;
     private final CommandPollRegistry commandPollRegistry;
+    private final FeaturePermissionGuard featurePermissionGuard;
 
     /**
      * 에이전트 Long-poll 명령 수령 (GET /api/v1/agent/commands/next)
@@ -82,7 +84,7 @@ public class CommandController {
     }
 
     @PostMapping("/commands")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "PC 명령 발행",
         description = "관리자가 PC에 원격 명령(종료, 재부팅, WOL, 스크립트 등)을 발행합니다. " +
@@ -92,6 +94,7 @@ public class CommandController {
     @ApiResponse(responseCode = "202", description = "명령 발행 성공 (큐에 저장됨)")
     @ApiResponse(responseCode = "400", description = "잘못된 요청 (필수 파라미터 누락, scope 또는 type 오류)")
     public ResponseEntity<Map<String, Object>> enqueue(@Valid @RequestBody CommandRequestDto req) {
+        featurePermissionGuard.requireCommand(req.getType());
         return ResponseEntity.accepted().body(commandLifecycleService.enqueue(req));
     }
 
@@ -133,13 +136,14 @@ public class CommandController {
     }
 
     @PostMapping("/commands/to-ip")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "IP 기반 PC 명령 발행",
                description = "IP 주소로 PC를 조회하여 명령을 발행합니다.")
     @ApiResponse(responseCode = "202", description = "명령 발행 성공")
     public ResponseEntity<Map<String, Object>> enqueueToIp(@RequestBody Map<String, Object> body) {
         String ipAddress = body.containsKey("ipAddress") ? body.get("ipAddress").toString().trim() : null;
         String type = body.containsKey("type") ? body.get("type").toString() : null;
+        featurePermissionGuard.requireCommand(type);
         String scriptUrl = body.containsKey("scriptUrl") ? body.get("scriptUrl").toString() : null;
         String payloadJson = body.containsKey("payloadJson") ? body.get("payloadJson").toString() : null;
         String broadcastIp = body.containsKey("broadcastIp") ? body.get("broadcastIp").toString() : null;
@@ -148,7 +152,7 @@ public class CommandController {
     }
 
     @GetMapping("/commands")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "명령 목록 조회",
                description = "진행 중이거나 완료된 명령 목록을 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "명령 목록 조회 성공")
@@ -166,14 +170,14 @@ public class CommandController {
     }
 
     @PostMapping("/commands/status")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "명령 상태 일괄 조회", description = "대량 작업의 taskId를 한 요청으로 조회합니다.")
     public ResponseEntity<?> commandStatuses(@Valid @RequestBody CommandStatusBatchRequestDto request) {
         return ResponseEntity.ok(commandLifecycleService.findCommandsByIds(request.getTaskIds()));
     }
 
     @PostMapping("/commands/{taskId}/cancel")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_COMMAND_CANCEL')")
     @Operation(
         summary = "대기 명령 취소",
         description = "명령 종류와 관계없이 아직 에이전트에 전달되지 않은 QUEUED 명령을 취소합니다."

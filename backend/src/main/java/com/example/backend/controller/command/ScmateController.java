@@ -4,6 +4,7 @@ import com.example.backend.common.exception.ApplicationException;
 import com.example.backend.common.exception.InvalidRequestException;
 import com.example.backend.dto.command.ScmateActionRequestDto;
 import com.example.backend.service.command.ScmateWorkflowService;
+import com.example.backend.security.FeaturePermissionGuard;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -24,21 +25,24 @@ import java.util.Map;
 public class ScmateController {
 
     private final ScmateWorkflowService scmateWorkflowService;
+    private final FeaturePermissionGuard featurePermissionGuard;
 
     @PostMapping("/actions")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_PCS','PERM_COMMANDS')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> perform(@Valid @RequestBody ScmateActionRequestDto request) {
+        featurePermissionGuard.requireScmateAction(request.action());
         return ResponseEntity.accepted().body(
                 scmateWorkflowService.perform(request.macAddress(), request.action(), request.recoveryPoint()));
     }
 
     @PostMapping("/actions/bulk")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_PCS','PERM_COMMANDS')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> performBulk(
             @Valid @RequestBody List<@Valid ScmateActionRequestDto> requests) {
         if (requests == null || requests.isEmpty()) {
             throw new InvalidRequestException("SCMATE bulk 요청 대상이 없습니다.");
         }
+        requests.forEach(request -> featurePermissionGuard.requireScmateAction(request.action()));
         List<Map<String, Object>> results = new ArrayList<>();
         int accepted = 0;
         for (ScmateActionRequestDto request : requests) {

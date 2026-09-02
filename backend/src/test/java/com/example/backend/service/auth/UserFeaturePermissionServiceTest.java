@@ -23,17 +23,19 @@ class UserFeaturePermissionServiceTest {
         User user = new User("operator", "encoded", "operator@example.com", "USER");
 
         assertThat(service.resolve(user, "USER"))
-                .contains(FeaturePermission.CLASSROOMS, FeaturePermission.PCS, FeaturePermission.REPORTS)
-                .doesNotContain(FeaturePermission.COMMANDS, FeaturePermission.FILES, FeaturePermission.TOKENS);
+                .contains(FeaturePermission.CLASSROOM_VIEW, FeaturePermission.PC_VIEW, FeaturePermission.REPORT_VIEW,
+                        FeaturePermission.POWER_ON, FeaturePermission.SCMATE_BASELINE_UPDATE)
+                .doesNotContain(FeaturePermission.COMMAND_VIEW, FeaturePermission.FILE_DISTRIBUTION_VIEW,
+                        FeaturePermission.TOKEN_VIEW);
     }
 
     @Test
     void explicitOperatorSelectionIsUsedWithoutAddingDefaults() {
         User user = new User("operator", "encoded", "operator@example.com", "USER");
-        user.changeFeaturePermissions("FILES,COMMANDS");
+        user.changeFeaturePermissions("POWER_ON,COMMAND_VIEW");
 
         assertThat(service.resolve(user, "USER"))
-                .containsExactlyInAnyOrder(FeaturePermission.FILES, FeaturePermission.COMMANDS);
+                .containsExactlyInAnyOrder(FeaturePermission.POWER_ON, FeaturePermission.COMMAND_VIEW);
     }
 
     @Test
@@ -42,7 +44,7 @@ class UserFeaturePermissionServiceTest {
         user.changeFeaturePermissions("FILES,TOKENS");
 
         assertThat(service.resolve(user, "VIEWER"))
-                .contains(FeaturePermission.CLASSROOMS, FeaturePermission.REPORTS)
-                .doesNotContain(FeaturePermission.FILES, FeaturePermission.TOKENS);
+                .contains(FeaturePermission.CLASSROOM_VIEW, FeaturePermission.REPORT_VIEW)
+                .doesNotContain(FeaturePermission.FILE_DISTRIBUTION_VIEW, FeaturePermission.TOKEN_VIEW);
     }
 }

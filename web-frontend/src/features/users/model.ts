@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CreateUserInput, ManagedUser, UpdateUserInput, UserRole } from './api'
+import { ALL_FEATURE_PERMISSIONS, type FeaturePermission } from '../../auth/permissions'
 
 export const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string; description: string }> = [
   { value: 'ADMIN', label: '관리자 (ADMIN)', description: '모든 조회와 관리 작업을 수행할 수 있습니다.' },
@@ -23,10 +24,10 @@ const emailSchema = z.string()
   .email('올바른 이메일 주소를 입력하세요.')
 
 const noteSchema = z.string().trim().max(500, '비고는 500자 이하로 입력하세요.').optional()
-const permissionsSchema = z.array(z.enum([
-  'CLASSROOMS', 'PCS', 'COMMANDS', 'SCRIPT_LIBRARY', 'TOKENS', 'BROKEN_PCS',
-  'NETWORK', 'REPORTS', 'FILES', 'CLASSROOM_SETTINGS', 'SYSTEM_SETTINGS',
-]))
+const permissionsSchema = z.array(z.custom<FeaturePermission>((value) =>
+  typeof value === 'string' && ALL_FEATURE_PERMISSIONS.includes(value as FeaturePermission),
+  '알 수 없는 세부 기능 권한입니다.',
+))
 
 export const createUserSchema = z.object({
   username: usernameSchema,

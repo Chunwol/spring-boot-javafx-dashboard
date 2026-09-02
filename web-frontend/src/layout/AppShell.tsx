@@ -30,21 +30,21 @@ import { useRealtimeUpdates } from '../features/realtime/useRealtimeUpdates'
 type NavigationItem = { to: string; label: string; icon: LucideIcon; permission?: FeaturePermission; adminOnly?: boolean }
 
 const navigation: ReadonlyArray<NavigationItem> = [
-  { to: '/classrooms', label: '강의실 현황', icon: Activity, permission: 'CLASSROOMS' },
-  { to: '/pcs', label: 'PC 관리', icon: MonitorCog, permission: 'PCS' },
-  { to: '/commands', label: '명령 발행 / 이력', icon: Command, permission: 'COMMANDS' },
-  { to: '/script-library', label: '스크립트 보관함', icon: FileCode2, permission: 'SCRIPT_LIBRARY' },
-  { to: '/tokens', label: '토큰 관리', icon: KeyRound, permission: 'TOKENS' },
-  { to: '/broken', label: '고장 PC', icon: AlertTriangle, permission: 'BROKEN_PCS' },
-  { to: '/network', label: '네트워크', icon: Network, permission: 'NETWORK' },
-  { to: '/reports', label: '보고서', icon: BarChart3, permission: 'REPORTS' },
-  { to: '/files', label: '파일 배포', icon: FolderUp, permission: 'FILES' },
+  { to: '/classrooms', label: '강의실 현황', icon: Activity, permission: 'CLASSROOM_VIEW' },
+  { to: '/pcs', label: 'PC 관리', icon: MonitorCog, permission: 'PC_VIEW' },
+  { to: '/commands', label: '명령 발행 / 이력', icon: Command, permission: 'COMMAND_VIEW' },
+  { to: '/script-library', label: '스크립트 보관함', icon: FileCode2, permission: 'SCRIPT_LIBRARY_VIEW' },
+  { to: '/tokens', label: '토큰 관리', icon: KeyRound, permission: 'TOKEN_VIEW' },
+  { to: '/broken', label: '고장 PC', icon: AlertTriangle, permission: 'BROKEN_PC_VIEW' },
+  { to: '/network', label: '네트워크', icon: Network, permission: 'NETWORK_VIEW' },
+  { to: '/reports', label: '보고서', icon: BarChart3, permission: 'REPORT_VIEW' },
+  { to: '/files', label: '파일 배포', icon: FolderUp, permission: 'FILE_DISTRIBUTION_VIEW' },
 ]
 
 const settingsNavigation: ReadonlyArray<NavigationItem> = [
-  { to: '/settings/classrooms', label: '강의실 설정', icon: School, permission: 'CLASSROOM_SETTINGS' },
+  { to: '/settings/classrooms', label: '강의실 설정', icon: School, permission: 'CLASSROOM_SETTINGS_VIEW' },
   { to: '/settings/users', label: '사용자 관리', icon: Users, adminOnly: true },
-  { to: '/settings/system', label: '시스템 설정', icon: Settings, permission: 'SYSTEM_SETTINGS' },
+  { to: '/settings/system', label: '시스템 설정', icon: Settings, permission: 'SYSTEM_SETTINGS_VIEW' },
 ]
 
 export function AppShell() {
@@ -87,7 +87,7 @@ export function AppShell() {
           <span><i className="status-dot offline" />오프라인</span>
         </div>
         <div className="topbar-actions">
-          {hasPermission('CLASSROOMS') && <label className="global-search">
+          {hasPermission('CLASSROOM_VIEW') && <label className="global-search">
             <Search size={17} aria-hidden="true" />
             <input type="search" value={search} onChange={(event) => { const value = event.target.value; setSearch(value); if (!value.trim() && location.pathname.startsWith('/classrooms')) navigate('/classrooms', { replace: true }) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); searchClassrooms() } }} placeholder="PC/강의실 검색" aria-label="PC 또는 강의실 검색" />
           </label>}

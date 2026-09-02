@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Power, PowerOff, RotateCw, X } from 'lucide-react'
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog'
+import { useAuth } from '../../auth/AuthProvider'
 import { EmptyState, PageError, PageLoading } from '../../components/ui/PageState'
 import { useToast } from '../../components/ui/ToastProvider'
 import { useDialogFocus } from '../../components/ui/useDialogFocus'
@@ -13,6 +14,10 @@ import type { PcStatus } from '../../types/dashboard'
 type PowerCommand = 'SHUTDOWN' | 'REBOOT' | 'WOL'
 
 export function IndividualControlDialog({ range, onClose }: { range: IpRange | null; onClose: () => void }) {
+  const { hasPermission } = useAuth()
+  const canPowerOn = hasPermission('POWER_ON')
+  const canReboot = hasPermission('REBOOT')
+  const canShutdown = hasPermission('SHUTDOWN')
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [pending, setPending] = useState<{ pc: PcStatus; type: PowerCommand } | null>(null)
@@ -46,7 +51,7 @@ export function IndividualControlDialog({ range, onClose }: { range: IpRange | n
         <header><div><h2 id="individual-control-title">IP 범위 개별 제어</h2><p>{range.groupName || `강의실 #${range.groupId}`} · {rangeLabel}</p></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={18} /></button></header>
         {pcsQuery.isLoading ? <PageLoading /> : pcsQuery.isError ? <PageError message={pcsQuery.error instanceof Error ? pcsQuery.error.message : 'PC 목록을 불러오지 못했습니다.'} onRetry={() => void pcsQuery.refetch()} /> : !pcs.length ? <EmptyState message="이 IP 범위에 등록된 PC가 없습니다." /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>PC 이름</th><th>IP 주소</th><th>상태</th><th>명령</th></tr></thead><tbody>{pcs.map((pc) => {
           const online = pc.online || pc.status?.toUpperCase() === 'ONLINE'
-          return <tr key={pc.macAddress}><td><strong>{pc.pcName}</strong></td><td>{pc.ipAddress || '-'}</td><td><span className={`status-badge ${online ? 'online' : 'offline'}`}>{online ? '온라인' : '오프라인'}</span></td><td><div className="row-actions">{online ? <><button className="icon-button bordered" onClick={() => setPending({ pc, type: 'REBOOT' })} aria-label={`${pc.pcName} 재시작`} title="재시작"><RotateCw size={15} /></button><button className="icon-button danger-icon" onClick={() => setPending({ pc, type: 'SHUTDOWN' })} aria-label={`${pc.pcName} 종료`} title="종료"><PowerOff size={15} /></button></> : <button className="icon-button bordered" onClick={() => setPending({ pc, type: 'WOL' })} aria-label={`${pc.pcName} 켜기`} title="켜기"><Power size={15} /></button>}</div></td></tr>
+          return <tr key={pc.macAddress}><td><strong>{pc.pcName}</strong></td><td>{pc.ipAddress || '-'}</td><td><span className={`status-badge ${online ? 'online' : 'offline'}`}>{online ? '온라인' : '오프라인'}</span></td><td><div className="row-actions">{online ? <>{canReboot && <button className="icon-button bordered" onClick={() => setPending({ pc, type: 'REBOOT' })} aria-label={`${pc.pcName} 재시작`} title="재시작"><RotateCw size={15} /></button>}{canShutdown && <button className="icon-button danger-icon" onClick={() => setPending({ pc, type: 'SHUTDOWN' })} aria-label={`${pc.pcName} 종료`} title="종료"><PowerOff size={15} /></button>}</> : canPowerOn && <button className="icon-button bordered" onClick={() => setPending({ pc, type: 'WOL' })} aria-label={`${pc.pcName} 켜기`} title="켜기"><Power size={15} /></button>}</div></td></tr>
         })}</tbody></table></div>}
       </section>
     </div>

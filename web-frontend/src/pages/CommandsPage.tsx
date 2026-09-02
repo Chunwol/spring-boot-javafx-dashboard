@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
+import { commandPermission } from '../auth/permissions'
 import { api } from '../api/client'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
@@ -79,10 +80,12 @@ function remoteViewerStatusLabel(status: string) {
   } as Record<string, string>)[status] || status
 }
 
-function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDownload, onCancel, onClose }: {
+function CommandDetail({ command, loading, error, canDownload, canCancel, downloadBusy, cancelBusy, onDownload, onCancel, onClose }: {
   command: CommandView | null
   loading: boolean
   error: string | null
+  canDownload: boolean
+  canCancel: boolean
   downloadBusy: boolean
   cancelBusy: boolean
   onDownload: (command: CommandView) => void
@@ -138,7 +141,7 @@ function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDo
                   <div><strong>명령 실행 실패</strong><p>종료 코드 {command.exitCode ?? '-'} · {command.stderr?.trim().split(/\r?\n/, 1)[0] || '상세 오류가 기록되지 않았습니다.'}</p></div>
                 </section>
               )}
-              {canCancelCommand(command.status) && (
+              {canCancel && canCancelCommand(command.status) && (
                 <section className="command-output-section">
                   <button className="button danger" onClick={() => onCancel(command)} disabled={cancelBusy}>
                     <Ban size={16} />{cancelBusy ? '취소 처리 중' : '대기 명령 취소'}
@@ -154,7 +157,7 @@ function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDo
               )}
               <section className="command-output-section"><h3>표준 출력</h3><pre className="command-output">{command.stdout || '출력 없음'}</pre></section>
               <section className="command-output-section"><h3>표준 오류</h3><pre className="command-output error">{command.stderr || '오류 없음'}</pre></section>
-              {collectDownloadPath(command) && <section className="command-output-section">
+              {canDownload && collectDownloadPath(command) && <section className="command-output-section">
                 <button className="button primary" onClick={() => onDownload(command)} disabled={downloadBusy}>
                   <Download size={16} />{downloadBusy ? '내려받는 중' : '수집 파일 다운로드'}
                 </button>
@@ -167,9 +170,10 @@ function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDo
   )
 }
 
-function IssueCommandDialog({ draft, errors, busy, onChange, onSubmit, onClose }: {
+function IssueCommandDialog({ draft, errors, commandTypes, busy, onChange, onSubmit, onClose }: {
   draft: CommandDraft
   errors: CommandDraftErrors
+  commandTypes: readonly CommandDraft['type'][]
   busy: boolean
   onChange: (next: CommandDraft) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -194,7 +198,7 @@ function IssueCommandDialog({ draft, errors, busy, onChange, onSubmit, onClose }
             </label>
             <label className="command-form-field">명령
               <select value={draft.type} onChange={(event) => onChange({ ...draft, type: event.target.value as CommandDraft['type'] })}>
-                {COMMAND_TYPES.map((type) => <option value={type} key={type}>{COMMAND_TYPE_LABELS[type]}</option>)}
+                {commandTypes.map((type) => <option value={type} key={type}>{COMMAND_TYPE_LABELS[type]}</option>)}
               </select>
               {errors.type && <span className="field-error">{errors.type}</span>}
             </label>
@@ -256,9 +260,13 @@ function enqueueMessage(result: CommandEnqueueResult) {
 
 export function CommandsPage() {
   const queryClient = useQueryClient()
-  const { isAdmin, canWrite, hasPermission } = useAuth()
-  const allowed = isAdmin || hasPermission?.('COMMANDS') === true
-  const canOperate = isAdmin || (canWrite && allowed)
+  const { hasPermission } = useAuth()
+  const allowed = hasPermission('COMMAND_VIEW')
+  const commandTypes = useMemo(() => COMMAND_TYPES.filter((type) => hasPermission(commandPermission(type))), [hasPermission])
+  const canOperate = commandTypes.length > 0
+  const canViewRemoteSessions = hasPermission('REMOTE_SCREEN_VIEW')
+  const canCancel = hasPermission('COMMAND_CANCEL')
+  const canDownload = hasPermission('COMMAND_RESULT_DOWNLOAD')
   const { showToast } = useToast()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<CommandStatusFilter>('ALL')
@@ -294,7 +302,7 @@ export function CommandsPage() {
   const remoteSessionsQuery = useQuery({
     queryKey: ['remote-control', 'active-sessions'],
     queryFn: listActiveRemoteControlSessions,
-    enabled: allowed,
+    enabled: allowed && canViewRemoteSessions,
     refetchInterval: 5_000,
   })
   const detailQuery = useQuery({
@@ -410,6 +418,7 @@ export function CommandsPage() {
   const prepareIssue = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const errors = validateCommandDraft(draft)
+    if (!commandTypes.includes(draft.type)) errors.type = '이 명령을 발행할 세부 권한이 없습니다.'
     setDraftErrors(errors)
     if (Object.keys(errors).length) return
     setPendingIssue(toIssueCommandRequest(draft))
@@ -445,7 +454,7 @@ export function CommandsPage() {
             {taskId && <button className="icon-button bordered" type="button" onClick={clearTaskId} aria-label="작업 ID 필터 해제" title="필터 해제"><X size={17} /></button>}
           </form>
           <button className="icon-button bordered" onClick={() => { void commandsQuery.refetch() }} disabled={commandsQuery.isFetching} aria-label="새로고침" title="새로고침"><RefreshCw size={17} className={commandsQuery.isFetching ? 'spin-icon' : ''} /></button>
-          {canOperate && <button className="button primary" onClick={() => setIssueOpen(true)}><Plus size={17} />명령 발행</button>}
+          {canOperate && <button className="button primary" onClick={() => { if (!commandTypes.includes(draft.type)) setDraft({ ...DEFAULT_COMMAND_DRAFT, type: commandTypes[0] }); setIssueOpen(true) }}><Plus size={17} />명령 발행</button>}
         </div>
       </header>
       {taskIdError && <p className="form-error" role="alert">{taskIdError}</p>}
@@ -457,7 +466,7 @@ export function CommandsPage() {
         <div className="command-inline-error" role="alert"><CircleAlert size={15} />자동 갱신에 실패했습니다. 기존 스냅샷을 유지합니다.</div>
       )}
 
-      <section className="management-form" aria-label="현재 원격 접속">
+      {canViewRemoteSessions && <section className="management-form" aria-label="현재 원격 접속">
         <div className="management-form-header">
           <div><h2>현재 원격 접속</h2><p>계정·접속 IP·브라우저·대상 PC를 5초마다 확인합니다.</p></div>
           <span className="status-badge running">{remoteSessionsQuery.data?.length || 0}개 연결</span>
@@ -480,7 +489,7 @@ export function CommandsPage() {
             </table>
           </div>
         )}
-      </section>
+      </section>}
 
       {!taskId && (
         <>
@@ -565,6 +574,8 @@ export function CommandsPage() {
           command={selectedCommand}
           loading={detailQuery.isPending}
           error={detailQuery.isError ? (detailQuery.error instanceof Error ? detailQuery.error.message : '명령 상세를 불러오지 못했습니다.') : null}
+          canDownload={canDownload}
+          canCancel={canCancel}
           downloadBusy={downloadMutation.isPending}
           cancelBusy={cancelMutation.isPending}
           onDownload={(command) => downloadMutation.mutate(command)}
@@ -576,6 +587,7 @@ export function CommandsPage() {
         <IssueCommandDialog
           draft={draft}
           errors={draftErrors}
+          commandTypes={commandTypes}
           busy={issueMutation.isPending}
           onChange={(next) => { setDraft(next); setDraftErrors({}) }}
           onSubmit={prepareIssue}

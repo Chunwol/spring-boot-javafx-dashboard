@@ -36,7 +36,9 @@ function NoteDialog({ pc, busy, onClose, onSave }: {
 }
 
 export function BrokenPcsPage() {
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canEdit = hasPermission('BROKEN_PC_REGISTER_EDIT')
+  const canClear = hasPermission('BROKEN_PC_CLEAR')
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<RegisterMode>('existing')
@@ -97,7 +99,7 @@ export function BrokenPcsPage() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (!canWrite) return
+    if (!canEdit) return
     if (!note.trim()) return showToast('고장 또는 미사용 사유를 입력하세요.', 'error')
     let input: BrokenPcInput
     if (mode === 'existing') {
@@ -119,7 +121,7 @@ export function BrokenPcsPage() {
   return <section className="content-section">
     <header className="page-header"><div><h1>고장 PC</h1><p>현재 고장 또는 미사용으로 표시된 PC {brokenQuery.data?.length || 0}대</p></div><button className="icon-button bordered" onClick={() => void invalidate()} aria-label="새로고침"><RefreshCw size={17} /></button></header>
     {(brokenQuery.isError || pcsQuery.isError || roomsQuery.isError) && <div className="form-error" role="alert">새 데이터 갱신에 실패해 마지막으로 받은 목록을 표시하고 있습니다.</div>}
-    {canWrite && <form className="management-form" onSubmit={submit}>
+    {canEdit && <form className="management-form" onSubmit={submit}>
       <div className="management-form-header"><div><h2>고장 PC 등록</h2><p>기존 PC의 고장 처리 또는 빈 좌석을 지정합니다.</p></div><div className="segmented-text"><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => setMode('existing')}>기존 PC</button><button type="button" className={mode === 'unused' ? 'active' : ''} onClick={() => setMode('unused')}>미사용 좌석</button></div></div>
       <div className="form-grid">
         <label><span>강의실</span><select value={groupId} onChange={(event) => { setGroupId(event.target.value ? Number(event.target.value) : ''); setSelectedMac('') }} required={mode === 'unused'}><option value="">{mode === 'existing' ? '전체 강의실' : '강의실 선택'}</option>{(roomsQuery.data || []).map((room) => <option key={room.groupId} value={room.groupId}>{room.groupName}</option>)}</select></label>
@@ -130,7 +132,7 @@ export function BrokenPcsPage() {
     </form>}
 
     <div className="section-toolbar"><div><h2>고장 PC 목록</h2><p>{filtered.length}대 표시</p></div><div className="toolbar-actions"><label className="toolbar-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="PC, IP, 사유 검색" /></label><select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as typeof kindFilter)} aria-label="등록 유형 필터"><option value="all">전체 유형</option><option value="registered">기존 PC</option><option value="unused">미사용 좌석</option></select><select value={filterGroupId} onChange={(event) => setFilterGroupId(event.target.value === 'all' ? 'all' : Number(event.target.value))}><option value="all">전체 강의실</option>{(roomsQuery.data || []).map((room) => <option key={room.groupId} value={room.groupId}>{room.groupName}</option>)}</select></div></div>
-    {!filtered.length ? <EmptyState message="등록된 고장 PC가 없습니다." /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>고장 사유</th><th>마지막 연결</th><th aria-label="관리" /></tr></thead><tbody>{filtered.map((pc) => <tr key={pc.macAddress}><td>{pc.groupName || '-'}</td><td><strong>{pc.pcName}</strong></td><td>{pc.ipAddress || '-'}</td><td>{pc.macAddress}</td><td>{pc.brokenNote || '-'}</td><td>{formatDate(pc.lastSeen)}</td><td><div className="row-actions">{canWrite && <><button className="icon-button bordered" onClick={() => setEditing(pc)} aria-label={`${pc.pcName} 고장 사유 수정`} title="고장 사유 수정"><Pencil size={15} /></button><button className="button secondary compact" onClick={() => setClearing(pc)}><Wrench size={15} />고장 해제</button></>}</div></td></tr>)}</tbody></table></div>}
+    {!filtered.length ? <EmptyState message="등록된 고장 PC가 없습니다." /> : <div className="table-scroll"><table className="data-table"><thead><tr><th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>고장 사유</th><th>마지막 연결</th><th aria-label="관리" /></tr></thead><tbody>{filtered.map((pc) => <tr key={pc.macAddress}><td>{pc.groupName || '-'}</td><td><strong>{pc.pcName}</strong></td><td>{pc.ipAddress || '-'}</td><td>{pc.macAddress}</td><td>{pc.brokenNote || '-'}</td><td>{formatDate(pc.lastSeen)}</td><td><div className="row-actions">{canEdit && <button className="icon-button bordered" onClick={() => setEditing(pc)} aria-label={`${pc.pcName} 고장 사유 수정`} title="고장 사유 수정"><Pencil size={15} /></button>}{canClear && <button className="button secondary compact" onClick={() => setClearing(pc)}><Wrench size={15} />고장 해제</button>}</div></td></tr>)}</tbody></table></div>}
     <NoteDialog key={editing?.macAddress || 'none'} pc={editing} busy={noteMutation.isPending} onClose={() => setEditing(null)} onSave={(value) => editing && noteMutation.mutate({ mac: editing.macAddress, value })} />
     <ConfirmDialog open={Boolean(clearing)} title="고장 상태 해제" description={`${clearing?.groupName || '-'} ${clearing?.pcName || ''}의 고장 상태를 해제합니다. 미사용 좌석 항목은 목록에서 삭제됩니다.`} confirmLabel="고장 해제" requiredText={clearing?.pcName || ''} requiredTextLabel={`PC 이름 '${clearing?.pcName || ''}' 입력`} busy={clearMutation.isPending} onCancel={() => setClearing(null)} onConfirm={() => clearing && clearMutation.mutate(clearing)} />
   </section>

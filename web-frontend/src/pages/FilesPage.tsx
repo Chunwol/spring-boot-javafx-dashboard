@@ -166,9 +166,11 @@ function uploadPhaseLabel(progress: FileUploadProgress | null) {
 
 export function FilesPage() {
   const location = useLocation()
-  const { isAdmin, canWrite, hasPermission, token } = useAuth()
-  const allowed = isAdmin || hasPermission?.('FILES') === true
-  const canOperate = isAdmin || (canWrite && allowed)
+  const { hasPermission, token } = useAuth()
+  const allowed = hasPermission('FILE_DISTRIBUTION_VIEW')
+  const canUpload = hasPermission('FILE_UPLOAD_DISTRIBUTE')
+  const canPeerTransfer = hasPermission('PEER_FILE_TRANSFER')
+  const canControlJobs = hasPermission('FILE_JOB_CONTROL')
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -205,13 +207,13 @@ export function FilesPage() {
     queryKey: ['classrooms'],
     queryFn: getClassrooms,
     staleTime: 60_000,
-    enabled: canOperate,
+    enabled: canUpload,
   })
   const pcsQuery = useQuery({
     queryKey: ['pcs'],
     queryFn: getPcs,
     staleTime: 30_000,
-    enabled: canOperate,
+    enabled: canUpload || canPeerTransfer,
   })
   const eligibleTargetPcs = useMemo(() => (pcsQuery.data || []).filter((pc) => pc.online && !pc.brokenNote), [pcsQuery.data])
   const filteredTargetPcs = useMemo(() => {
@@ -230,7 +232,7 @@ export function FilesPage() {
     queryKey: ['file-distribution', 'jobs'],
     queryFn: getRecentDistributionJobs,
     refetchInterval: 10_000,
-    enabled: canOperate,
+    enabled: allowed,
   })
   const jobs = useMemo(() => normalizeRecentJobs(jobsQuery.data), [jobsQuery.data])
 
@@ -247,13 +249,13 @@ export function FilesPage() {
   const statusQuery = useQuery({
     queryKey: ['file-distribution', 'job', selectedJobId],
     queryFn: () => getDistributionJob(selectedJobId as number),
-    enabled: canOperate && selectedJobId != null,
+    enabled: allowed && selectedJobId != null,
     refetchInterval: 5_000,
   })
   const eventsQuery = useQuery({
     queryKey: ['file-distribution', 'events', selectedJobId],
     queryFn: () => getDistributionJobEvents(selectedJobId as number),
-    enabled: canOperate && selectedJobId != null,
+    enabled: allowed && selectedJobId != null,
     refetchInterval: 5_000,
   })
   const jobStatus = useMemo(() => normalizeJobStatus(statusQuery.data), [statusQuery.data])
@@ -443,7 +445,7 @@ export function FilesPage() {
   const selectedIsPeer = (jobStatus?.updatePackageType || selectedSummary?.updatePackageType) === 'PC_COPY'
   const progressValue = uploadPercent(uploadProgress)
 
-  if (!canOperate) {
+  if (!allowed) {
     return <section className="content-section"><PageError message="파일 배포 기능 권한이 없습니다." /></section>
   }
   if (jobsQuery.isLoading && !jobsQuery.data && classroomsQuery.isLoading) {
@@ -461,7 +463,7 @@ export function FilesPage() {
 
       {jobsQuery.isError && jobsQuery.data && <div className="form-error" role="alert">최근 작업 갱신에 실패해 마지막 데이터를 표시하고 있습니다.</div>}
 
-      <form style={{ ...styles.panel, marginBottom: 18 }} onSubmit={submitPeerTransfer}>
+      {canPeerTransfer && <form style={{ ...styles.panel, marginBottom: 18 }} onSubmit={submitPeerTransfer}>
         <header style={styles.panelHeader}>
           <h2 style={styles.panelTitle}><ArrowRightLeft size={17} />PC 간 직접 자료 전송</h2>
           <small style={styles.subtle}>에이전트 업데이트 없음 · SHA-256 검증</small>
@@ -504,9 +506,9 @@ export function FilesPage() {
           <label style={{ ...styles.checkRow, gridColumn: '1 / -1', alignItems: 'flex-start' }}><input type="checkbox" checked={peerAcknowledged} onChange={(event) => setPeerAcknowledged(event.target.checked)} />원본 PC는 읽기 전용으로 사용하고, 대상 PC에서 파일별 SHA-256 검증 후 반영하며, 임시 전송 서버와 방화벽 규칙은 작업 종료 시 자동 제거됨을 확인했습니다.</label>
         </div>
         <div style={styles.actions}><button className="button primary" disabled={!peerSourceMac || !peerTargetMacs.size || !peerSourcePath.trim() || !peerTargetPath.trim() || !peerAcknowledged || actionBusy}><ArrowRightLeft size={16} />직접 전송 시작</button></div>
-      </form>
+      </form>}
 
-      <div style={styles.twoColumn}>
+      {canUpload && <div style={styles.twoColumn}>
         <section style={styles.panel}>
           <header style={styles.panelHeader}><h2 style={styles.panelTitle}><UploadCloud size={17} />파일 업로드</h2><small style={styles.subtle}>청크 {formatBytes(FILE_CHUNK_SIZE)}</small></header>
           <label style={styles.uploadBox}>
@@ -564,7 +566,7 @@ export function FilesPage() {
           </div>
           <div style={styles.actions}><button className="button primary" disabled={!uploadedArtifact || targetMode === '' || (targetMode === 'GROUP' && (groupId === '' || classroomsQuery.isError)) || (targetMode === 'PCS' && (!selectedTargetMacs.size || pcsQuery.isError)) || !deploymentAcknowledged || actionBusy}><UploadCloud size={16} />배포 시작</button></div>
         </form>
-      </div>
+      </div>}
 
       <div className="section-toolbar">
         <div><h2>최근 배포 작업</h2><p>최대 50개 · 10초마다 갱신</p></div>
@@ -581,8 +583,8 @@ export function FilesPage() {
         <header style={styles.panelHeader}>
           <h2 style={styles.panelTitle}>작업 #{selectedJobId} 상세 <span className={`status-badge ${jobStatusTone(jobStatus?.status || selectedSummary?.status)}`}>{jobStatusLabel(jobStatus?.status || selectedSummary?.status)}</span></h2>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="button secondary" disabled={!canRetryJob(jobStatus) || actionBusy} onClick={() => setPendingAction({ type: 'retry', jobId: selectedJobId, peer: selectedIsPeer })}><RotateCw size={15} />실패 재시도</button>
-            <button className="button danger" disabled={!canCancelJob(jobStatus?.status) || actionBusy} onClick={() => setPendingAction({ type: 'cancel', jobId: selectedJobId, peer: selectedIsPeer })}><XCircle size={15} />작업 취소</button>
+            {canControlJobs && <button className="button secondary" disabled={!canRetryJob(jobStatus) || actionBusy} onClick={() => setPendingAction({ type: 'retry', jobId: selectedJobId, peer: selectedIsPeer })}><RotateCw size={15} />실패 재시도</button>}
+            {canControlJobs && <button className="button danger" disabled={!canCancelJob(jobStatus?.status) || actionBusy} onClick={() => setPendingAction({ type: 'cancel', jobId: selectedJobId, peer: selectedIsPeer })}><XCircle size={15} />작업 취소</button>}
           </div>
         </header>
         {statusQuery.isLoading && !statusQuery.data ? <PageLoading label="작업 상태를 불러오는 중입니다." /> : statusQuery.isError && !statusQuery.data ? <PageError message={mutationMessage(statusQuery.error, '작업 상태를 불러오지 못했습니다.')} onRetry={() => void statusQuery.refetch()} /> : jobStatus && <>

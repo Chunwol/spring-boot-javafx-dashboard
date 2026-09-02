@@ -5,19 +5,54 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** 대시보드 운영자에게 개별 부여할 수 있는 화면 단위 기능 권한. */
+/** 대시보드 운영자에게 개별 부여할 수 있는 세부 기능 권한. */
 public enum FeaturePermission {
-    CLASSROOMS,
-    PCS,
-    COMMANDS,
-    SCRIPT_LIBRARY,
-    TOKENS,
-    BROKEN_PCS,
-    NETWORK,
-    REPORTS,
-    FILES,
-    CLASSROOM_SETTINGS,
-    SYSTEM_SETTINGS;
+    CLASSROOM_VIEW,
+    PC_VIEW,
+    REMOTE_SCREEN_VIEW,
+    POWER_ON,
+    REBOOT,
+    SHUTDOWN,
+    SCMATE_STATUS_VIEW,
+    SCMATE_OPERATOR_MODE,
+    SCMATE_BASELINE_UPDATE,
+    SCMATE_PROTECTED_MODE,
+    SCMATE_SYSTEM_RESTORE,
+    SCMATE_RECOVERY_MODULE_INSTALL,
+    AGENT_UPDATE,
+    COMMAND_VIEW,
+    COMMAND_ISSUE,
+    COMMAND_CANCEL,
+    COMMAND_RESULT_DOWNLOAD,
+    SCRIPT_LIBRARY_VIEW,
+    SCRIPT_CREATE_EDIT,
+    SCRIPT_DELETE,
+    SCRIPT_EXECUTE,
+    TOKEN_VIEW,
+    AGENT_REGISTRATION_TOGGLE,
+    INSTALL_KEY_ROTATE,
+    AGENT_TOKEN_REVOKE,
+    AGENT_DELETE,
+    AGENT_CONFIG_DOWNLOAD,
+    BROKEN_PC_VIEW,
+    BROKEN_PC_REGISTER_EDIT,
+    BROKEN_PC_CLEAR,
+    NETWORK_VIEW,
+    REPORT_VIEW,
+    REPORT_EXPORT,
+    REPORT_REGENERATE,
+    FILE_DISTRIBUTION_VIEW,
+    FILE_UPLOAD_DISTRIBUTE,
+    FILE_JOB_CONTROL,
+    FILE_ROLLBACK,
+    PEER_FILE_TRANSFER,
+    CLASSROOM_SETTINGS_VIEW,
+    CLASSROOM_EDIT,
+    IP_RANGE_EDIT,
+    TEACHER_PC_EDIT,
+    IP_RANGE_PC_CONTROL,
+    SYSTEM_SETTINGS_VIEW,
+    ALERT_SETTINGS_EDIT;
 
     public String authority() {
         return "PERM_" + name();
@@ -27,8 +62,14 @@ public enum FeaturePermission {
         Set<FeaturePermission> permissions = EnumSet.noneOf(FeaturePermission.class);
         if (raw == null || raw.isBlank()) return permissions;
         for (String value : raw.split(",")) {
+            String normalized = value.trim().toUpperCase(Locale.ROOT);
+            Set<FeaturePermission> legacy = legacyPermissions(normalized);
+            if (legacy != null) {
+                permissions.addAll(legacy);
+                continue;
+            }
             try {
-                permissions.add(valueOf(value.trim().toUpperCase(Locale.ROOT)));
+                permissions.add(valueOf(normalized));
             } catch (IllegalArgumentException ignored) {
                 // Unknown values from a newer deployment are ignored safely.
             }
@@ -52,5 +93,29 @@ public enum FeaturePermission {
             }
         }
         return permissions;
+    }
+
+    /** f9fae10 이전 화면 단위 권한을 동일하거나 더 좁지 않은 세부 권한으로 변환한다. */
+    private static Set<FeaturePermission> legacyPermissions(String code) {
+        return switch (code) {
+            case "CLASSROOMS" -> EnumSet.of(CLASSROOM_VIEW, REMOTE_SCREEN_VIEW, POWER_ON, REBOOT, SHUTDOWN);
+            case "PCS" -> EnumSet.of(PC_VIEW, REMOTE_SCREEN_VIEW, POWER_ON, REBOOT, SHUTDOWN,
+                    SCMATE_STATUS_VIEW, SCMATE_OPERATOR_MODE, SCMATE_BASELINE_UPDATE, SCMATE_PROTECTED_MODE,
+                    SCMATE_SYSTEM_RESTORE, SCMATE_RECOVERY_MODULE_INSTALL, AGENT_UPDATE);
+            case "COMMANDS" -> EnumSet.of(COMMAND_VIEW, COMMAND_ISSUE, COMMAND_CANCEL, COMMAND_RESULT_DOWNLOAD,
+                    REMOTE_SCREEN_VIEW);
+            case "SCRIPT_LIBRARY" -> EnumSet.of(SCRIPT_LIBRARY_VIEW, SCRIPT_CREATE_EDIT, SCRIPT_DELETE, SCRIPT_EXECUTE);
+            case "TOKENS" -> EnumSet.of(TOKEN_VIEW, AGENT_REGISTRATION_TOGGLE, INSTALL_KEY_ROTATE,
+                    AGENT_TOKEN_REVOKE, AGENT_DELETE, AGENT_CONFIG_DOWNLOAD);
+            case "BROKEN_PCS" -> EnumSet.of(BROKEN_PC_VIEW, BROKEN_PC_REGISTER_EDIT, BROKEN_PC_CLEAR);
+            case "NETWORK" -> EnumSet.of(NETWORK_VIEW);
+            case "REPORTS" -> EnumSet.of(REPORT_VIEW, REPORT_EXPORT, REPORT_REGENERATE);
+            case "FILES" -> EnumSet.of(FILE_DISTRIBUTION_VIEW, FILE_UPLOAD_DISTRIBUTE, FILE_JOB_CONTROL,
+                    FILE_ROLLBACK, PEER_FILE_TRANSFER);
+            case "CLASSROOM_SETTINGS" -> EnumSet.of(CLASSROOM_SETTINGS_VIEW, CLASSROOM_EDIT, IP_RANGE_EDIT,
+                    TEACHER_PC_EDIT, IP_RANGE_PC_CONTROL);
+            case "SYSTEM_SETTINGS" -> EnumSet.of(SYSTEM_SETTINGS_VIEW, ALERT_SETTINGS_EDIT);
+            default -> null;
+        };
     }
 }

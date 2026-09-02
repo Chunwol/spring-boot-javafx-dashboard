@@ -9,6 +9,7 @@ import com.example.backend.service.agent.AgentTokenService;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.service.command.CommandLifecycleService;
 import com.example.backend.service.command.CommandService;
+import com.example.backend.security.FeaturePermissionGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -55,6 +56,7 @@ public class AdminController {
     private final AdminService adminService;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final FeaturePermissionGuard featurePermissionGuard;
 
     @PutMapping("/change-password")
     @PreAuthorize("isAuthenticated()")
@@ -80,7 +82,7 @@ public class AdminController {
     }
 
     @PostMapping("/enqueue")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "PC 명령 단순 큐",
         description = "단동 PC 단나에 명령(RESTORE, WAKEUP 등)을 큐에 넣습니다."
@@ -90,6 +92,7 @@ public class AdminController {
             @Parameter(description = "대상 PC의 MAC 주소", example = "00:1A:2B:3C:4D:5E") @RequestParam String mac,
             @Parameter(description = "명령 종류", example = "RESTORE") @RequestParam String type,
             @Parameter(description = "스크립트 URL (선택)") @RequestParam(required = false) String scriptUrl) {
+        featurePermissionGuard.requireCommand(type);
         var req = new CommandRequestDto();
         req.setMacAddress(mac);
         req.setType(type);
@@ -99,7 +102,7 @@ public class AdminController {
     }
 
     @PostMapping("/group/wol")
-    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_POWER_ON')")
     @Operation(
         summary = "그룹 WOL 전송",
         description = "지정한 강의실 그룹의 온라인 리더 에이전트를 통해 Wake-on-LAN 패킷을 그룹 전체에 전송합니다."
@@ -121,7 +124,7 @@ public class AdminController {
     }
 
     @PutMapping("/agents/{mac}/revoke")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_TOKEN_REVOKE')")
     @Operation(
         summary = "에이전트 토큰 폐기",
         description = "지정한 MAC 주소의 에이전트 토큰을 즉시 폐기합니다."
@@ -137,14 +140,14 @@ public class AdminController {
     }
 
     @GetMapping("/install-key")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKEN_VIEW')")
     @Operation(summary = "에이전트 설치키 조회", description = "관리자 화면에서 복사/배포할 현재 설치키와 미리보기를 반환합니다.")
     public ResponseEntity<Map<String, Object>> findInstallKey() {
         return ResponseEntity.ok(agentInstallKeyService.describeInstallKey());
     }
 
     @PutMapping("/install-key")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_INSTALL_KEY_ROTATE')")
     @Operation(summary = "에이전트 설치키 변경", description = "새 설치키를 발급하고 기존 설치키로는 신규 등록되지 않도록 합니다.")
     public ResponseEntity<Map<String, Object>> rotateInstallKey() {
         Map<String, Object> resp = agentInstallKeyService.rotateInstallKey();
@@ -154,7 +157,7 @@ public class AdminController {
     }
 
     @GetMapping("/agents")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKEN_VIEW')")
     @Operation(summary = "등록된 에이전트 목록", description = "등록된 모든 PC 에이전트 목록과 토큰 상태를 반환합니다. pc_master에 없는 고아 토큰도 포함됩니다.")
     @ApiResponse(responseCode = "200", description = "에이전트 목록 조회 성공")
     @ApiResponse(responseCode = "401", description = "인증 실패")
@@ -163,7 +166,7 @@ public class AdminController {
     }
 
     @DeleteMapping("/agents/{mac}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_DELETE')")
     @Operation(summary = "에이전트 강제 삭제", description = "PC 레코드와 토큰을 모두 삭제합니다.")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable String mac) {
         adminService.delete(mac);
@@ -171,7 +174,7 @@ public class AdminController {
     }
 
     @PutMapping("/agents/bulk/revoke")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_TOKEN_REVOKE')")
     @Operation(summary = "에이전트 토큰 일괄 폐기", description = "선택한 에이전트의 모든 토큰을 한 요청에서 폐기합니다.")
     public ResponseEntity<Map<String, Object>> revokeTokens(@RequestBody Map<String, List<String>> body) {
         Set<String> macs = normalizeMacs(body.get("macAddresses"));
@@ -182,7 +185,7 @@ public class AdminController {
     }
 
     @PostMapping("/agents/bulk/delete")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_DELETE')")
     @Operation(summary = "에이전트 일괄 삭제", description = "선택한 PC 레코드와 토큰을 한 요청에서 삭제합니다.")
     public ResponseEntity<Map<String, Object>> deleteAgents(@RequestBody Map<String, List<String>> body) {
         Set<String> macs = normalizeMacs(body.get("macAddresses"));

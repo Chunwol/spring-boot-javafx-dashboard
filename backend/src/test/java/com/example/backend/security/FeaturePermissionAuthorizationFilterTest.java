@@ -27,7 +27,7 @@ class FeaturePermissionAuthorizationFilterTest {
 
     @Test
     void rejectsAnApiFromAnUncheckedFeature() throws Exception {
-        authenticate("PERM_NETWORK");
+        authenticate("PERM_NETWORK_VIEW");
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/reports/monthly");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
@@ -40,8 +40,33 @@ class FeaturePermissionAuthorizationFilterTest {
 
     @Test
     void permitsTheApiForAnAssignedFeature() throws Exception {
-        authenticate("PERM_NETWORK");
+        authenticate("PERM_NETWORK_VIEW");
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/dashboard/traffic");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void viewPermissionCannotCallAWriteActionInTheSameModule() throws Exception {
+        authenticate("PERM_TOKEN_VIEW");
+        MockHttpServletRequest request = new MockHttpServletRequest("PUT", "/api/v1/admin/install-key");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        verify(chain, never()).doFilter(request, response);
+    }
+
+    @Test
+    void matchingDetailedWritePermissionPermitsTheAction() throws Exception {
+        authenticate("PERM_INSTALL_KEY_ROTATE");
+        MockHttpServletRequest request = new MockHttpServletRequest("PUT", "/api/v1/admin/install-key");
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = mock(FilterChain.class);
 

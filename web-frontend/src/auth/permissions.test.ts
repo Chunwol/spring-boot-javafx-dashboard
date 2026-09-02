@@ -10,8 +10,10 @@ describe('feature permissions', () => {
     expect(normalizePermissions('USER', undefined)).toEqual(DEFAULT_FEATURE_PERMISSIONS)
   })
 
-  it('keeps an explicit operator selection exact', () => {
-    expect(normalizePermissions('USER', ['FILES', 'COMMANDS', 'UNKNOWN'])).toEqual(['FILES', 'COMMANDS'])
+  it('expands legacy modules and keeps detailed selections exact', () => {
+    expect(normalizePermissions('USER', ['FILES', 'COMMANDS', 'UNKNOWN']))
+      .toContain('FILE_UPLOAD_DISTRIBUTE')
+    expect(normalizePermissions('USER', ['POWER_ON', 'UNKNOWN'])).toEqual(['POWER_ON'])
     expect(normalizePermissions('USER', [])).toEqual([])
   })
 })

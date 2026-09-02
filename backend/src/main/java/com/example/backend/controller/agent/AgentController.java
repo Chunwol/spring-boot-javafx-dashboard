@@ -77,7 +77,7 @@ public class AgentController {
      * 에이전트 등록 허용 여부 조회. (ADMIN 전용)
      */
     @GetMapping("/registration-status")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKEN_VIEW')")
     @Operation(summary = "에이전트 등록 허용 상태 조회", description = "현재 에이전트 등록이 허용 상태인지 여부를 반환합니다.")
     @ApiResponse(responseCode = "200", description = "등록 상태 조회 성공")
     public ResponseEntity<Map<String, Object>> getRegistrationStatus() {
@@ -90,7 +90,7 @@ public class AgentController {
      * 윈도우 이미지 배포 시 동일 MAC으로 100대가 동시 등록되는 것을 막는 용도로 사용한다.
      */
     @PutMapping("/registration-status")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_REGISTRATION_TOGGLE')")
     @Operation(
         summary = "에이전트 등록 허용/차단",
         description = "에이전트 등록을 활성화하거나 비활성화합니다. " +
@@ -111,7 +111,7 @@ public class AgentController {
      * 현재 서버 URL, 설치키, 하트비트 간격 등 에이전트 운영에 필요한 설정을 JSON으로 제공한다.
      */
     @GetMapping("/config/download")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_TOKENS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_AGENT_CONFIG_DOWNLOAD')")
     @Operation(
         summary = "에이전트 config.json 다운로드",
         description = "에이전트 설치에 필요한 서버 URL·설치키·하트비트 설정을 포함한 config.json을 다운로드합니다."

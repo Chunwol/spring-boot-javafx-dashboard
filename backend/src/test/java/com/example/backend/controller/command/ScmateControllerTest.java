@@ -3,6 +3,7 @@ package com.example.backend.controller.command;
 import com.example.backend.common.exception.ConflictException;
 import com.example.backend.dto.command.ScmateActionRequestDto;
 import com.example.backend.service.command.ScmateWorkflowService;
+import com.example.backend.security.FeaturePermissionGuard;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,6 +20,7 @@ import static org.mockito.Mockito.when;
 class ScmateControllerTest {
 
     @Mock ScmateWorkflowService scmateWorkflowService;
+    @Mock FeaturePermissionGuard featurePermissionGuard;
     @InjectMocks ScmateController controller;
 
     @Test

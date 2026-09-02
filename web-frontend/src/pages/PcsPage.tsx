@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Monitor, Power, PowerOff, RefreshCw, RotateCw, Search, Shield, UploadCloud, Wrench } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
+import { scmatePermission } from '../auth/permissions'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
 import { useToast } from '../components/ui/ToastProvider'
@@ -67,8 +68,16 @@ function commandDescription(pending: PendingCommand | null) {
 export function PcsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { isAdmin, canWrite } = useAuth()
-  const canOperate = isAdmin || canWrite
+  const { hasPermission } = useAuth()
+  const canPowerOn = hasPermission('POWER_ON')
+  const canReboot = hasPermission('REBOOT')
+  const canShutdown = hasPermission('SHUTDOWN')
+  const canRemote = hasPermission('REMOTE_SCREEN_VIEW')
+  const canPcOperations = hasPermission('COMMAND_ISSUE') && hasPermission('FILE_UPLOAD_DISTRIBUTE')
+  const canAgentUpdate = hasPermission('AGENT_UPDATE') && hasPermission('FILE_DISTRIBUTION_VIEW')
+  const canScmate = ['SCMATE_STATUS_VIEW', 'SCMATE_OPERATOR_MODE', 'SCMATE_BASELINE_UPDATE',
+    'SCMATE_PROTECTED_MODE', 'SCMATE_SYSTEM_RESTORE', 'SCMATE_RECOVERY_MODULE_INSTALL']
+    .some((permission) => hasPermission(permission as Parameters<typeof hasPermission>[0]))
   const { showToast } = useToast()
   const [filters, setFilters] = useState<PcFilters>({ search: '', groupId: 'all', state: 'all', role: 'all', scmate: 'all' })
   const [selectedMacs, setSelectedMacs] = useState<Set<string>>(() => new Set())
@@ -151,8 +160,9 @@ export function PcsPage() {
   })
 
   const openCommand = (type: PcPowerCommand, candidates: PcStatus[], bulk: boolean) => {
-    if (!canOperate) {
-      showToast('PC 관리 기능을 실행할 권한이 없습니다.', 'error')
+    const permitted = type === 'PCON' ? canPowerOn : type === 'REBOOT' ? canReboot : canShutdown
+    if (!permitted) {
+      showToast(`${commandLabel(type)} 권한이 없습니다.`, 'error')
       return
     }
     const preview = commandTargets(candidates, type)
@@ -235,11 +245,11 @@ export function PcsPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 54, padding: '8px 0', borderTop: '1px solid var(--border)' }}>
         <strong style={{ fontSize: 12 }}>{selectedPcs.length > 0 ? `${selectedPcs.length}대 선택` : `검색 결과 ${filteredPcs.length}대`}</strong>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="button secondary" disabled={!canOperate || !selectedPcs.some((pc) => pc.online && !pc.brokenNote)} onClick={() => setOperationTargets(selectedPcs)}><Wrench size={16} />선택 작업</button>
-          <button className="button secondary" disabled={!canOperate || !selectedRolloutMacs.length} onClick={() => navigate('/files', { state: { targetMacs: selectedRolloutMacs } })}><UploadCloud size={16} />선택 에이전트 배포</button>
-          <button className="button secondary" disabled={!canOperate || candidateCommands.powerOn === 0 || commandMutation.isPending} onClick={() => openCommand('PCON', commandCandidates, true)}><Power size={16} />{candidateLabel} 켜기</button>
-          <button className="button danger" disabled={!canOperate || candidateCommands.reboot === 0 || commandMutation.isPending} onClick={() => openCommand('REBOOT', commandCandidates, true)}><RotateCw size={16} />{candidateLabel} 재시작</button>
-          <button className="button danger" disabled={!canOperate || candidateCommands.shutdown === 0 || commandMutation.isPending} onClick={() => openCommand('SHUTDOWN', commandCandidates, true)}><PowerOff size={16} />{candidateLabel} 종료</button>
+          {canPcOperations && <button className="button secondary" disabled={!selectedPcs.some((pc) => pc.online && !pc.brokenNote)} onClick={() => setOperationTargets(selectedPcs)}><Wrench size={16} />선택 작업</button>}
+          {canAgentUpdate && <button className="button secondary" disabled={!selectedRolloutMacs.length} onClick={() => navigate('/files', { state: { targetMacs: selectedRolloutMacs } })}><UploadCloud size={16} />선택 에이전트 배포</button>}
+          {canPowerOn && <button className="button secondary" disabled={candidateCommands.powerOn === 0 || commandMutation.isPending} onClick={() => openCommand('PCON', commandCandidates, true)}><Power size={16} />{candidateLabel} 켜기</button>}
+          {canReboot && <button className="button danger" disabled={candidateCommands.reboot === 0 || commandMutation.isPending} onClick={() => openCommand('REBOOT', commandCandidates, true)}><RotateCw size={16} />{candidateLabel} 재시작</button>}
+          {canShutdown && <button className="button danger" disabled={candidateCommands.shutdown === 0 || commandMutation.isPending} onClick={() => openCommand('SHUTDOWN', commandCandidates, true)}><PowerOff size={16} />{candidateLabel} 종료</button>}
         </div>
       </div>
 
@@ -270,19 +280,19 @@ export function PcsPage() {
                     <td>{pc.bundleVersion || '-'}</td>
                     <td>{formatLastSeen(pc.lastSeen)}</td>
                     <td>
-                      {canOperate && selectable ? (
+                      {selectable ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                          {state === 'offline' && pc.groupId != null ? (
+                          {state === 'offline' && pc.groupId != null && canPowerOn ? (
                             <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => openCommand('PCON', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 켜기`} title="PC 켜기"><Power size={15} /></button>
                           ) : state === 'online' ? (
                             <>
-                              <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => openCommand('REBOOT', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 재시작`} title="재시작"><RotateCw size={15} /></button>
-                              <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setOperationTargets([pc])} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 작업`} title="PC 작업"><Wrench size={15} /></button>
-                              <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setRemoteTarget(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 원격제어`} title="원격제어"><Monitor size={15} /></button>
-                              <button className="icon-button" style={{ width: 30, height: 30, color: 'var(--red)' }} onClick={() => openCommand('SHUTDOWN', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 종료`} title="종료"><PowerOff size={15} /></button>
+                              {canReboot && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => openCommand('REBOOT', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 재시작`} title="재시작"><RotateCw size={15} /></button>}
+                              {canPcOperations && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setOperationTargets([pc])} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 작업`} title="PC 작업"><Wrench size={15} /></button>}
+                              {canRemote && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setRemoteTarget(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 원격제어`} title="원격제어"><Monitor size={15} /></button>}
+                              {canShutdown && <button className="icon-button" style={{ width: 30, height: 30, color: 'var(--red)' }} onClick={() => openCommand('SHUTDOWN', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 종료`} title="종료"><PowerOff size={15} /></button>}
                             </>
                           ) : '-'}
-                          {canOperate && ((pcRole(pc) === 'teacher' && pc.groupId != null) || allowedScmateActions(pc).length > 0) && (
+                          {canScmate && ((pcRole(pc) === 'teacher' && pc.groupId != null) || allowedScmateActions(pc).length > 0) && (
                             <button className="icon-button scmate-action-button" style={{ width: 30, height: 30 }} onClick={() => openScmate(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} SCMATE 작업`} title="SCMATE 작업"><Shield size={15} /></button>
                           )}
                         </span>
@@ -318,7 +328,7 @@ export function PcsPage() {
       />
       {operationTargets.length > 0 && <PcOperationsDialog targets={operationTargets} onClose={() => setOperationTargets([])} />}
       {remoteTarget && <RemoteControlDialog pc={remoteTarget} onClose={() => setRemoteTarget(null)} />}
-      {scmateTarget && <ScmateControlDialog pc={scmateTarget} classroomPcs={scmateClassroomPcs} canAct={canOperate} onClose={() => setScmateTargetMac(null)} />}
+      {scmateTarget && <ScmateControlDialog pc={scmateTarget} classroomPcs={scmateClassroomPcs} canAct={canScmate} canPerform={(action) => hasPermission(scmatePermission(action))} onClose={() => setScmateTargetMac(null)} />}
     </section>
   )
 }

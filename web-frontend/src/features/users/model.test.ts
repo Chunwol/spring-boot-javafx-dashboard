@@ -14,7 +14,7 @@ function user(overrides: Partial<ManagedUser> = {}): ManagedUser {
     username: 'admin',
     email: 'admin@example.com',
     role: 'ADMIN',
-    permissions: ['CLASSROOMS'],
+    permissions: ['CLASSROOM_VIEW'],
     active: true,
     failedLoginAttempts: 0,
     loggedIn: false,

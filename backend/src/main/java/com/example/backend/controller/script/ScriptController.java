@@ -148,7 +148,7 @@ public class ScriptController {
      * 스크립트 파일 업로드
      */
     @PostMapping(value = "/scripts", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "스크립트 업로드",
         description = "PowerShell 및 다른 스크립트 파일을 업로드합니다. SHA256 체크섬도 동시에 진행됩니다."
@@ -304,7 +304,7 @@ public class ScriptController {
      * - 재전송(resume)을 위해 uploadId 단위 메타데이터를 유지한다.
      */
     @PostMapping(value = "/file-chunks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "대용량 파일 청크 업로드",
         description = "파일을 여러 청크로 나누어 업로드합니다. 각 청크는 순번(chunkIndex)과 전체 청크 수(totalChunks), 파일 식별자(uploadId)와 함께 전송되어야 합니다."
@@ -437,7 +437,7 @@ public class ScriptController {
      * - DB/스토리지에 최종 파일 및 매니페스트 기록
      */
     @PostMapping("/file-chunks/assemble")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "청크 조립 및 매니페스트 생성",
         description = "모든 청크 업로드 후 호출. 서버가 청크를 병합하여 최종 파일을 생성하고, 전체 해시 및 매니페스트를 기록합니다."
@@ -626,7 +626,7 @@ public class ScriptController {
      * X-Accel-Redirect 활성화 시 Nginx가 직접 서빙한다.
      */
     @GetMapping("/agent/uploads/{id}/download")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "수집 파일 다운로드", description = "에이전트가 업로드한 수집 파일을 관리자가 다운로드합니다.")
     public ResponseEntity<?> downloadCollected(@PathVariable Long id,
                                                @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) {

@@ -220,8 +220,9 @@ function MonthlyRows({ reports, canWrite, onRegenerate }: {
 
 export function ReportsPage() {
   const queryClient = useQueryClient()
-  const { isAdmin, canWrite } = useAuth()
-  const canOperate = isAdmin || canWrite
+  const { hasPermission } = useAuth()
+  const canRegenerate = hasPermission('REPORT_REGENERATE')
+  const canExport = hasPermission('REPORT_EXPORT')
   const { showToast } = useToast()
   const initialFilters = useMemo(() => defaultReportFilters(), [])
   const [draftFilters, setDraftFilters] = useState<ReportFilters>(initialFilters)
@@ -349,9 +350,9 @@ export function ReportsPage() {
             <option value="MONTHLY">월간 형식</option>
           </select>
         </label>
-        <button className="button secondary" type="button" onClick={() => pdfMutation.mutate()} disabled={pdfMutation.isPending || Boolean(filterError)}>
+        {canExport && <button className="button secondary" type="button" onClick={() => pdfMutation.mutate()} disabled={pdfMutation.isPending || Boolean(filterError)}>
           <Download size={16} />{pdfMutation.isPending ? '생성 중' : '전체 강의실 PDF'}
-        </button>
+        </button>}
       </form>
 
       {filterError && <div className="form-error" role="alert" style={styles.inlineError}>{filterError}</div>}
@@ -479,15 +480,15 @@ export function ReportsPage() {
             <h2 id="monthly-report-title" style={styles.sectionTitle}><CalendarDays size={16} />월간 보고서</h2>
             <p style={styles.subtext}>월별 운영 집계 스냅샷</p>
           </div>
-          {canOperate && (
+          {canRegenerate && (
             <div style={styles.monthlyActions}>
               <label style={{ ...styles.field, minWidth: 142 }}>
                 <span style={styles.fieldLabel}>재생성 대상 월</span>
                 <input style={styles.input} type="month" value={regenerateMonth} onChange={(event) => setRegenerateMonth(event.target.value)} />
               </label>
-              <button className="button secondary" onClick={() => setPendingRegenerate(regenerateMonth)} disabled={!/^\d{4}-\d{2}$/.test(regenerateMonth)}>
+              {canRegenerate && <button className="button secondary" onClick={() => setPendingRegenerate(regenerateMonth)} disabled={!/^\d{4}-\d{2}$/.test(regenerateMonth)}>
                 <RotateCcw size={15} />재생성
-              </button>
+              </button>}
             </div>
           )}
         </header>
@@ -500,7 +501,7 @@ export function ReportsPage() {
         ) : (
           <>
             {monthlyQuery.isError && <div className="form-error" role="alert">월간 보고서 갱신에 실패해 기존 데이터를 표시합니다.</div>}
-            <MonthlyRows reports={monthlyReports} canWrite={canOperate} onRegenerate={setPendingRegenerate} />
+            <MonthlyRows reports={monthlyReports} canWrite={canRegenerate} onRegenerate={setPendingRegenerate} />
           </>
         )}
       </section>

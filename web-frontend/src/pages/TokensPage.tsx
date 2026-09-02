@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clipboard, Download, Eye, EyeOff, KeyRound, RefreshCw, RotateCw, Search, ShieldOff, Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { useAuth } from '../auth/AuthProvider'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
 import { useToast } from '../components/ui/ToastProvider'
 import { tokenApi, type AgentAdminView } from '../features/tokens/api'
@@ -14,6 +15,12 @@ function formatDate(value?: string | null) {
 }
 
 export function TokensPage() {
+  const { hasPermission } = useAuth()
+  const canToggleRegistration = hasPermission('AGENT_REGISTRATION_TOGGLE')
+  const canRotateKey = hasPermission('INSTALL_KEY_ROTATE')
+  const canRevoke = hasPermission('AGENT_TOKEN_REVOKE')
+  const canDelete = hasPermission('AGENT_DELETE')
+  const canDownloadConfig = hasPermission('AGENT_CONFIG_DOWNLOAD')
   const queryClient = useQueryClient()
   const { showToast } = useToast()
   const [search, setSearch] = useState('')
@@ -137,9 +144,9 @@ export function TokensPage() {
       {(statusQuery.isError || keyQuery.isError || agentsQuery.isError) && <div className="form-error" role="alert">새 데이터 갱신에 실패해 마지막으로 받은 토큰 정보를 표시하고 있습니다.</div>}
 
       <div className="summary-grid summary-grid-3">
-        <article className="summary-panel"><span className="summary-icon"><KeyRound size={19} /></span><div><small>설치 키</small><strong>{showInstallKey ? installKey : keyQuery.data?.keyPreview || '미설정'}</strong></div><button className="icon-button bordered" onClick={() => setShowInstallKey((value) => !value)} aria-label={showInstallKey ? '설치 키 숨기기' : '설치 키 보기'}>{showInstallKey ? <EyeOff size={15} /> : <Eye size={15} />}</button><button className="icon-button bordered" onClick={() => void copyInstallKey()} aria-label="설치 키 복사"><Clipboard size={15} /></button><button className="button secondary" onClick={() => setPending({ kind: 'rotate' })}><RotateCw size={15} />재발급</button></article>
-        <article className="summary-panel"><div><small>신규 에이전트 등록</small><strong>{statusQuery.data?.enabled ? '허용 중' : '차단됨'}</strong></div><label className="switch"><input type="checkbox" checked={Boolean(statusQuery.data?.enabled)} disabled={toggleMutation.isPending} onChange={(event) => toggleMutation.mutate(event.target.checked)} aria-label="신규 에이전트 등록 허용" /><span /></label></article>
-        <article className="summary-panel"><div><small>활성 토큰</small><strong>{allAgents.filter((agent) => agent.tokenActive).length} / {allAgents.length}</strong></div><button className="button secondary" onClick={() => downloadMutation.mutate()} disabled={downloadMutation.isPending}><Download size={15} />설정 다운로드</button></article>
+        <article className="summary-panel"><span className="summary-icon"><KeyRound size={19} /></span><div><small>설치 키</small><strong>{showInstallKey ? installKey : keyQuery.data?.keyPreview || '미설정'}</strong></div><button className="icon-button bordered" onClick={() => setShowInstallKey((value) => !value)} aria-label={showInstallKey ? '설치 키 숨기기' : '설치 키 보기'}>{showInstallKey ? <EyeOff size={15} /> : <Eye size={15} />}</button><button className="icon-button bordered" onClick={() => void copyInstallKey()} aria-label="설치 키 복사"><Clipboard size={15} /></button>{canRotateKey && <button className="button secondary" onClick={() => setPending({ kind: 'rotate' })}><RotateCw size={15} />재발급</button>}</article>
+        <article className="summary-panel"><div><small>신규 에이전트 등록</small><strong>{statusQuery.data?.enabled ? '허용 중' : '차단됨'}</strong></div>{canToggleRegistration && <label className="switch"><input type="checkbox" checked={Boolean(statusQuery.data?.enabled)} disabled={toggleMutation.isPending} onChange={(event) => toggleMutation.mutate(event.target.checked)} aria-label="신규 에이전트 등록 허용" /><span /></label>}</article>
+        <article className="summary-panel"><div><small>활성 토큰</small><strong>{allAgents.filter((agent) => agent.tokenActive).length} / {allAgents.length}</strong></div>{canDownloadConfig && <button className="button secondary" onClick={() => downloadMutation.mutate()} disabled={downloadMutation.isPending}><Download size={15} />설정 다운로드</button>}</article>
       </div>
 
       <div className="section-toolbar">
@@ -149,8 +156,8 @@ export function TokensPage() {
           <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} aria-label="강의실 필터"><option value="all">전체 강의실</option>{groups.map((group) => <option key={group} value={group}>{group}</option>)}</select>
           <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} aria-label="에이전트 상태 필터"><option value="all">전체 상태</option><option value="online">온라인</option><option value="offline">오프라인</option></select>
           <select value={tokenFilter} onChange={(event) => setTokenFilter(event.target.value)} aria-label="토큰 상태 필터"><option value="all">전체 토큰</option><option value="active">활성</option><option value="revoked">폐기됨</option></select>
-          <button className="button secondary" disabled={!selectedAgents.length || actionMutation.isPending} onClick={() => setPending({ kind: 'revoke', agents: selectedAgents })}><ShieldOff size={15} />선택 폐기</button>
-          <button className="button danger" disabled={!selectedAgents.length || actionMutation.isPending} onClick={() => setPending({ kind: 'delete', agents: selectedAgents })}><Trash2 size={15} />선택 삭제</button>
+          {canRevoke && <button className="button secondary" disabled={!selectedAgents.length || actionMutation.isPending} onClick={() => setPending({ kind: 'revoke', agents: selectedAgents })}><ShieldOff size={15} />선택 폐기</button>}
+          {canDelete && <button className="button danger" disabled={!selectedAgents.length || actionMutation.isPending} onClick={() => setPending({ kind: 'delete', agents: selectedAgents })}><Trash2 size={15} />선택 삭제</button>}
         </div>
       </div>
       {!agents.length ? <EmptyState message="조건에 맞는 에이전트가 없습니다." /> : (
@@ -163,7 +170,7 @@ export function TokensPage() {
             <td><span className={`status-badge ${agent.status?.toUpperCase() === 'ONLINE' ? 'online' : 'offline'}`}>{agent.status || 'OFFLINE'}</span></td>
             <td><span className={`status-badge ${agent.tokenActive ? 'online' : 'warning'}`}>{agent.tokenActive ? '활성' : '폐기됨'}</span></td>
             <td>{formatDate(agent.tokenLastUsedAt || agent.lastSeen)}</td>
-            <td><div className="row-actions"><button className="icon-button bordered" disabled={!agent.tokenActive} onClick={() => setPending({ kind: 'revoke', agents: [agent] })} title="토큰 폐기" aria-label={`${agent.pcName || agent.macAddress} 토큰 폐기`}><ShieldOff size={16} /></button><button className="icon-button danger-icon" onClick={() => setPending({ kind: 'delete', agents: [agent] })} title="에이전트 삭제" aria-label={`${agent.pcName || agent.macAddress} 삭제`}><Trash2 size={16} /></button></div></td>
+            <td><div className="row-actions">{canRevoke && <button className="icon-button bordered" disabled={!agent.tokenActive} onClick={() => setPending({ kind: 'revoke', agents: [agent] })} title="토큰 폐기" aria-label={`${agent.pcName || agent.macAddress} 토큰 폐기`}><ShieldOff size={16} /></button>}{canDelete && <button className="icon-button danger-icon" onClick={() => setPending({ kind: 'delete', agents: [agent] })} title="에이전트 삭제" aria-label={`${agent.pcName || agent.macAddress} 삭제`}><Trash2 size={16} /></button>}</div></td>
           </tr>)}
         </tbody></table></div>
       )}

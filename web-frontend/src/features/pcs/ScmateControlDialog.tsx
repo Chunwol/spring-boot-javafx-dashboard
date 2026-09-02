@@ -30,6 +30,7 @@ interface Props {
   pc: PcStatus
   classroomPcs?: PcStatus[]
   canAct: boolean
+  canPerform?: (action: ScmateAction) => boolean
   onClose: () => void
 }
 
@@ -86,7 +87,7 @@ export function ScmateStatusBadge({ pc, busy = false }: { pc: PcStatus; busy?: b
   )
 }
 
-export function ScmateControlDialog({ pc, classroomPcs, canAct, onClose }: Props) {
+export function ScmateControlDialog({ pc, classroomPcs, canAct, canPerform, onClose }: Props) {
   const queryClient = useQueryClient()
   const { showToast } = useToast()
   const [pendingAction, setPendingAction] = useState<ScmateAction | null>(null)
@@ -104,7 +105,8 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, onClose }: Props
     [classroomMode, classroomPreviews, pc],
   )
   const refreshAllowed = allowedActions.includes('REFRESH_STATUS_DETAIL')
-  const actionButtons = allowedActions.filter((action) => action !== 'REFRESH_STATUS_DETAIL')
+  const actionButtons = allowedActions.filter((action) => action !== 'REFRESH_STATUS_DETAIL' && (!canPerform || canPerform(action)))
+  const canRefresh = canAct && (!canPerform || canPerform('REFRESH_STATUS_DETAIL'))
   const showsRecoveryPoint = actionButtons.some(usesRecoveryPoint)
 
   const actionMutation = useMutation({
@@ -167,7 +169,7 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, onClose }: Props
             <div className="scmate-state-panel" aria-live="polite">
               <div className="scmate-state-heading">
                 <ScmateStatusBadge pc={pc} busy={actionMutation.isPending} />
-                {canAct && refreshAllowed && (
+                {canRefresh && refreshAllowed && (
                   <button type="button" className="button secondary scmate-refresh-button" disabled={actionMutation.isPending} onClick={() => actionMutation.mutate({ action: 'REFRESH_STATUS_DETAIL', point: recoveryPoint })}>
                     <RefreshCw size={15} className={actionMutation.isPending ? 'spin-icon' : ''} /><span>상세 상태 새로고침</span><small>{classroomPreviews.get('REFRESH_STATUS_DETAIL')?.targets.length || 0}대</small>
                   </button>
@@ -179,7 +181,7 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, onClose }: Props
             <div className={`scmate-state-panel scmate-${state.tone}`} aria-live="polite">
               <div className="scmate-state-heading">
                 <ScmateStatusBadge pc={pc} busy={actionMutation.isPending} />
-                {canAct && refreshAllowed && (
+                {canRefresh && refreshAllowed && (
                   <button type="button" className="button secondary scmate-refresh-button" disabled={actionMutation.isPending} onClick={() => actionMutation.mutate({ action: 'REFRESH_STATUS_DETAIL', point: recoveryPoint })}>
                     <RefreshCw size={15} className={actionMutation.isPending ? 'spin-icon' : ''} /><span>상세 상태 새로고침</span>
                   </button>

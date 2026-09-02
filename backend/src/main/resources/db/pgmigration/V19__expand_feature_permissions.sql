@@ -1,0 +1,1 @@
+ALTER TABLE users ALTER COLUMN feature_permissions TYPE VARCHAR(2000);

@@ -10,7 +10,9 @@ import { clientEnvironmentLabel } from '../utils/clientInfo'
 import {
   ALL_FEATURE_PERMISSIONS,
   DEFAULT_FEATURE_PERMISSIONS,
+  FEATURE_PERMISSION_GROUPS,
   FEATURE_PERMISSION_OPTIONS,
+  VIEWER_FEATURE_PERMISSIONS,
   type FeaturePermission,
 } from '../auth/permissions'
 import {
@@ -99,7 +101,7 @@ function UserEditor({ state, busy, onCancel, onSave }: {
           const nextRole = event.target.value as UserRole
           setRole(nextRole)
           if (nextRole === 'ADMIN') setPermissions([...ALL_FEATURE_PERMISSIONS])
-          else if (nextRole === 'VIEWER') setPermissions([...DEFAULT_FEATURE_PERMISSIONS])
+          else if (nextRole === 'VIEWER') setPermissions([...VIEWER_FEATURE_PERMISSIONS])
           else if (role !== 'USER') setPermissions([...DEFAULT_FEATURE_PERMISSIONS])
         }} aria-invalid={Boolean(errors.role)} style={{ width: '100%', minHeight: 43, padding: '0 11px', border: '1px solid var(--border-strong)', borderRadius: 6, background: 'white' }}>
           {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -107,22 +109,38 @@ function UserEditor({ state, busy, onCancel, onSave }: {
         <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: 11 }}>{ROLE_OPTIONS.find((option) => option.value === role)?.description}</p>
         {errors.role && <p className="field-error">{errors.role}</p>}
 
-        <fieldset className="feature-permission-grid">
+        <fieldset className="feature-permission-grid detailed">
           <legend>기능별 권한</legend>
-          <p>{role === 'ADMIN' ? '관리자는 모든 기능 권한이 자동으로 적용됩니다.' : role === 'USER' ? '운영자가 사용할 기능을 각각 선택하세요.' : '조회 전용 계정은 기본 조회 기능만 사용할 수 있습니다.'}</p>
-          {FEATURE_PERMISSION_OPTIONS.map((option) => {
-            const checked = role === 'ADMIN' || (role === 'VIEWER' ? DEFAULT_FEATURE_PERMISSIONS.includes(option.value) : permissions.includes(option.value))
-            return <label key={option.value} className={checked ? 'selected' : ''}>
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={role !== 'USER'}
-                onChange={() => setPermissions((current) => current.includes(option.value)
-                  ? current.filter((value) => value !== option.value)
-                  : [...current, option.value])}
-              />
-              <span><strong>{option.label}</strong><small>{option.description}</small></span>
-            </label>
+          <p>{role === 'ADMIN' ? '관리자는 아래 모든 세부 권한이 자동으로 적용됩니다.' : role === 'USER' ? '운영자가 사용할 조회 화면과 실제 동작을 각각 선택하세요.' : '조회 전용 계정은 지정된 조회 기능만 사용할 수 있습니다.'}</p>
+          {FEATURE_PERMISSION_GROUPS.map((group) => {
+            const fixed = role === 'ADMIN' ? ALL_FEATURE_PERMISSIONS : role === 'VIEWER' ? VIEWER_FEATURE_PERMISSIONS : permissions
+            const selectedCount = group.options.filter((option) => fixed.includes(option.value)).length
+            const allSelected = selectedCount === group.options.length
+            return <section className="feature-permission-group" key={group.key}>
+              <header>
+                <div><strong>{group.label}</strong><small>{selectedCount} / {group.options.length}개 선택</small></div>
+                {role === 'USER' && <button type="button" className="button secondary compact" onClick={() => {
+                  const groupValues = group.options.map((option) => option.value)
+                  setPermissions((current) => allSelected
+                    ? current.filter((value) => !groupValues.includes(value))
+                    : [...new Set([...current, ...groupValues])])
+                }}>{allSelected ? '그룹 해제' : '그룹 전체'}</button>}
+              </header>
+              <div>{group.options.map((option) => {
+                const checked = fixed.includes(option.value)
+                return <label key={option.value} className={checked ? 'selected' : ''}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={role !== 'USER'}
+                    onChange={() => setPermissions((current) => current.includes(option.value)
+                      ? current.filter((value) => value !== option.value)
+                      : [...current, option.value])}
+                  />
+                  <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                </label>
+              })}</div>
+            </section>
           })}
         </fieldset>
 
@@ -220,7 +238,7 @@ export function UsersPage() {
                 <td><strong>{managedUser.username}</strong></td>
                 <td>{managedUser.email}</td>
                 <td><span className={`status-badge ${roleClass}`}>{roleLabel(managedUser.role)}</span></td>
-                <td><span className="stacked-cell"><strong>{managedUser.role === 'ADMIN' ? '전체 기능' : `${managedUser.permissions.length}개 기능`}</strong><small>{managedUser.permissions.map((value) => FEATURE_PERMISSION_OPTIONS.find((option) => option.value === value)?.label).filter(Boolean).join(', ') || '부여된 기능 없음'}</small></span></td>
+                <td><span className="stacked-cell"><strong>{managedUser.role === 'ADMIN' ? '전체 세부 권한' : `${managedUser.permissions.length}개 세부 권한`}</strong><small>{managedUser.permissions.map((value) => FEATURE_PERMISSION_OPTIONS.find((option) => option.value === value)?.label).filter(Boolean).join(', ') || '부여된 기능 없음'}</small></span></td>
                 <td>{managedUser.active
                   ? <span className="status-badge online">활성</span>
                   : <span className="status-badge offline">비활성화 (오류 {managedUser.failedLoginAttempts}회)</span>}</td>

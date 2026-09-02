@@ -59,7 +59,7 @@ public class User {
     private String note;
 
     /** 운영자에게 명시적으로 부여한 화면 단위 기능 권한(CSV). null은 역할 기본값을 뜻한다. */
-    @Column(name = "feature_permissions", length = 500)
+    @Column(name = "feature_permissions", length = 2000)
     private String featurePermissions;
 
     /** 연속 로그인 실패 누적 횟수. 성공 로그인 시 0으로 초기화한다. */

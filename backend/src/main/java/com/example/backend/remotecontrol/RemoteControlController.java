@@ -19,7 +19,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/remote-control/sessions")
-@PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS')")
+@PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_REMOTE_SCREEN_VIEW')")
 public class RemoteControlController {
 
     private final RemoteControlSessionService sessionService;

@@ -28,8 +28,8 @@ class CustomUserDetailsServiceTest {
         var authorities = service.loadUserByUsername("operator").getAuthorities();
 
         assertThat(authorities).extracting(authority -> authority.getAuthority())
-                .contains("ROLE_USER", "PERM_COMMANDS", "PERM_FILES")
-                .doesNotContain("PERM_TOKENS");
+                .contains("ROLE_USER", "PERM_COMMAND_VIEW", "PERM_FILE_DISTRIBUTION_VIEW")
+                .doesNotContain("PERM_TOKEN_VIEW");
     }
 
     @Test

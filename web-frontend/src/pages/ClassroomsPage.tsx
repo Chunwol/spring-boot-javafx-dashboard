@@ -178,10 +178,11 @@ function RoomCard({ room, pcs, onOpen }: { room: ClassroomSummary; pcs: PcStatus
   )
 }
 
-function RoomTable({ rooms, pcMap, isAdmin, commandBusy, onOpen, onTeacherCommand }: {
+function RoomTable({ rooms, pcMap, canPowerOn, canShutdown, commandBusy, onOpen, onTeacherCommand }: {
   rooms: ClassroomSummary[]
   pcMap: Map<number, PcStatus[]>
-  isAdmin: boolean
+  canPowerOn: boolean
+  canShutdown: boolean
   commandBusy: boolean
   onOpen: (room: ClassroomSummary) => void
   onTeacherCommand: (room: ClassroomSummary, pc: PcStatus, type: TeacherCommandType) => void
@@ -212,7 +213,7 @@ function RoomTable({ rooms, pcMap, isAdmin, commandBusy, onOpen, onTeacherComman
                       <div className="teacher-control" key={teacher.macAddress || `${teacher.pcName}-${teacher.ipAddress}`} title={`${label} · ${online ? '온라인' : broken ? '고장' : '오프라인'}`}>
                         <span className={`pc-state-mark ${broken ? 'broken' : online ? 'online' : 'offline'}`} />
                         <span>{label}</span>
-                        {isAdmin && teacher.macAddress?.trim() && !broken && (
+                        {(online ? canShutdown : canPowerOn) && teacher.macAddress?.trim() && !broken && (
                           <button
                             className={`teacher-power-button ${online ? 'danger' : ''}`}
                             type="button"
@@ -243,10 +244,12 @@ function RoomTable({ rooms, pcMap, isAdmin, commandBusy, onOpen, onTeacherComman
   )
 }
 
-function RoomDetail({ room, pcs, isAdmin, onClose, onCommand, onOpenScreenWall }: {
+function RoomDetail({ room, pcs, canRemote, canPowerOn, canShutdown, onClose, onCommand, onOpenScreenWall }: {
   room: ClassroomSummary
   pcs: PcStatus[]
-  isAdmin: boolean
+  canRemote: boolean
+  canPowerOn: boolean
+  canShutdown: boolean
   onClose: () => void
   onCommand: (type: CommandType) => void
   onOpenScreenWall: () => void
@@ -288,11 +291,11 @@ function RoomDetail({ room, pcs, isAdmin, onClose, onCommand, onOpenScreenWall }
           ))}
           {!sorted.length && <EmptyState message="등록된 PC가 없습니다." />}
         </div>
-        {isAdmin && (
+        {(canRemote || canPowerOn || canShutdown) && (
           <footer className="drawer-actions">
-            <button className="button secondary" onClick={onOpenScreenWall}><PanelsTopLeft size={17} />화면 모니터링</button>
-            <button className="button secondary" onClick={() => onCommand('WOL')}><Power size={17} />전체 켜기</button>
-            <button className="button danger" onClick={() => onCommand('SHUTDOWN')}><PowerOff size={17} />전체 종료</button>
+            {canRemote && <button className="button secondary" onClick={onOpenScreenWall}><PanelsTopLeft size={17} />화면 모니터링</button>}
+            {canPowerOn && <button className="button secondary" onClick={() => onCommand('WOL')}><Power size={17} />전체 켜기</button>}
+            {canShutdown && <button className="button danger" onClick={() => onCommand('SHUTDOWN')}><PowerOff size={17} />전체 종료</button>}
           </footer>
         )}
       </aside>
@@ -305,8 +308,10 @@ export function ClassroomsPage() {
   const { groupId: groupIdParam } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const { isAdmin, canWrite } = useAuth()
-  const canOperate = isAdmin || canWrite
+  const { hasPermission } = useAuth()
+  const canRemote = hasPermission('REMOTE_SCREEN_VIEW')
+  const canPowerOn = hasPermission('POWER_ON')
+  const canShutdown = hasPermission('SHUTDOWN')
   const { showToast } = useToast()
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [search, setSearch] = useState(searchParams.get('q') || '')
@@ -462,13 +467,14 @@ export function ClassroomsPage() {
       ) : <RoomTable
         rooms={filteredRooms}
         pcMap={pcMap}
-        isAdmin={canOperate}
+        canPowerOn={canPowerOn}
+        canShutdown={canShutdown}
         commandBusy={teacherCommandMutation.isPending}
         onOpen={(room) => navigate(routeWithSearch(`/classrooms/${room.groupId}`))}
         onTeacherCommand={(room, pc, type) => setPendingTeacherCommand({ room, pc, type })}
       />}
 
-      {selectedRoom && <RoomDetail room={selectedRoom} pcs={pcMap.get(selectedRoom.groupId) || []} isAdmin={canOperate} onClose={() => navigate(routeWithSearch('/classrooms'))} onCommand={(type) => setPendingCommand({ room: selectedRoom, type })} onOpenScreenWall={() => setScreenWallRoomId(selectedRoom.groupId)} />}
+      {selectedRoom && <RoomDetail room={selectedRoom} pcs={pcMap.get(selectedRoom.groupId) || []} canRemote={canRemote} canPowerOn={canPowerOn} canShutdown={canShutdown} onClose={() => navigate(routeWithSearch('/classrooms'))} onCommand={(type) => setPendingCommand({ room: selectedRoom, type })} onOpenScreenWall={() => setScreenWallRoomId(selectedRoom.groupId)} />}
       {screenWallRoomId != null && rooms.find((room) => room.groupId === screenWallRoomId) && (
         <ClassroomScreenWall
           room={rooms.find((room) => room.groupId === screenWallRoomId)!}

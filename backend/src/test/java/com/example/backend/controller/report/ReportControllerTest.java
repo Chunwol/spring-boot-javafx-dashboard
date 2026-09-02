@@ -63,7 +63,7 @@ class ReportControllerTest {
         PreAuthorize preAuthorize = method.getAnnotation(PreAuthorize.class);
 
         assertThat(preAuthorize).isNotNull();
-        assertThat(preAuthorize.value()).isEqualTo("hasRole('ADMIN') or hasAuthority('PERM_REPORTS')");
+        assertThat(preAuthorize.value()).isEqualTo("hasRole('ADMIN') or hasAuthority('PERM_REPORT_REGENERATE')");
     }
 
     private static ReportController controller(ReportService reportService) {

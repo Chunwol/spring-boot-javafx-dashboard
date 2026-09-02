@@ -68,7 +68,7 @@ public class ReportController {
     }
 
     @PostMapping("/monthly/{yearMonth}/regenerate")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_REPORTS')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_REPORT_REGENERATE')")
     @Operation(summary = "월간 보고서 강제 재생성",
                description = "ADMIN 전용 — 누락된 월 또는 데이터 보정 후 재집계")
     public ResponseEntity<MonthlyReport> regenerate(@PathVariable String yearMonth) {
