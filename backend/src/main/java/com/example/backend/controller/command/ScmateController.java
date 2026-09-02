@@ -26,14 +26,14 @@ public class ScmateController {
     private final ScmateWorkflowService scmateWorkflowService;
 
     @PostMapping("/actions")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_PCS','PERM_COMMANDS')")
     public ResponseEntity<Map<String, Object>> perform(@Valid @RequestBody ScmateActionRequestDto request) {
         return ResponseEntity.accepted().body(
                 scmateWorkflowService.perform(request.macAddress(), request.action(), request.recoveryPoint()));
     }
 
     @PostMapping("/actions/bulk")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_PCS','PERM_COMMANDS')")
     public ResponseEntity<Map<String, Object>> performBulk(
             @Valid @RequestBody List<@Valid ScmateActionRequestDto> requests) {
         if (requests == null || requests.isEmpty()) {

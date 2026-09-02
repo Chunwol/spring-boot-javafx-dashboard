@@ -34,7 +34,7 @@ public class PeerTransferController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @Operation(summary = "PC 간 직접 파일 전송 시작")
     public Map<String, Object> create(@Valid @RequestBody PeerTransferCreateRequest body,
                                       HttpServletRequest request) {
@@ -58,7 +58,7 @@ public class PeerTransferController {
     }
 
     @PostMapping("/{jobId}/cancel")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @Operation(summary = "PC 간 직접 파일 전송 취소")
     public Map<String, Object> cancel(@PathVariable Long jobId, HttpServletRequest request) {
         requestSecurity.validateOrThrow(request, "cancelPeerTransfer|" + jobId);
@@ -66,7 +66,7 @@ public class PeerTransferController {
     }
 
     @PostMapping("/{jobId}/retry-failed")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @Operation(summary = "PC 간 직접 파일 전송 실패 대상 재시도")
     public Map<String, Object> retryFailed(@PathVariable Long jobId, HttpServletRequest request) {
         requestSecurity.validateOrThrow(request, "retryPeerTransfer|" + jobId);

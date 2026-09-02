@@ -6,6 +6,13 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
 import { useToast } from '../components/ui/ToastProvider'
 import { useDialogFocus } from '../components/ui/useDialogFocus'
+import { clientEnvironmentLabel } from '../utils/clientInfo'
+import {
+  ALL_FEATURE_PERMISSIONS,
+  DEFAULT_FEATURE_PERMISSIONS,
+  FEATURE_PERMISSION_OPTIONS,
+  type FeaturePermission,
+} from '../auth/permissions'
 import {
   usersApi,
   type CreateUserInput,
@@ -28,6 +35,12 @@ type SaveAction =
   | { mode: 'create'; input: CreateUserInput }
   | { mode: 'edit'; id: number; input: UpdateUserInput }
 
+function formatUserDate(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ko-KR')
+}
+
 function UserEditor({ state, busy, onCancel, onSave }: {
   state: EditorState
   busy: boolean
@@ -39,18 +52,20 @@ function UserEditor({ state, busy, onCancel, onSave }: {
   const [email, setEmail] = useState(editing?.email || '')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<UserRole>(editing?.role || 'USER')
+  const [note, setNote] = useState(editing?.note || '')
+  const [permissions, setPermissions] = useState<FeaturePermission[]>(editing?.permissions || [...DEFAULT_FEATURE_PERMISSIONS])
   const [errors, setErrors] = useState<UserFormErrors>({})
   const dialogRef = useDialogFocus<HTMLFormElement>(onCancel, busy)
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (state.mode === 'create') {
-      const result = validateCreateUser({ username, email, password, role })
+      const result = validateCreateUser({ username, email, password, role, note, permissions })
       setErrors(result.errors)
       if (result.success) onSave({ mode: 'create', input: result.data })
       return
     }
-    const result = validateUpdateUser({ username, email, role })
+    const result = validateUpdateUser({ username, email, role, note, permissions })
     setErrors(result.errors)
     if (result.success) onSave({ mode: 'edit', id: state.user.id, input: result.data })
   }
@@ -59,7 +74,7 @@ function UserEditor({ state, busy, onCancel, onSave }: {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !busy) onCancel()
     }}>
-      <form ref={dialogRef} className="confirm-dialog" style={{ textAlign: 'left', width: 'min(100%, 520px)' }} onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="user-editor-title" tabIndex={-1}>
+      <form ref={dialogRef} className="confirm-dialog" style={{ textAlign: 'left', width: 'min(100%, 680px)', maxHeight: '92vh', overflowY: 'auto' }} onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="user-editor-title" tabIndex={-1}>
         <button type="button" className="icon-button modal-close" onClick={onCancel} disabled={busy} aria-label="닫기"><X size={18} /></button>
         <span className="confirm-icon"><UserCog size={21} /></span>
         <h2 id="user-editor-title" style={{ textAlign: 'center' }}>{editing ? '사용자 수정' : '사용자 추가'}</h2>
@@ -80,11 +95,41 @@ function UserEditor({ state, busy, onCancel, onSave }: {
         </>}
 
         <label className="field-label" htmlFor="managed-role">역할</label>
-        <select id="managed-role" value={role} onChange={(event) => setRole(event.target.value as UserRole)} aria-invalid={Boolean(errors.role)} style={{ width: '100%', minHeight: 43, padding: '0 11px', border: '1px solid var(--border-strong)', borderRadius: 6, background: 'white' }}>
+        <select id="managed-role" value={role} onChange={(event) => {
+          const nextRole = event.target.value as UserRole
+          setRole(nextRole)
+          if (nextRole === 'ADMIN') setPermissions([...ALL_FEATURE_PERMISSIONS])
+          else if (nextRole === 'VIEWER') setPermissions([...DEFAULT_FEATURE_PERMISSIONS])
+          else if (role !== 'USER') setPermissions([...DEFAULT_FEATURE_PERMISSIONS])
+        }} aria-invalid={Boolean(errors.role)} style={{ width: '100%', minHeight: 43, padding: '0 11px', border: '1px solid var(--border-strong)', borderRadius: 6, background: 'white' }}>
           {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
         <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: 11 }}>{ROLE_OPTIONS.find((option) => option.value === role)?.description}</p>
         {errors.role && <p className="field-error">{errors.role}</p>}
+
+        <fieldset className="feature-permission-grid">
+          <legend>기능별 권한</legend>
+          <p>{role === 'ADMIN' ? '관리자는 모든 기능 권한이 자동으로 적용됩니다.' : role === 'USER' ? '운영자가 사용할 기능을 각각 선택하세요.' : '조회 전용 계정은 기본 조회 기능만 사용할 수 있습니다.'}</p>
+          {FEATURE_PERMISSION_OPTIONS.map((option) => {
+            const checked = role === 'ADMIN' || (role === 'VIEWER' ? DEFAULT_FEATURE_PERMISSIONS.includes(option.value) : permissions.includes(option.value))
+            return <label key={option.value} className={checked ? 'selected' : ''}>
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={role !== 'USER'}
+                onChange={() => setPermissions((current) => current.includes(option.value)
+                  ? current.filter((value) => value !== option.value)
+                  : [...current, option.value])}
+              />
+              <span><strong>{option.label}</strong><small>{option.description}</small></span>
+            </label>
+          })}
+        </fieldset>
+
+        <label className="field-label" htmlFor="managed-note">비고</label>
+        <textarea id="managed-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} rows={3} placeholder="예: 102호 교사 PC · 홍길동 선생님" aria-invalid={Boolean(errors.note)} style={{ width: '100%', resize: 'vertical' }} />
+        <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: 11 }}>계정 사용처와 실제 사용자 이름을 적어 두세요.</p>
+        {errors.note && <p className="field-error">{errors.note}</p>}
 
         <div className="modal-actions">
           <button type="button" className="button secondary" onClick={onCancel} disabled={busy}>취소</button>
@@ -107,6 +152,7 @@ export function UsersPage() {
     queryKey: ['users'],
     queryFn: usersApi.list,
     enabled: isAdmin,
+    refetchInterval: 10_000,
   })
   const displayedUsers = useMemo(
     () => filterAndSortUsers(usersQuery.data || [], search),
@@ -160,13 +206,13 @@ export function UsersPage() {
 
       <div className="section-toolbar">
         <div><h2>계정 목록</h2><p>{displayedUsers.length}개 표시</p></div>
-        <label className="toolbar-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="사용자명, 이메일, 역할 검색" /></label>
+        <label className="toolbar-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="사용자명, 이메일, 역할, 비고, 접속 IP 검색" /></label>
       </div>
 
       {!displayedUsers.length ? <EmptyState message={search.trim() ? '검색 조건에 맞는 사용자가 없습니다.' : '등록된 사용자가 없습니다.'} /> : (
         <div className="table-scroll">
           <table className="data-table">
-            <thead><tr><th>사용자명</th><th>이메일</th><th>역할</th><th>계정 상태</th><th aria-label="관리" /></tr></thead>
+            <thead><tr><th>사용자명</th><th>이메일</th><th>역할</th><th>기능 권한</th><th>계정 상태</th><th>현재 로그인</th><th>접속 시각</th><th>비고</th><th aria-label="관리" /></tr></thead>
             <tbody>{displayedUsers.map((managedUser) => {
               const current = isCurrentAccount(managedUser, signedInUser?.username)
               const roleClass = managedUser.role === 'ADMIN' ? 'warning' : managedUser.role === 'VIEWER' ? 'offline' : 'online'
@@ -174,11 +220,15 @@ export function UsersPage() {
                 <td><strong>{managedUser.username}</strong></td>
                 <td>{managedUser.email}</td>
                 <td><span className={`status-badge ${roleClass}`}>{roleLabel(managedUser.role)}</span></td>
-                <td>{current
-                  ? <span className="status-badge running">현재 로그인</span>
-                  : managedUser.active
-                    ? <span className="status-badge online">활성</span>
-                    : <span className="status-badge offline">비활성화 (오류 {managedUser.failedLoginAttempts}회)</span>}</td>
+                <td><span className="stacked-cell"><strong>{managedUser.role === 'ADMIN' ? '전체 기능' : `${managedUser.permissions.length}개 기능`}</strong><small>{managedUser.permissions.map((value) => FEATURE_PERMISSION_OPTIONS.find((option) => option.value === value)?.label).filter(Boolean).join(', ') || '부여된 기능 없음'}</small></span></td>
+                <td>{managedUser.active
+                  ? <span className="status-badge online">활성</span>
+                  : <span className="status-badge offline">비활성화 (오류 {managedUser.failedLoginAttempts}회)</span>}</td>
+                <td>{managedUser.loggedIn
+                  ? <span className="stacked-cell"><strong><span className="status-badge running">{current ? '현재 브라우저' : '로그인 중'}</span> {managedUser.loginIpAddress || '-'}</strong><small>{clientEnvironmentLabel(managedUser.loginUserAgent)}</small></span>
+                  : <span className="status-badge offline">로그아웃</span>}</td>
+                <td><span className="stacked-cell"><strong>{formatUserDate(managedUser.loginAt)}</strong><small>최근 활동 {formatUserDate(managedUser.lastActivityAt)}</small></span></td>
+                <td>{managedUser.note || '-'}</td>
                 <td><div className="row-actions">
                   <button className="icon-button bordered" onClick={() => setEditor({ mode: 'edit', user: managedUser })} title="사용자 수정" aria-label={`${managedUser.username} 수정`}><Pencil size={15} /></button>
                   <button className="icon-button danger-icon" onClick={() => !current && setDeleting(managedUser)} disabled={current} title={current ? '현재 로그인한 계정은 삭제할 수 없습니다.' : '사용자 삭제'} aria-label={`${managedUser.username} 삭제`}><Trash2 size={15} /></button>

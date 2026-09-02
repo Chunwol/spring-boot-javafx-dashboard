@@ -54,6 +54,14 @@ public class User {
     @Column(name = "role")
     private String role;
 
+    /** 계정 사용처와 실제 사용자 이름 등을 적는 관리자 비고. */
+    @Column(name = "note", length = 500)
+    private String note;
+
+    /** 운영자에게 명시적으로 부여한 화면 단위 기능 권한(CSV). null은 역할 기본값을 뜻한다. */
+    @Column(name = "feature_permissions", length = 500)
+    private String featurePermissions;
+
     /** 연속 로그인 실패 누적 횟수. 성공 로그인 시 0으로 초기화한다. */
     @Column(name = "failed_login_attempts", nullable = false)
     private int failedLoginAttempts;
@@ -65,6 +73,24 @@ public class User {
     /** 10회 실패 시 false로 전환되는 계정 활성 상태. */
     @Column(nullable = false)
     private boolean active = true;
+
+    /** 현재 유효한 단일 로그인 세션 ID. 새 로그인 시 교체된다. */
+    @Column(name = "active_session_id", length = 36)
+    private String activeSessionId;
+
+    /** 현재 로그인 세션을 시작한 클라이언트 IP. */
+    @Column(name = "login_ip_address", length = 64)
+    private String loginIpAddress;
+
+    /** 현재 로그인 세션의 브라우저 User-Agent. */
+    @Column(name = "login_user_agent", length = 500)
+    private String loginUserAgent;
+
+    @Column(name = "login_at")
+    private LocalDateTime loginAt;
+
+    @Column(name = "last_activity_at")
+    private LocalDateTime lastActivityAt;
 
     /**
      * 신규 사용자 생성자.
@@ -97,6 +123,14 @@ public class User {
         this.role = role;
     }
 
+    public void changeNote(String note) {
+        this.note = note;
+    }
+
+    public void changeFeaturePermissions(String featurePermissions) {
+        this.featurePermissions = featurePermissions;
+    }
+
     /** 사용자명을 변경한다. */
     public void changeUsername(String username) {
         this.username = username;
@@ -122,5 +156,32 @@ public class User {
     public void deactivate() {
         this.active = false;
         this.loginLockedUntil = null;
+        clearLoginSession();
+    }
+
+    public void startLoginSession(String sessionId, String ipAddress, String userAgent, LocalDateTime now) {
+        this.activeSessionId = sessionId;
+        this.loginIpAddress = ipAddress;
+        this.loginUserAgent = userAgent;
+        this.loginAt = now;
+        this.lastActivityAt = now;
+    }
+
+    public boolean hasLoginSession(String sessionId) {
+        return activeSessionId != null && activeSessionId.equals(sessionId);
+    }
+
+    public void touchLoginSession(String sessionId, LocalDateTime now) {
+        if (hasLoginSession(sessionId)) {
+            this.lastActivityAt = now;
+        }
+    }
+
+    public void clearLoginSession() {
+        this.activeSessionId = null;
+        this.loginIpAddress = null;
+        this.loginUserAgent = null;
+        this.loginAt = null;
+        this.lastActivityAt = null;
     }
 }

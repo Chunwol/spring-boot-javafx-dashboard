@@ -14,8 +14,10 @@ function user(overrides: Partial<ManagedUser> = {}): ManagedUser {
     username: 'admin',
     email: 'admin@example.com',
     role: 'ADMIN',
+    permissions: ['CLASSROOMS'],
     active: true,
     failedLoginAttempts: 0,
+    loggedIn: false,
     ...overrides,
   }
 }
@@ -60,13 +62,15 @@ describe('user management model', () => {
 
   it('searches username, email and Korean role labels, then sorts naturally', () => {
     const users = [
-      user({ id: 10, username: 'user10', email: 'ten@example.com', role: 'USER' }),
+      user({ id: 10, username: 'user10', email: 'ten@example.com', role: 'USER', note: '102호 홍길동', loginIpAddress: '192.0.2.55' }),
       user({ id: 2, username: 'user2', email: 'two@example.com', role: 'VIEWER' }),
       user({ id: 3, username: 'root', email: 'root@example.com', role: 'ADMIN' }),
     ]
     expect(filterAndSortUsers(users, '').map((item) => item.username)).toEqual(['root', 'user2', 'user10'])
     expect(filterAndSortUsers(users, '조회 전용').map((item) => item.username)).toEqual(['user2'])
     expect(filterAndSortUsers(users, 'TEN@').map((item) => item.username)).toEqual(['user10'])
+    expect(filterAndSortUsers(users, '홍길동').map((item) => item.username)).toEqual(['user10'])
+    expect(filterAndSortUsers(users, '192.0.2.55').map((item) => item.username)).toEqual(['user10'])
   })
 
   it('uses explicit labels and detects the signed-in account case-insensitively', () => {

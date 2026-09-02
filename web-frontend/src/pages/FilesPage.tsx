@@ -166,7 +166,9 @@ function uploadPhaseLabel(progress: FileUploadProgress | null) {
 
 export function FilesPage() {
   const location = useLocation()
-  const { isAdmin, token } = useAuth()
+  const { isAdmin, canWrite, hasPermission, token } = useAuth()
+  const allowed = isAdmin || hasPermission?.('FILES') === true
+  const canOperate = isAdmin || (canWrite && allowed)
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -203,13 +205,13 @@ export function FilesPage() {
     queryKey: ['classrooms'],
     queryFn: getClassrooms,
     staleTime: 60_000,
-    enabled: isAdmin,
+    enabled: canOperate,
   })
   const pcsQuery = useQuery({
     queryKey: ['pcs'],
     queryFn: getPcs,
     staleTime: 30_000,
-    enabled: isAdmin,
+    enabled: canOperate,
   })
   const eligibleTargetPcs = useMemo(() => (pcsQuery.data || []).filter((pc) => pc.online && !pc.brokenNote), [pcsQuery.data])
   const filteredTargetPcs = useMemo(() => {
@@ -228,7 +230,7 @@ export function FilesPage() {
     queryKey: ['file-distribution', 'jobs'],
     queryFn: getRecentDistributionJobs,
     refetchInterval: 10_000,
-    enabled: isAdmin,
+    enabled: canOperate,
   })
   const jobs = useMemo(() => normalizeRecentJobs(jobsQuery.data), [jobsQuery.data])
 
@@ -245,13 +247,13 @@ export function FilesPage() {
   const statusQuery = useQuery({
     queryKey: ['file-distribution', 'job', selectedJobId],
     queryFn: () => getDistributionJob(selectedJobId as number),
-    enabled: isAdmin && selectedJobId != null,
+    enabled: canOperate && selectedJobId != null,
     refetchInterval: 5_000,
   })
   const eventsQuery = useQuery({
     queryKey: ['file-distribution', 'events', selectedJobId],
     queryFn: () => getDistributionJobEvents(selectedJobId as number),
-    enabled: isAdmin && selectedJobId != null,
+    enabled: canOperate && selectedJobId != null,
     refetchInterval: 5_000,
   })
   const jobStatus = useMemo(() => normalizeJobStatus(statusQuery.data), [statusQuery.data])
@@ -441,8 +443,8 @@ export function FilesPage() {
   const selectedIsPeer = (jobStatus?.updatePackageType || selectedSummary?.updatePackageType) === 'PC_COPY'
   const progressValue = uploadPercent(uploadProgress)
 
-  if (!isAdmin) {
-    return <section className="content-section"><PageError message="파일 배포는 관리자만 사용할 수 있습니다." /></section>
+  if (!canOperate) {
+    return <section className="content-section"><PageError message="파일 배포 기능 권한이 없습니다." /></section>
   }
   if (jobsQuery.isLoading && !jobsQuery.data && classroomsQuery.isLoading) {
     return <section className="content-section"><PageLoading label="파일 배포 정보를 불러오는 중입니다." /></section>

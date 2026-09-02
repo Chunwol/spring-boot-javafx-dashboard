@@ -1,6 +1,7 @@
 package com.example.backend.config;
 
 import com.example.backend.security.JwtAuthenticationFilter;
+import com.example.backend.security.FeaturePermissionAuthorizationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -26,9 +27,12 @@ import static org.springframework.security.config.Customizer.withDefaults;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final FeaturePermissionAuthorizationFilter featurePermissionAuthorizationFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                          FeaturePermissionAuthorizationFilter featurePermissionAuthorizationFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.featurePermissionAuthorizationFilter = featurePermissionAuthorizationFilter;
     }
 
     @Bean
@@ -82,6 +86,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/agent/commands/**").permitAll()
                 // 개인 UI 설정은 VIEWER도 자신의 값만 조회/저장할 수 있음
                 .requestMatchers("/api/v1/settings/**").hasAnyRole("ADMIN", "USER", "VIEWER")
+                // 모든 계정은 현재 비밀번호 확인 후 자신의 비밀번호를 변경할 수 있음
+                .requestMatchers(HttpMethod.PUT, "/api/v1/admin/change-password").hasAnyRole("ADMIN", "USER", "VIEWER")
                 // 조회용 GET API: ADMIN, USER, VIEWER 모두 허용
                 .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("ADMIN", "USER", "VIEWER")
                 // 변경/제어 API(POST, PUT, DELETE 등): ADMIN, USER만 허용 (VIEWER 제외)
@@ -90,6 +96,7 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(featurePermissionAuthorizationFilter, JwtAuthenticationFilter.class)
             .cors(withDefaults());
         return http.build();
     }

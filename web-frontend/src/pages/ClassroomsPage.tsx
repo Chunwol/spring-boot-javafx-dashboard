@@ -305,7 +305,8 @@ export function ClassroomsPage() {
   const { groupId: groupIdParam } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const { isAdmin } = useAuth()
+  const { isAdmin, canWrite } = useAuth()
+  const canOperate = isAdmin || canWrite
   const { showToast } = useToast()
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [search, setSearch] = useState(searchParams.get('q') || '')
@@ -461,13 +462,13 @@ export function ClassroomsPage() {
       ) : <RoomTable
         rooms={filteredRooms}
         pcMap={pcMap}
-        isAdmin={isAdmin}
+        isAdmin={canOperate}
         commandBusy={teacherCommandMutation.isPending}
         onOpen={(room) => navigate(routeWithSearch(`/classrooms/${room.groupId}`))}
         onTeacherCommand={(room, pc, type) => setPendingTeacherCommand({ room, pc, type })}
       />}
 
-      {selectedRoom && <RoomDetail room={selectedRoom} pcs={pcMap.get(selectedRoom.groupId) || []} isAdmin={isAdmin} onClose={() => navigate(routeWithSearch('/classrooms'))} onCommand={(type) => setPendingCommand({ room: selectedRoom, type })} onOpenScreenWall={() => setScreenWallRoomId(selectedRoom.groupId)} />}
+      {selectedRoom && <RoomDetail room={selectedRoom} pcs={pcMap.get(selectedRoom.groupId) || []} isAdmin={canOperate} onClose={() => navigate(routeWithSearch('/classrooms'))} onCommand={(type) => setPendingCommand({ room: selectedRoom, type })} onOpenScreenWall={() => setScreenWallRoomId(selectedRoom.groupId)} />}
       {screenWallRoomId != null && rooms.find((room) => room.groupId === screenWallRoomId) && (
         <ClassroomScreenWall
           room={rooms.find((room) => room.groupId === screenWallRoomId)!}

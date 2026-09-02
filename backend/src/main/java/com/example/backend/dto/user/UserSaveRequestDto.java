@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Getter
 @NoArgsConstructor
 public class UserSaveRequestDto {
@@ -22,4 +24,10 @@ public class UserSaveRequestDto {
 
     @Pattern(regexp = "^(?i)(ADMIN|USER|VIEWER)?$", message = "role은 ADMIN/USER/VIEWER 중 하나여야 합니다.")
     private String role;
+
+    @Size(max = 500, message = "비고는 500자를 초과할 수 없습니다.")
+    private String note;
+
+    @Size(max = 11, message = "기능 권한은 최대 11개까지 선택할 수 있습니다.")
+    private List<@Pattern(regexp = "^[A-Z_]+$", message = "기능 권한 값이 올바르지 않습니다.") String> permissions;
 }

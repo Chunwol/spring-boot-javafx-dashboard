@@ -238,6 +238,7 @@ export function filterAndSortCommands(commands: readonly CommandView[], filters:
       groupLabel(command), command.pcName, command.ipAddress, command.macAddress,
       commandDisplayType(command), commandTypeLabel(command.commandType), detailedCommandStatus(command),
       commandRunMode(command), commandTransferDisplay(command), commandDestinationDisplay(command), command.scriptUrl,
+      command.requestedBy, command.requestedIp,
     ].filter(Boolean).join(' ').toLocaleLowerCase('ko-KR').includes(query)
   })
   return [...filtered].sort((left, right) => {

@@ -50,11 +50,16 @@ function isSessionEndpoint(path: string) {
   return cleanPath === '/auth/login' || cleanPath === '/auth/refresh' || cleanPath === '/auth/logout'
 }
 
+function acceptsAccessToken(path: string) {
+  const cleanPath = path.split('?')[0].replace(/\/$/, '')
+  return cleanPath !== '/auth/login' && cleanPath !== '/auth/refresh'
+}
+
 async function executeFetch(path: string, init: RequestInit = {}) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   const headers = new Headers(init.headers)
-  if (accessToken && !isSessionEndpoint(path)) headers.set('Authorization', `Bearer ${accessToken}`)
+  if (accessToken && acceptsAccessToken(path)) headers.set('Authorization', `Bearer ${accessToken}`)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }

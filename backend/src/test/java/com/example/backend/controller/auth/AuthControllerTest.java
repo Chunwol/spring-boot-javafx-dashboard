@@ -31,6 +31,7 @@ class AuthControllerTest {
         ReflectionTestUtils.setField(controller, "refreshExpirationMs", 7776000000L);
         ReflectionTestUtils.setField(controller, "refreshCookieSecure", false);
         org.mockito.Mockito.lenient().when(servletRequest.getRemoteAddr()).thenReturn("192.0.2.20");
+        org.mockito.Mockito.lenient().when(servletRequest.getHeader(HttpHeaders.USER_AGENT)).thenReturn("test-browser");
     }
 
     @Test
@@ -39,7 +40,7 @@ class AuthControllerTest {
         ReflectionTestUtils.setField(request, "username", "admin");
         ReflectionTestUtils.setField(request, "password", "secret");
         ReflectionTestUtils.setField(request, "autoLogin", true);
-        when(authService.login(request, "192.0.2.20")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
+        when(authService.login(request, "192.0.2.20", "test-browser")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
         when(authService.issueRefreshToken("admin")).thenReturn("refresh");
 
         ResponseEntity<LoginResponse> response = controller.login(request, servletRequest);
@@ -52,22 +53,22 @@ class AuthControllerTest {
     @Test
     void loginWithoutAutoLoginAndLogoutClearCookie() {
         LoginRequest request = new LoginRequest();
-        when(authService.login(request, "192.0.2.20")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
+        when(authService.login(request, "192.0.2.20", "test-browser")).thenReturn(LoginResponse.of("admin", "access", "ADMIN"));
 
         assertThat(controller.login(request, servletRequest).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");
-        assertThat(controller.logout().getHeaders().getFirst(HttpHeaders.SET_COOKIE))
+        assertThat(controller.logout(null, null).getHeaders().getFirst(HttpHeaders.SET_COOKIE))
                 .contains("classroom_refresh=", "Max-Age=0");
     }
 
     @Test
     void refreshRequiresCookieAndRotatesIt() {
-        assertThatThrownBy(() -> controller.refresh(null)).isInstanceOf(UnauthorizedException.class);
-        when(authService.refresh("old-refresh"))
+        assertThatThrownBy(() -> controller.refresh(null, servletRequest)).isInstanceOf(UnauthorizedException.class);
+        when(authService.refresh("old-refresh", "192.0.2.20", "test-browser"))
                 .thenReturn(LoginResponse.of("admin", "new-access", "ADMIN"));
         when(authService.issueRefreshToken("admin")).thenReturn("new-refresh");
 
-        ResponseEntity<LoginResponse> response = controller.refresh("old-refresh");
+        ResponseEntity<LoginResponse> response = controller.refresh("old-refresh", servletRequest);
 
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getToken()).isEqualTo("new-access");

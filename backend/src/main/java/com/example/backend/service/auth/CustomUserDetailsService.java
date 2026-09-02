@@ -5,8 +5,12 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Spring Security {@link UserDetailsService} 구현체.
@@ -25,11 +29,14 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final UserRoleResolver userRoleResolver;
+    private final UserFeaturePermissionService featurePermissionService;
 
     public CustomUserDetailsService(UserRepository userRepository,
-                                    UserRoleResolver userRoleResolver) {
+                                    UserRoleResolver userRoleResolver,
+                                    UserFeaturePermissionService featurePermissionService) {
         this.userRepository = userRepository;
         this.userRoleResolver = userRoleResolver;
+        this.featurePermissionService = featurePermissionService;
     }
 
     /**
@@ -48,12 +55,16 @@ public class CustomUserDetailsService implements UserDetailsService {
                     if (!user.isActive()) {
                         throw new DisabledException("Account is disabled");
                     }
-                    return org.springframework.security.core.userdetails.User
-                        .builder()
-                        .username(user.getUsername())
-                        .password(user.getPassword())
-                        .roles(resolveSpringRoles(user))
-                        .build();
+                    String role = userRoleResolver.resolveRole(user);
+                    List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                    for (String springRole : resolveSpringRoles(role)) {
+                        authorities.add(new SimpleGrantedAuthority("ROLE_" + springRole));
+                    }
+                    featurePermissionService.resolve(user, role).stream()
+                            .map(permission -> new SimpleGrantedAuthority(permission.authority()))
+                            .forEach(authorities::add);
+                    return new org.springframework.security.core.userdetails.User(
+                            user.getUsername(), user.getPassword(), authorities);
                 })
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }
@@ -65,8 +76,7 @@ public class CustomUserDetailsService implements UserDetailsService {
      * @param username 사용자 이름
      * @return Spring Security roles 배열
      */
-    private String[] resolveSpringRoles(com.example.backend.model.user.User user) {
-        String role = userRoleResolver.resolveRole(user);
+    private String[] resolveSpringRoles(String role) {
         return switch (role) {
             case "ADMIN" -> new String[]{"ADMIN", "USER"};
             case "VIEWER" -> new String[]{"VIEWER"};

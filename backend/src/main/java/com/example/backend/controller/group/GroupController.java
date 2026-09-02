@@ -24,7 +24,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/groups")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_CLASSROOM_SETTINGS')")
 @Tag(name = "Group Management", description = "강의실(그룹) 관리 API")
 public class GroupController {
 

@@ -65,6 +65,16 @@ public class CommandQueue {
     @Convert(converter = LenientLocalDateTimeStringConverter.class)
     private LocalDateTime createdAt;
 
+    /** 명령을 발행한 대시보드 계정. 시스템 작업은 system. */
+    @Schema(description = "명령 발행 계정")
+    @Column(name = "requested_by", length = 100)
+    private String requestedBy;
+
+    /** 명령 발행 요청의 클라이언트 IP. */
+    @Schema(description = "명령 발행 IP")
+    @Column(name = "requested_ip", length = 64)
+    private String requestedIp;
+
     /** 에이전트에 전달된 일시 */
     @Schema(description = "에이전트 전달 일시")
     @Column(name = "delivered_at")
@@ -160,5 +170,10 @@ public class CommandQueue {
      */
     public Boolean getIsAdminOperation() {
         return isAdminOperation != null ? isAdminOperation : false;
+    }
+
+    @PrePersist
+    void defaultRequestOrigin() {
+        if (requestedBy == null || requestedBy.isBlank()) requestedBy = "system";
     }
 }

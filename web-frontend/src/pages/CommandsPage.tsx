@@ -23,6 +23,8 @@ import { useToast } from '../components/ui/ToastProvider'
 import { useDialogFocus } from '../components/ui/useDialogFocus'
 import { cancelCommand, getCommand, getCommands, issueCommand } from '../features/commands/api'
 import { routerWolFailureMessage } from '../features/commands/routerWolMessage'
+import { listActiveRemoteControlSessions } from '../features/remoteControl/api'
+import { clientEnvironmentLabel } from '../utils/clientInfo'
 import {
   COMMAND_TYPE_LABELS,
   DEFAULT_COMMAND_DRAFT,
@@ -66,6 +68,17 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`command-status ${commandStatusTone(status)}`}>{commandStatusLabel(status)}</span>
 }
 
+function remoteViewerStatusLabel(status: string) {
+  return ({
+    OPEN: '준비',
+    PENDING: 'PC 준비 중',
+    READY: '접속 준비',
+    TICKET_ISSUED: '접속 준비',
+    CONNECTING: '연결 중',
+    CONNECTED: '화면 보는 중',
+  } as Record<string, string>)[status] || status
+}
+
 function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDownload, onCancel, onClose }: {
   command: CommandView | null
   loading: boolean
@@ -105,6 +118,8 @@ function CommandDetail({ command, loading, error, downloadBusy, cancelBusy, onDo
                 <div><dt>MAC 주소</dt><dd>{command.macAddress || '-'}</dd></div>
                 <div><dt>강의실</dt><dd>{command.groupName || command.groupId || '-'}</dd></div>
                 <div><dt>IP 주소</dt><dd>{command.ipAddress || '-'}</dd></div>
+                <div><dt>발행 계정</dt><dd>{command.requestedBy || '기록 없음'}</dd></div>
+                <div><dt>발행 위치</dt><dd>{command.requestedIp || '-'}</dd></div>
                 <div><dt>생성</dt><dd>{formatCommandDate(command.createdAt)}</dd></div>
                 <div><dt>전달</dt><dd>{formatCommandDate(command.deliveredAt)}</dd></div>
                 <div><dt>확인</dt><dd>{formatCommandDate(command.ackedAt)}</dd></div>
@@ -241,7 +256,9 @@ function enqueueMessage(result: CommandEnqueueResult) {
 
 export function CommandsPage() {
   const queryClient = useQueryClient()
-  const { isAdmin } = useAuth()
+  const { isAdmin, canWrite, hasPermission } = useAuth()
+  const allowed = isAdmin || hasPermission?.('COMMANDS') === true
+  const canOperate = isAdmin || (canWrite && allowed)
   const { showToast } = useToast()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<CommandStatusFilter>('ALL')
@@ -270,14 +287,20 @@ export function CommandsPage() {
   const commandsQuery = useQuery({
     queryKey: ['commands', 'operations-snapshot', taskId || null],
     queryFn: () => getCommands(serverFilters),
-    enabled: isAdmin,
+    enabled: allowed,
     placeholderData: taskId ? undefined : keepPreviousData,
     refetchInterval: 10_000,
+  })
+  const remoteSessionsQuery = useQuery({
+    queryKey: ['remote-control', 'active-sessions'],
+    queryFn: listActiveRemoteControlSessions,
+    enabled: allowed,
+    refetchInterval: 5_000,
   })
   const detailQuery = useQuery({
     queryKey: ['command', selectedTaskId],
     queryFn: () => getCommand(selectedTaskId as number),
-    enabled: isAdmin && selectedTaskId !== null,
+    enabled: allowed && selectedTaskId !== null,
     refetchInterval: (query) => isFinalCommandStatus(query.state.data?.status) ? false : 5_000,
   })
   const snapshot = commandsQuery.data?.content || []
@@ -392,8 +415,8 @@ export function CommandsPage() {
     setPendingIssue(toIssueCommandRequest(draft))
   }
 
-  if (!isAdmin) {
-    return <section className="content-section commands-page"><PageError message="명령 이력과 발행은 관리자만 사용할 수 있습니다." /></section>
+  if (!allowed) {
+    return <section className="content-section commands-page"><PageError message="명령 발행 / 이력 기능 권한이 없습니다." /></section>
   }
   if (commandsQuery.isPending && !commandsQuery.data) return <section className="content-section commands-page"><PageLoading label="명령 이력을 불러오는 중입니다." /></section>
   if (commandsQuery.isError && !commandsQuery.data) {
@@ -422,7 +445,7 @@ export function CommandsPage() {
             {taskId && <button className="icon-button bordered" type="button" onClick={clearTaskId} aria-label="작업 ID 필터 해제" title="필터 해제"><X size={17} /></button>}
           </form>
           <button className="icon-button bordered" onClick={() => { void commandsQuery.refetch() }} disabled={commandsQuery.isFetching} aria-label="새로고침" title="새로고침"><RefreshCw size={17} className={commandsQuery.isFetching ? 'spin-icon' : ''} /></button>
-          {isAdmin && <button className="button primary" onClick={() => setIssueOpen(true)}><Plus size={17} />명령 발행</button>}
+          {canOperate && <button className="button primary" onClick={() => setIssueOpen(true)}><Plus size={17} />명령 발행</button>}
         </div>
       </header>
       {taskIdError && <p className="form-error" role="alert">{taskIdError}</p>}
@@ -433,6 +456,31 @@ export function CommandsPage() {
       {commandsQuery.isError && commandsQuery.data && (
         <div className="command-inline-error" role="alert"><CircleAlert size={15} />자동 갱신에 실패했습니다. 기존 스냅샷을 유지합니다.</div>
       )}
+
+      <section className="management-form" aria-label="현재 원격 접속">
+        <div className="management-form-header">
+          <div><h2>현재 원격 접속</h2><p>계정·접속 IP·브라우저·대상 PC를 5초마다 확인합니다.</p></div>
+          <span className="status-badge running">{remoteSessionsQuery.data?.length || 0}개 연결</span>
+        </div>
+        {remoteSessionsQuery.isError ? (
+          <div className="command-inline-error" role="alert"><CircleAlert size={15} />원격 접속 현황을 불러오지 못했습니다.</div>
+        ) : !(remoteSessionsQuery.data || []).length ? (
+          <p>현재 화면을 보고 있는 사용자가 없습니다.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>계정</th><th>접속 위치</th><th>대상 PC</th><th>상태</th><th>시작 시각</th></tr></thead>
+              <tbody>{remoteSessionsQuery.data?.map((session) => <tr key={session.sessionId}>
+                <td><strong>{session.username || 'system'}</strong></td>
+                <td><span className="stacked-cell"><strong>{session.sourceIp || '-'}</strong><small>{clientEnvironmentLabel(session.userAgent)}</small></span></td>
+                <td><span className="stacked-cell"><strong>{session.pcName || session.macAddress}</strong><small>{session.targetIp || '-'} · {session.macAddress}</small></span></td>
+                <td><span className="status-badge running">{remoteViewerStatusLabel(session.status)}</span></td>
+                <td>{formatCommandDate(session.startedAt)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {!taskId && (
         <>
@@ -482,7 +530,7 @@ export function CommandsPage() {
       {!visibleCommands.length ? <EmptyState message="조건에 맞는 명령 이력이 없습니다." /> : (
         <div className="table-scroll">
           <table className="data-table commands-table">
-            <thead><tr><th>작업 ID</th><th>대상</th><th>강의실</th><th>명령</th><th>상태</th><th>최근 시각</th><th>결과</th></tr></thead>
+            <thead><tr><th>작업 ID</th><th>대상</th><th>강의실</th><th>명령</th><th>발행 계정</th><th>상태</th><th>최근 시각</th><th>결과</th></tr></thead>
             <tbody>
               {visibleCommands.map((command) => (
                 <tr key={command.taskId} tabIndex={0} onClick={() => setSelectedTaskId(command.taskId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedTaskId(command.taskId) }}>
@@ -490,6 +538,7 @@ export function CommandsPage() {
                   <td><span className="command-target"><strong>{commandTargetLabel(command)}</strong><small>{command.ipAddress || '-'} · {command.macAddress}</small></span></td>
                   <td>{command.groupName || command.groupId || '-'}</td>
                   <td><span className="command-target"><strong>{commandTypeLabel(command.commandType)}</strong><small>{commandDisplayType(command)}</small></span></td>
+                  <td><span className="command-target"><strong>{command.requestedBy || '기록 없음'}</strong><small>{command.requestedIp || '-'}</small></span></td>
                   <td><span className="command-target"><StatusBadge status={command.status} /><small>{detailedCommandStatus(command)}</small></span></td>
                   <td>{formatCommandDate(command.completedAt || command.ackedAt || command.deliveredAt || command.createdAt)}</td>
                   <td>{command.status === 'FAILED' || (command.exitCode != null && command.exitCode !== 0) ? <span className="command-result failed"><CircleAlert size={14} />{command.exitCode ?? '실패'}</span> : isFinalCommandStatus(command.status) ? <span className="command-result success"><CheckCircle2 size={14} />{command.exitCode ?? 0}</span> : '-'}</td>

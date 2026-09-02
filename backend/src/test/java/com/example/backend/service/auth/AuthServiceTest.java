@@ -4,6 +4,7 @@ import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.model.user.User;
+import com.example.backend.remotecontrol.RemoteControlSessionService;
 import com.example.backend.repository.user.UserRepository;
 import com.example.backend.security.WebSocketSessionExpiryRegistry;
 import com.example.backend.service.audit.AuditService;
@@ -33,8 +34,11 @@ class AuthServiceTest {
     @Mock PasswordEncoder passwordEncoder;
     @Mock JwtUtil jwtUtil;
     @Mock UserRoleResolver userRoleResolver;
+    @Mock UserFeaturePermissionService featurePermissionService;
     @Mock AuditService auditService;
     @Mock WebSocketSessionExpiryRegistry webSocketSessions;
+    @Mock UserLoginSessionService loginSessions;
+    @Mock RemoteControlSessionService remoteControlSessions;
     @InjectMocks AuthService authService;
 
     @Test
@@ -46,7 +50,8 @@ class AuthServiceTest {
 
         when(userRepository.findByUsernameForLogin("admin")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("secret123", "encoded")).thenReturn(true);
-        when(jwtUtil.generateToken("admin")).thenReturn("jwt-token");
+        when(jwtUtil.generateToken(org.mockito.ArgumentMatchers.eq("admin"), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn("jwt-token");
         when(userRoleResolver.resolveRole(user)).thenReturn("ADMIN");
 
         LoginResponse response = authService.login(request, null);
@@ -54,6 +59,28 @@ class AuthServiceTest {
         assertThat(response.getUsername()).isEqualTo("admin");
         assertThat(response.getToken()).isEqualTo("jwt-token");
         assertThat(response.getRole()).isEqualTo("ADMIN");
+        assertThat(user.getActiveSessionId()).isNotBlank();
+    }
+
+    @Test
+    void secondLoginReplacesTheOnlyActiveSession() {
+        LoginRequest request = loginRequest("admin", "secret123");
+        User user = new User("admin", "encoded", "admin@example.com");
+        when(userRepository.findByUsernameForLogin("admin")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret123", "encoded")).thenReturn(true);
+        when(jwtUtil.generateToken(org.mockito.ArgumentMatchers.eq("admin"), org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> "jwt-" + invocation.getArgument(1));
+        when(userRoleResolver.resolveRole(user)).thenReturn("ADMIN");
+
+        authService.login(request, "192.0.2.20", "first-browser");
+        String firstSession = user.getActiveSessionId();
+        authService.login(request, "192.0.2.21", "second-browser");
+
+        assertThat(user.getActiveSessionId()).isNotEqualTo(firstSession);
+        assertThat(user.getLoginIpAddress()).isEqualTo("192.0.2.21");
+        assertThat(user.getLoginUserAgent()).isEqualTo("second-browser");
+        verify(webSocketSessions, org.mockito.Mockito.times(2)).closeUserSessions("admin");
+        verify(remoteControlSessions, org.mockito.Mockito.times(2)).closeOwnerSessions("admin");
     }
 
     @Test
@@ -144,7 +171,8 @@ class AuthServiceTest {
         user.setLoginLockedUntil(LocalDateTime.now().minusSeconds(1));
         when(userRepository.findByUsernameForLogin("admin")).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("secret123", "encoded")).thenReturn(true);
-        when(jwtUtil.generateToken("admin")).thenReturn("jwt-token");
+        when(jwtUtil.generateToken(org.mockito.ArgumentMatchers.eq("admin"), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn("jwt-token");
         when(userRoleResolver.resolveRole(user)).thenReturn("ADMIN");
 
         authService.login(request, "192.0.2.13");
@@ -156,10 +184,12 @@ class AuthServiceTest {
     @Test
     void refreshRotatesAccessTokenForExistingUser() {
         User user = new User("admin", "encoded", "admin@example.com");
+        user.startLoginSession("session-1", "192.0.2.10", "browser", LocalDateTime.now());
         when(jwtUtil.validateRefreshAndGetClaims("refresh-token"))
                 .thenReturn(Jwts.claims().setSubject("admin"));
+        when(jwtUtil.getSessionId(org.mockito.ArgumentMatchers.any())).thenReturn("session-1");
         when(userRepository.findByUsername("admin")).thenReturn(Optional.of(user));
-        when(jwtUtil.generateToken("admin")).thenReturn("new-access-token");
+        when(jwtUtil.generateToken("admin", "session-1")).thenReturn("new-access-token");
         when(userRoleResolver.resolveRole(user)).thenReturn("ADMIN");
 
         LoginResponse response = authService.refresh("refresh-token");
@@ -176,6 +206,20 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refresh("invalid-token"))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("자동 로그인 정보가 만료되었거나 유효하지 않습니다.");
+    }
+
+    @Test
+    void refreshRejectsTokenFromAReplacedLoginSession() {
+        User user = new User("admin", "encoded", "admin@example.com");
+        user.startLoginSession("new-session", "192.0.2.21", "browser", LocalDateTime.now());
+        when(jwtUtil.validateRefreshAndGetClaims("old-refresh"))
+                .thenReturn(Jwts.claims().setSubject("admin"));
+        when(jwtUtil.getSessionId(org.mockito.ArgumentMatchers.any())).thenReturn("old-session");
+        when(userRepository.findByUsername("admin")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.refresh("old-refresh"))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("다른 장소에서 새로 로그인되어 현재 로그인이 종료되었습니다.");
     }
 
     @Test

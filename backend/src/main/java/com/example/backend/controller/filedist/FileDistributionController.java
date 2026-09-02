@@ -51,7 +51,7 @@ public class FileDistributionController {
      * uploadId(청크 업로드 완료 ID), 파일명, 총 청크 수, 웨이브 크기 등을 받아 Job을 생성합니다.
      * canaryOnly=true이면 카나리 에이전트에만 우선 배포합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs")
     @Operation(
         summary = "파일 배포 작업 생성",
@@ -154,7 +154,7 @@ public class FileDistributionController {
      * 배포 작업 취소.
      * 진행 중인 웨이브를 포함해 전체 Job을 CANCELLED 상태로 전환합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/cancel")
     @Operation(summary = "배포 작업 취소", description = "지정된 Job과 모든 진행 중인 웨이브를 취소합니다.")
     @ApiResponse(responseCode = "200", description = "취소 성공")
@@ -173,7 +173,7 @@ public class FileDistributionController {
      * 특정 웨이브 취소.
      * 해당 웨이브에 배정된 에이전트들의 배포를 취소합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/waves/{wave}/cancel")
     @Operation(summary = "웨이브 취소", description = "지정된 Job의 특정 웨이브를 취소합니다.")
     @ApiResponse(responseCode = "200", description = "웨이브 취소 성공")
@@ -192,7 +192,7 @@ public class FileDistributionController {
      * 특정 웨이브 수동 시작.
      * 자동 진행이 비활성화된 경우 관리자가 수동으로 웨이브를 시작합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/waves/{wave}/start")
     @Operation(summary = "웨이브 수동 시작", description = "지정된 Job의 특정 웨이브를 수동으로 시작합니다.")
     @ApiResponse(responseCode = "200", description = "웨이브 시작 성공")
@@ -211,7 +211,7 @@ public class FileDistributionController {
      * 실패한 에이전트 재시도.
      * wave를 지정하면 해당 웨이브만, 미지정이면 전체 실패 에이전트를 재시도합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/retry-failed")
     @Operation(
         summary = "실패 에이전트 재시도",
@@ -236,7 +236,7 @@ public class FileDistributionController {
      * 이전 배포 버전으로 롤백.
      * rollbackFromJobId에 해당하는 Job의 파일을 다시 배포하는 새 Job을 생성합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/rollback")
     @Operation(
         summary = "배포 롤백",
@@ -272,7 +272,7 @@ public class FileDistributionController {
      * 에이전트가 파일 수신 결과(성공/실패)를 서버에 보고합니다.
      * 결과에 따라 다음 웨이브 진행 여부가 결정됩니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @PostMapping("/jobs/{jobId}/agents/{agentId}/result")
     @Operation(
         summary = "에이전트 배포 결과 보고",
@@ -299,7 +299,7 @@ public class FileDistributionController {
      * 배포 작업 상태 조회
      * @param jobId 조회할 Job ID
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @GetMapping("/jobs/{jobId}")
     @Operation(summary = "배포 작업 상태 조회", description = "지정된 Job의 현재 상태, 진행 웨이브, 에이전트별 결과를 조회합니다.")
     @ApiResponse(responseCode = "200", description = "Job 상태 조회 성공")
@@ -315,7 +315,7 @@ public class FileDistributionController {
      * @param jobId 조회할 Job ID
      * @return 이벤트 타입, 상세 JSON, 발생 시각 목록
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @GetMapping("/jobs/{jobId}/events")
     @Operation(summary = "배포 이벤트 목록 조회", description = "Job의 이벤트 로그(웨이브 시작/완료, 에이전트 결과 등)를 조회합니다.")
     @ApiResponse(responseCode = "200", description = "이벤트 목록 조회 성공")
@@ -337,7 +337,7 @@ public class FileDistributionController {
      * 최근 배포 작업 목록 조회
      * 최근 생성된 Job 목록을 반환합니다.
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_FILES')")
     @GetMapping("/jobs")
     @Operation(summary = "최근 배포 작업 목록 조회", description = "최근 생성된 배포 Job 목록을 최신 순으로 조회합니다.")
     @ApiResponse(responseCode = "200", description = "배포 작업 목록 조회 성공")

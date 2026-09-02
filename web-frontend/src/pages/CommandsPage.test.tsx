@@ -7,15 +7,22 @@ import type { CommandPage, CommandView } from '../features/commands/types'
 
 const mocks = vi.hoisted(() => ({
   isAdmin: true,
+  canWrite: true,
+  hasCommandPermission: true,
   getCommands: vi.fn(),
   getCommand: vi.fn(),
   issueCommand: vi.fn(),
   cancelCommand: vi.fn(),
+  listActiveRemoteControlSessions: vi.fn(),
   showToast: vi.fn(),
 }))
 
 vi.mock('../auth/AuthProvider', () => ({
-  useAuth: () => ({ isAdmin: mocks.isAdmin }),
+  useAuth: () => ({
+    isAdmin: mocks.isAdmin,
+    canWrite: mocks.canWrite,
+    hasPermission: () => mocks.hasCommandPermission,
+  }),
 }))
 
 vi.mock('../components/ui/ToastProvider', () => ({
@@ -27,6 +34,10 @@ vi.mock('../features/commands/api', () => ({
   getCommand: mocks.getCommand,
   issueCommand: mocks.issueCommand,
   cancelCommand: mocks.cancelCommand,
+}))
+
+vi.mock('../features/remoteControl/api', () => ({
+  listActiveRemoteControlSessions: mocks.listActiveRemoteControlSessions,
 }))
 
 function command(overrides: Partial<CommandView> = {}): CommandView {
@@ -67,19 +78,52 @@ describe('CommandsPage', () => {
 
   beforeEach(() => {
     mocks.isAdmin = true
+    mocks.canWrite = true
+    mocks.hasCommandPermission = true
     mocks.getCommands.mockReset().mockResolvedValue(page([command()]))
     mocks.getCommand.mockReset().mockResolvedValue(command({ stdout: 'shutdown accepted', stderr: 'no error' }))
     mocks.issueCommand.mockReset().mockResolvedValue({ queued: 1, taskIds: [8] })
     mocks.cancelCommand.mockReset().mockResolvedValue({ taskId: 7, status: 'CANCELLED' })
+    mocks.listActiveRemoteControlSessions.mockReset().mockResolvedValue([])
     mocks.showToast.mockReset()
   })
 
-  it('blocks command history and mutation controls for non-admin users', () => {
-    mocks.isAdmin = false
+  it('shows who is currently viewing a PC and from which location', async () => {
+    mocks.listActiveRemoteControlSessions.mockResolvedValue([{
+      sessionId: 'viewer-1',
+      username: 'operator',
+      sourceIp: '192.0.2.55',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0) Chrome/140',
+      macAddress: 'AA:BB:CC:DD:EE:FF',
+      pcName: '218-01',
+      targetIp: '192.0.2.101',
+      status: 'CONNECTED',
+      startedAt: '2026-09-02T15:00:00',
+    }])
+
     renderPage()
-    expect(screen.getByText('명령 이력과 발행은 관리자만 사용할 수 있습니다.')).toBeInTheDocument()
+
+    expect(await screen.findByText('operator')).toBeInTheDocument()
+    expect(screen.getByText('192.0.2.55')).toBeInTheDocument()
+    expect(screen.getByText('Chrome · Windows')).toBeInTheDocument()
+    expect(screen.getByText('화면 보는 중')).toBeInTheDocument()
+  })
+
+  it('blocks command history and mutation controls when the feature is unchecked', () => {
+    mocks.isAdmin = false
+    mocks.hasCommandPermission = false
+    renderPage()
+    expect(screen.getByText('명령 발행 / 이력 기능 권한이 없습니다.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '명령 발행' })).not.toBeInTheDocument()
     expect(mocks.getCommands).not.toHaveBeenCalled()
+  })
+
+  it('allows an operator whose command feature is checked', async () => {
+    mocks.isAdmin = false
+    renderPage()
+
+    expect(await screen.findByText('#7')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '명령 발행' })).toBeInTheDocument()
   })
 
   it('opens a refreshed detail view with stdout and stderr', async () => {

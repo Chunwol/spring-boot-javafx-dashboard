@@ -20,7 +20,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -147,6 +152,34 @@ class CommandLifecycleServiceTest {
         assertThat(result.get("offlineSkipped")).isEqualTo(1);
         assertThat(result.get("notFoundSkipped")).isEqualTo(1);
         verify(commandQueueRepository).saveAll(any());
+    }
+
+    @Test
+    void enqueueRecordsAuthenticatedAccountAndRequestIp() {
+        PcMaster pc = pc("AA:BB:CC:DD:EE:14", "ONLINE");
+        when(pcMasterRepository.findByGroupId(29L)).thenReturn(List.of(pc));
+        when(commandQueueRepository.saveAll(any())).thenAnswer(invocation -> {
+            List<CommandQueue> commands = invocation.getArgument(0);
+            commands.getFirst().setTaskId(1L);
+            return commands;
+        });
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("192.0.2.44");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("operator", null, List.of()));
+        try {
+            commandLifecycleService.enqueue(groupCommand("SHUTDOWN"));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+            SecurityContextHolder.clearContext();
+        }
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<CommandQueue>> captor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(commandQueueRepository).saveAll(captor.capture());
+        assertThat(captor.getValue().getFirst().getRequestedBy()).isEqualTo("operator");
+        assertThat(captor.getValue().getFirst().getRequestedIp()).isEqualTo("192.0.2.44");
     }
 
     @Test

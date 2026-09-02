@@ -32,6 +32,7 @@ import java.util.Date;
 public class JwtUtil {
 
     private static final String TOKEN_TYPE_CLAIM = "tokenType";
+    private static final String SESSION_ID_CLAIM = "sid";
     private static final String ACCESS_TOKEN_TYPE = "access";
     private static final String REFRESH_TOKEN_TYPE = "refresh";
 
@@ -83,15 +84,19 @@ public class JwtUtil {
      * @return 서명된 JWT 문자열
      */
     public String generateToken(String username) {
+        return generateToken(username, null);
+    }
+
+    public String generateToken(String username, String sessionId) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + expirationMs);
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .setSubject(username)
                 .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN_TYPE)
                 .setIssuedAt(now)
-                .setExpiration(exp)
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
+                .setExpiration(exp);
+        if (sessionId != null) builder.claim(SESSION_ID_CLAIM, sessionId);
+        return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
 
     /**
@@ -112,15 +117,19 @@ public class JwtUtil {
     }
 
     public String generateRefreshToken(String username) {
+        return generateRefreshToken(username, null);
+    }
+
+    public String generateRefreshToken(String username, String sessionId) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + refreshExpirationMs);
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .setSubject(username)
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN_TYPE)
                 .setIssuedAt(now)
-                .setExpiration(exp)
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
+                .setExpiration(exp);
+        if (sessionId != null) builder.claim(SESSION_ID_CLAIM, sessionId);
+        return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
 
     public Claims validateRefreshAndGetClaims(String token) {
@@ -129,6 +138,10 @@ public class JwtUtil {
             throw new UnsupportedJwtException("Access token cannot be used as a refresh token");
         }
         return claims;
+    }
+
+    public String getSessionId(Claims claims) {
+        return claims == null ? null : claims.get(SESSION_ID_CLAIM, String.class);
     }
 
     private Claims parseClaims(String token) {

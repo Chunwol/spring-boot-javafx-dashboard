@@ -15,7 +15,8 @@ type Tab = 'rooms' | 'ranges' | 'teachers'
 type DeleteTarget = { type: 'room'; room: ClassroomGroup } | { type: 'range'; range: IpRange } | { type: 'teacher'; device: TeacherDevice }
 
 export function ClassroomSettingsPage() {
-  const { isAdmin, canWrite } = useAuth()
+  const { isAdmin: roleIsAdmin, canWrite } = useAuth()
+  const isAdmin = roleIsAdmin || canWrite
   const { showToast } = useToast()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()

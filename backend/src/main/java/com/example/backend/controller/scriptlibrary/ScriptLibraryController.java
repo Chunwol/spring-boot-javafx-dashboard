@@ -19,7 +19,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/script-library")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasRole('ADMIN') or hasAuthority('PERM_SCRIPT_LIBRARY')")
 @Tag(name = "Script Library", description = "버전 고정 PowerShell 보관함과 최근 실행")
 public class ScriptLibraryController {
     private final ScriptLibraryService service;

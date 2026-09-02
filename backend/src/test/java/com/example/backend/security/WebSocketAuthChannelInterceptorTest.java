@@ -1,6 +1,7 @@
 package com.example.backend.security;
 
 import com.example.backend.service.auth.CustomUserDetailsService;
+import com.example.backend.service.auth.UserLoginSessionService;
 import com.example.backend.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,8 @@ class WebSocketAuthChannelInterceptorTest {
         when(claims.getSubject()).thenReturn("admin");
         when(claims.getExpiration()).thenReturn(expiration);
         when(users.loadUserByUsername("admin")).thenReturn(User.withUsername("admin").password("x").roles("ADMIN").build());
-        WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(jwtUtil, users, expiryRegistry);
+        WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(
+                jwtUtil, users, expiryRegistry, activeLoginSessions());
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
         accessor.setSessionId("session-1");
         accessor.setSessionAttributes(new HashMap<>());
@@ -62,7 +64,7 @@ class WebSocketAuthChannelInterceptorTest {
     void rejectsAnonymousConnectFrame() {
         WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(
                 mock(JwtUtil.class), mock(CustomUserDetailsService.class),
-                mock(WebSocketSessionExpiryRegistry.class));
+                mock(WebSocketSessionExpiryRegistry.class), activeLoginSessions());
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
         accessor.setLeaveMutable(true);
         Message<byte[]> message = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
@@ -82,7 +84,7 @@ class WebSocketAuthChannelInterceptorTest {
         User user = (User) User.withUsername("admin").password("x").roles("ADMIN").build();
         when(users.loadUserByUsername("admin")).thenReturn(user);
         WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(
-                jwtUtil, users, mock(WebSocketSessionExpiryRegistry.class));
+                jwtUtil, users, mock(WebSocketSessionExpiryRegistry.class), activeLoginSessions());
 
         for (StompCommand command : new StompCommand[]{StompCommand.SUBSCRIBE, StompCommand.SEND}) {
             StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
@@ -103,7 +105,7 @@ class WebSocketAuthChannelInterceptorTest {
     void rejectsSubscribeAfterStoredExpiration() {
         WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(
                 mock(JwtUtil.class), mock(CustomUserDetailsService.class),
-                mock(WebSocketSessionExpiryRegistry.class));
+                mock(WebSocketSessionExpiryRegistry.class), activeLoginSessions());
         User user = (User) User.withUsername("admin").password("x").roles("ADMIN").build();
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
         accessor.setUser(new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
@@ -127,7 +129,8 @@ class WebSocketAuthChannelInterceptorTest {
         when(jwtUtil.validateAndGetClaims("expired-token")).thenReturn(claims);
         when(claims.getExpiration()).thenReturn(Date.from(Instant.now().minusSeconds(1)));
         WebSocketAuthChannelInterceptor interceptor = new WebSocketAuthChannelInterceptor(
-                jwtUtil, mock(CustomUserDetailsService.class), mock(WebSocketSessionExpiryRegistry.class));
+                jwtUtil, mock(CustomUserDetailsService.class), mock(WebSocketSessionExpiryRegistry.class),
+                activeLoginSessions());
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
         accessor.setSessionId("session-expired");
         accessor.setSessionAttributes(new HashMap<>());
@@ -138,5 +141,13 @@ class WebSocketAuthChannelInterceptorTest {
         assertThatThrownBy(() -> interceptor.preSend(
                 message, mock(org.springframework.messaging.MessageChannel.class)))
                 .isInstanceOf(AccessDeniedException.class);
+    }
+
+    private UserLoginSessionService activeLoginSessions() {
+        UserLoginSessionService sessions = mock(UserLoginSessionService.class);
+        when(sessions.validateAndTouch(
+                org.mockito.ArgumentMatchers.nullable(String.class),
+                org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(true);
+        return sessions;
     }
 }

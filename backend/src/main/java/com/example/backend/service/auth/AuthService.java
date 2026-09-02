@@ -4,17 +4,20 @@ import com.example.backend.common.error.UnauthorizedException;
 import com.example.backend.dto.auth.LoginRequest;
 import com.example.backend.dto.auth.LoginResponse;
 import com.example.backend.model.user.User;
+import com.example.backend.remotecontrol.RemoteControlSessionService;
 import com.example.backend.repository.user.UserRepository;
 import com.example.backend.security.WebSocketSessionExpiryRegistry;
 import com.example.backend.service.audit.AuditService;
 import com.example.backend.util.JwtUtil;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -28,11 +31,19 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final UserRoleResolver userRoleResolver;
+    private final UserFeaturePermissionService featurePermissionService;
     private final AuditService auditService;
     private final WebSocketSessionExpiryRegistry webSocketSessions;
+    private final UserLoginSessionService loginSessions;
+    private final RemoteControlSessionService remoteControlSessions;
 
     @Transactional(noRollbackFor = UnauthorizedException.class)
     public LoginResponse login(LoginRequest request, String ipAddress) {
+        return login(request, ipAddress, null);
+    }
+
+    @Transactional(noRollbackFor = UnauthorizedException.class)
+    public LoginResponse login(LoginRequest request, String ipAddress, String userAgent) {
         var user = userRepository.findByUsernameForLogin(request.getUsername())
                 .orElseThrow(() -> invalidCredentials());
         LocalDateTime now = LocalDateTime.now();
@@ -48,28 +59,79 @@ public class AuthService {
         }
 
         user.resetLoginFailures();
-        String token = jwtUtil.generateToken(user.getUsername());
+        webSocketSessions.closeUserSessions(user.getUsername());
+        remoteControlSessions.closeOwnerSessions(user.getUsername());
+        LocalDateTime loggedInAt = LocalDateTime.now();
+        String sessionId = UUID.randomUUID().toString();
+        user.startLoginSession(sessionId, sanitize(ipAddress, 64), sanitize(userAgent, 500), loggedInAt);
+        String token = jwtUtil.generateToken(user.getUsername(), sessionId);
         String role = userRoleResolver.resolveRole(user);
-        return LoginResponse.of(user.getUsername(), token, role);
+        auditService.log(user.getUsername(), "LOGIN_SUCCESS", "USER", user.getUsername(),
+                "{\"singleSession\":true}", sanitize(ipAddress, 64));
+        return LoginResponse.of(user.getUsername(), token, role, featurePermissionService.resolveCodes(user, role));
     }
 
     public String issueRefreshToken(String username) {
-        return jwtUtil.generateRefreshToken(username);
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UnauthorizedException("자동 로그인 정보가 유효하지 않습니다."));
+        if (user.getActiveSessionId() == null) {
+            throw new UnauthorizedException("자동 로그인 정보가 유효하지 않습니다.");
+        }
+        return jwtUtil.generateRefreshToken(username, user.getActiveSessionId());
     }
 
     public LoginResponse refresh(String refreshToken) {
+        return refresh(refreshToken, null, null);
+    }
+
+    @Transactional
+    public LoginResponse refresh(String refreshToken, String ipAddress, String userAgent) {
         try {
-            String username = jwtUtil.validateRefreshAndGetClaims(refreshToken).getSubject();
+            var claims = jwtUtil.validateRefreshAndGetClaims(refreshToken);
+            String username = claims.getSubject();
+            String sessionId = jwtUtil.getSessionId(claims);
             var user = userRepository.findByUsername(username)
                     .orElseThrow(() -> new UnauthorizedException("자동 로그인 정보가 유효하지 않습니다."));
             if (!user.isActive()) {
                 throw new UnauthorizedException("비활성화된 계정입니다. 관리자에게 문의해 주세요.");
             }
-            String token = jwtUtil.generateToken(user.getUsername());
+            if (!user.hasLoginSession(sessionId)) {
+                throw new UnauthorizedException("다른 장소에서 새로 로그인되어 현재 로그인이 종료되었습니다.");
+            }
+            user.touchLoginSession(sessionId, LocalDateTime.now());
+            if (ipAddress != null && !ipAddress.isBlank()) user.setLoginIpAddress(sanitize(ipAddress, 64));
+            if (userAgent != null && !userAgent.isBlank()) user.setLoginUserAgent(sanitize(userAgent, 500));
+            String token = jwtUtil.generateToken(user.getUsername(), sessionId);
             String role = userRoleResolver.resolveRole(user);
-            return LoginResponse.of(user.getUsername(), token, role);
+            return LoginResponse.of(user.getUsername(), token, role, featurePermissionService.resolveCodes(user, role));
         } catch (JwtException | IllegalArgumentException ex) {
             throw new UnauthorizedException("자동 로그인 정보가 만료되었거나 유효하지 않습니다.");
+        }
+    }
+
+    public void logout(String accessToken, String refreshToken) {
+        Claims claims = null;
+        try {
+            if (accessToken != null && !accessToken.isBlank()) {
+                claims = jwtUtil.validateAndGetClaims(accessToken);
+            }
+        } catch (JwtException | IllegalArgumentException ignored) {
+        }
+        if (claims == null) {
+            try {
+                if (refreshToken != null && !refreshToken.isBlank()) {
+                    claims = jwtUtil.validateRefreshAndGetClaims(refreshToken);
+                }
+            } catch (JwtException | IllegalArgumentException ignored) {
+                return;
+            }
+        }
+        if (claims == null) return;
+        String username = claims.getSubject();
+        String sessionId = jwtUtil.getSessionId(claims);
+        if (loginSessions.revoke(username, sessionId)) {
+            webSocketSessions.closeUserSessions(username);
+            remoteControlSessions.closeOwnerSessions(username);
         }
     }
 
@@ -82,6 +144,7 @@ public class AuthService {
             auditService.log(user.getUsername(), "LOGIN_ACCOUNT_DISABLED", "USER", user.getUsername(),
                     "{\"failedAttempts\":10,\"reason\":\"PASSWORD_FAILURE_LIMIT\"}", ipAddress);
             webSocketSessions.closeUserSessions(user.getUsername());
+            remoteControlSessions.closeOwnerSessions(user.getUsername());
             throw new UnauthorizedException("비밀번호 오류 10회로 계정이 비활성화되었습니다. 관리자에게 문의해 주세요.");
         }
         if (failures == TEMPORARY_LOCK_THRESHOLD) {
@@ -97,5 +160,12 @@ public class AuthService {
 
     private UnauthorizedException invalidCredentials() {
         return new UnauthorizedException("아이디 또는 비밀번호가 올바르지 않습니다.");
+    }
+
+    private String sanitize(String value, int maxLength) {
+        if (value == null) return null;
+        String sanitized = value.replaceAll("[\\r\\n\\u0000]", " ").trim();
+        if (sanitized.isBlank()) return null;
+        return sanitized.length() <= maxLength ? sanitized : sanitized.substring(0, maxLength);
     }
 }

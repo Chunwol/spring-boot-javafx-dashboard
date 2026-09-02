@@ -22,6 +22,12 @@ const emailSchema = z.string()
   .max(200, '이메일은 200자 이하로 입력하세요.')
   .email('올바른 이메일 주소를 입력하세요.')
 
+const noteSchema = z.string().trim().max(500, '비고는 500자 이하로 입력하세요.').optional()
+const permissionsSchema = z.array(z.enum([
+  'CLASSROOMS', 'PCS', 'COMMANDS', 'SCRIPT_LIBRARY', 'TOKENS', 'BROKEN_PCS',
+  'NETWORK', 'REPORTS', 'FILES', 'CLASSROOM_SETTINGS', 'SYSTEM_SETTINGS',
+]))
+
 export const createUserSchema = z.object({
   username: usernameSchema,
   password: z.string()
@@ -30,15 +36,19 @@ export const createUserSchema = z.object({
     .max(100, '비밀번호는 100자 이하로 입력하세요.'),
   email: emailSchema,
   role: roleSchema,
+  note: noteSchema,
+  permissions: permissionsSchema.optional(),
 })
 
 export const updateUserSchema = z.object({
   username: usernameSchema,
   email: emailSchema,
   role: roleSchema,
+  note: noteSchema,
+  permissions: permissionsSchema.optional(),
 })
 
-export type UserFormErrors = Partial<Record<'username' | 'password' | 'email' | 'role', string>>
+export type UserFormErrors = Partial<Record<'username' | 'password' | 'email' | 'role' | 'note', string>>
 
 export type UserValidationResult<T> =
   | { success: true; data: T; errors: UserFormErrors }
@@ -76,7 +86,10 @@ export function filterAndSortUsers(users: ManagedUser[], search: string) {
   const needle = search.trim().toLocaleLowerCase('ko-KR')
   const collator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
   return users
-    .filter((user) => !needle || [user.username, user.email, user.role, roleLabel(user.role)]
+    .filter((user) => !needle || [
+      user.username, user.email, user.role, roleLabel(user.role), user.note, user.loginIpAddress,
+    ]
+      .filter((value): value is string => Boolean(value))
       .some((value) => value.toLocaleLowerCase('ko-KR').includes(needle)))
     .sort((left, right) => collator.compare(left.username, right.username))
 }

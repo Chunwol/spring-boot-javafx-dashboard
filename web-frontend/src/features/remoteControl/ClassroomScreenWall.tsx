@@ -266,7 +266,7 @@ function ScreenWallTile({ pc, enabled, onStateChange, onSessionChange }: {
 
 export function ClassroomScreenWall({ room, pcs, onClose }: Props) {
   const { token } = useAuth()
-  const [scope, setScope] = useState<ScreenWallScope>('all')
+  const [scope, setScope] = useState<ScreenWallScope>('teacher')
   const wallPcs = useMemo(() => screenWallPcs(pcs, scope), [pcs, scope])
   const wallPcKey = useMemo(() => wallPcs.map((pc) => pc.macAddress).join('|'), [wallPcs])
   const wallMacs = useMemo(() => new Set(wallPcs.map((pc) => pc.macAddress)), [wallPcs])

@@ -1,0 +1,57 @@
+package com.example.backend.security;
+
+import jakarta.servlet.FilterChain;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+class FeaturePermissionAuthorizationFilterTest {
+
+    private final FeaturePermissionAuthorizationFilter filter = new FeaturePermissionAuthorizationFilter();
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void rejectsAnApiFromAnUncheckedFeature() throws Exception {
+        authenticate("PERM_NETWORK");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/reports/monthly");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        verify(chain, never()).doFilter(request, response);
+    }
+
+    @Test
+    void permitsTheApiForAnAssignedFeature() throws Exception {
+        authenticate("PERM_NETWORK");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/dashboard/traffic");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+    }
+
+    private void authenticate(String authority) {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "operator", null, List.of(new SimpleGrantedAuthority(authority))));
+    }
+}

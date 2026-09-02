@@ -92,7 +92,7 @@ describe('ClassroomScreenWall', () => {
   })
 
   it('opens a low-bandwidth view-only stream and cleans it up', async () => {
-    const view = render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+    const view = render(<ClassroomScreenWall room={room} pcs={[teacherPc]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('연결됨')).toBeInTheDocument()
     const client = mocks.rfbCreated.mock.calls[0][0]
@@ -112,39 +112,40 @@ describe('ClassroomScreenWall', () => {
   })
 
   it('does not reconnect when a status refresh replaces the PC object', async () => {
-    const view = render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+    const view = render(<ClassroomScreenWall room={room} pcs={[teacherPc]} onClose={vi.fn()} />)
     expect(await screen.findByText('연결됨')).toBeInTheDocument()
 
-    view.rerender(<ClassroomScreenWall room={{ ...room }} pcs={[{ ...pc }]} onClose={vi.fn()} />)
+    view.rerender(<ClassroomScreenWall room={{ ...room }} pcs={[{ ...teacherPc }]} onClose={vi.fn()} />)
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
     expect(mocks.rfbCreated).toHaveBeenCalledTimes(1)
   })
 
-  it('includes the teacher PC as the first view-only monitoring tile', async () => {
+  it('opens with only the teacher PC selected by default', async () => {
     render(<ClassroomScreenWall room={room} pcs={[pc, teacherPc]} onClose={vi.fn()} />)
 
     expect(await screen.findByText('교사 PC · 214_T')).toBeInTheDocument()
-    expect(await screen.findByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
-    expect(mocks.create.mock.calls.map(([macAddress]) => macAddress)).toContain(teacherPc.macAddress)
+    expect(await screen.findByText('교사 PC 1대 · 학생 PC 0대 · 연결 1/1')).toBeInTheDocument()
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+    expect(mocks.create).toHaveBeenCalledWith(teacherPc.macAddress)
     expect(mocks.rfbCreated.mock.calls.every(([client]) => client.viewOnly)).toBe(true)
   })
 
   it('switches between teacher, student, and combined monitoring targets', async () => {
     render(<ClassroomScreenWall room={room} pcs={[pc, teacherPc]} onClose={vi.fn()} />)
-    expect(await screen.findByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '교사 PC' }))
-
     expect(await screen.findByText('교사 PC 1대 · 학생 PC 0대 · 연결 1/1')).toBeInTheDocument()
-    expect(screen.queryByText('1번 · 214-1')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '둘 다' }))
+
+    expect(await screen.findByText('교사 PC 1대 · 학생 PC 1대 · 연결 2/2')).toBeInTheDocument()
+    expect(screen.getByText('1번 · 214-1')).toBeInTheDocument()
     expect(screen.getByText('교사 PC · 214_T')).toBeInTheDocument()
-    expect(screen.getByLabelText('214_T 화면').closest('.screen-wall-grid')).toHaveClass('compact-1')
+    expect(screen.getByLabelText('214_T 화면').closest('.screen-wall-grid')).toHaveClass('compact-2')
   })
 
   it('automatically recreates a student screen session after an unexpected disconnect', async () => {
     render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '학생 PC' }))
     expect(await screen.findByText('연결됨')).toBeInTheDocument()
 
     const listeners = mocks.rfbCreated.mock.calls[0][1] as Map<string, (event: CustomEvent) => void>
@@ -162,6 +163,7 @@ describe('ClassroomScreenWall', () => {
     mocks.create.mockRejectedValueOnce(new Error('temporary gateway failure'))
 
     render(<ClassroomScreenWall room={room} pcs={[pc]} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '학생 PC' }))
 
     expect(await screen.findByText('연결에 실패해 다시 연결합니다. (1/3)')).toBeInTheDocument()
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2), {

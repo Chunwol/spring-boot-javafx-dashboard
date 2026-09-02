@@ -57,13 +57,13 @@ class ReportControllerTest {
     }
 
     @Test
-    void monthlyRegenerationRequiresAdminRole() throws Exception {
+    void monthlyRegenerationAllowsAdminOrAssignedReportFeature() throws Exception {
         Method method = ReportController.class.getMethod("regenerate", String.class);
 
         PreAuthorize preAuthorize = method.getAnnotation(PreAuthorize.class);
 
         assertThat(preAuthorize).isNotNull();
-        assertThat(preAuthorize.value()).isEqualTo("hasRole('ADMIN')");
+        assertThat(preAuthorize.value()).isEqualTo("hasRole('ADMIN') or hasAuthority('PERM_REPORTS')");
     }
 
     private static ReportController controller(ReportService reportService) {

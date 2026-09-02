@@ -19,8 +19,24 @@ export interface RemoteControlTicket {
   ticketExpiresAt: string
 }
 
+export interface ActiveRemoteControlSession {
+  sessionId: string
+  username: string
+  sourceIp?: string | null
+  userAgent?: string | null
+  macAddress: string
+  pcName?: string | null
+  targetIp?: string | null
+  status: RemoteControlStatus
+  startedAt: string
+}
+
 export function createRemoteControlSession(macAddress: string) {
   return api.post<RemoteControlSession>('/remote-control/sessions', { macAddress })
+}
+
+export function listActiveRemoteControlSessions() {
+  return api.get<ActiveRemoteControlSession[]>('/remote-control/sessions/active')
 }
 
 export function getRemoteControlSession(sessionId: string) {

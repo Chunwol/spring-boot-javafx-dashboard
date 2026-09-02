@@ -3,6 +3,7 @@ import type { PropsWithChildren } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, setApiAccessToken, setApiAccessTokenRefresher } from '../api/client'
 import type { AuthUser, LoginResponse, StoredSession, UserRole } from './types'
+import { normalizePermissions, type FeaturePermission } from './permissions'
 
 const SESSION_KEY = 'classroom-dashboard.session'
 const REMEMBERED_USERNAME_KEY = 'classroom-dashboard.username'
@@ -15,6 +16,7 @@ interface AuthContextValue {
   isAuthenticated: boolean
   isAdmin: boolean
   canWrite: boolean
+  hasPermission: (permission: FeaturePermission) => boolean
   isRestoring: boolean
   rememberedUsername: string
   login: (username: string, password: string, rememberUsername: boolean, autoLogin: boolean) => Promise<void>
@@ -55,7 +57,8 @@ function loadSession(): StoredSession | null {
       sessionStorage.removeItem(SESSION_KEY)
       return null
     }
-    return { ...parsed, role: normalizeRole(parsed.role) }
+    const role = normalizeRole(parsed.role)
+    return { ...parsed, role, permissions: normalizePermissions(role, parsed.permissions) }
   } catch {
     return null
   }
@@ -88,10 +91,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const refreshSession = useCallback(async () => {
     try {
       const response = await api.post<LoginResponse>('/auth/refresh')
+      const role = normalizeRole(response.role)
       const nextSession: StoredSession = {
         username: response.username,
         token: response.token,
-        role: normalizeRole(response.role),
+        role,
+        permissions: normalizePermissions(role, response.permissions),
       }
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession))
       setApiAccessToken(nextSession.token)
@@ -171,10 +176,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     autoLogin: boolean,
   ) => {
     const response = await api.post<LoginResponse>('/auth/login', { username, password, autoLogin })
+    const role = normalizeRole(response.role)
     const nextSession: StoredSession = {
       username: response.username || username,
       token: response.token,
-      role: normalizeRole(response.role),
+      role,
+      permissions: normalizePermissions(role, response.permissions),
     }
     localStorage.removeItem(SESSION_KEY)
     sessionStorage.removeItem(SESSION_KEY)
@@ -191,11 +198,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [])
 
   const value = useMemo<AuthContextValue>(() => ({
-    user: session ? { username: session.username, role: session.role } : null,
+    user: session ? { username: session.username, role: session.role, permissions: session.permissions } : null,
     token: session?.token || null,
     isAuthenticated: Boolean(session),
     isAdmin: session?.role === 'ADMIN',
     canWrite: Boolean(session && session.role !== 'VIEWER'),
+    hasPermission: (permission) => Boolean(session?.permissions.includes(permission)),
     isRestoring,
     rememberedUsername,
     login,

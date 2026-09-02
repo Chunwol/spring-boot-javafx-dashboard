@@ -20,31 +20,35 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
+import type { FeaturePermission } from '../auth/permissions'
 import { AlertsMenu } from '../components/alerts/AlertsMenu'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { useRealtimeUpdates } from '../features/realtime/useRealtimeUpdates'
 
-const navigation = [
-  { to: '/classrooms', label: '강의실 현황', icon: Activity },
-  { to: '/pcs', label: 'PC 관리', icon: MonitorCog },
-  { to: '/commands', label: '명령 발행 / 이력', icon: Command, adminOnly: true },
-  { to: '/script-library', label: '스크립트 보관함', icon: FileCode2, adminOnly: true },
-  { to: '/tokens', label: '토큰 관리', icon: KeyRound, adminOnly: true },
-  { to: '/broken', label: '고장 PC', icon: AlertTriangle },
-  { to: '/network', label: '네트워크', icon: Network },
-  { to: '/reports', label: '보고서', icon: BarChart3 },
-  { to: '/files', label: '파일 배포', icon: FolderUp, adminOnly: true },
+type NavigationItem = { to: string; label: string; icon: LucideIcon; permission?: FeaturePermission; adminOnly?: boolean }
+
+const navigation: ReadonlyArray<NavigationItem> = [
+  { to: '/classrooms', label: '강의실 현황', icon: Activity, permission: 'CLASSROOMS' },
+  { to: '/pcs', label: 'PC 관리', icon: MonitorCog, permission: 'PCS' },
+  { to: '/commands', label: '명령 발행 / 이력', icon: Command, permission: 'COMMANDS' },
+  { to: '/script-library', label: '스크립트 보관함', icon: FileCode2, permission: 'SCRIPT_LIBRARY' },
+  { to: '/tokens', label: '토큰 관리', icon: KeyRound, permission: 'TOKENS' },
+  { to: '/broken', label: '고장 PC', icon: AlertTriangle, permission: 'BROKEN_PCS' },
+  { to: '/network', label: '네트워크', icon: Network, permission: 'NETWORK' },
+  { to: '/reports', label: '보고서', icon: BarChart3, permission: 'REPORTS' },
+  { to: '/files', label: '파일 배포', icon: FolderUp, permission: 'FILES' },
 ]
 
-const settingsNavigation = [
-  { to: '/settings/classrooms', label: '강의실 설정', icon: School },
+const settingsNavigation: ReadonlyArray<NavigationItem> = [
+  { to: '/settings/classrooms', label: '강의실 설정', icon: School, permission: 'CLASSROOM_SETTINGS' },
   { to: '/settings/users', label: '사용자 관리', icon: Users, adminOnly: true },
-  { to: '/settings/system', label: '시스템 설정', icon: Settings },
+  { to: '/settings/system', label: '시스템 설정', icon: Settings, permission: 'SYSTEM_SETTINGS' },
 ]
 
 export function AppShell() {
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, hasPermission } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -54,8 +58,8 @@ export function AppShell() {
   useRealtimeUpdates()
 
   const closeSidebar = () => setSidebarOpen(false)
-  const visibleNavigation = useMemo(() => navigation.filter((item) => !item.adminOnly || isAdmin), [isAdmin])
-  const visibleSettings = useMemo(() => settingsNavigation.filter((item) => !item.adminOnly || isAdmin), [isAdmin])
+  const visibleNavigation = useMemo(() => navigation.filter((item) => item.permission && hasPermission(item.permission)), [hasPermission])
+  const visibleSettings = useMemo(() => settingsNavigation.filter((item) => item.adminOnly ? isAdmin : Boolean(item.permission && hasPermission(item.permission))), [hasPermission, isAdmin])
   const roleLabel = user?.role === 'ADMIN' ? '관리자' : user?.role === 'USER' ? '운영자' : '보기 권한'
 
   useEffect(() => {
@@ -83,10 +87,10 @@ export function AppShell() {
           <span><i className="status-dot offline" />오프라인</span>
         </div>
         <div className="topbar-actions">
-          <label className="global-search">
+          {hasPermission('CLASSROOMS') && <label className="global-search">
             <Search size={17} aria-hidden="true" />
             <input type="search" value={search} onChange={(event) => { const value = event.target.value; setSearch(value); if (!value.trim() && location.pathname.startsWith('/classrooms')) navigate('/classrooms', { replace: true }) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); searchClassrooms() } }} placeholder="PC/강의실 검색" aria-label="PC 또는 강의실 검색" />
-          </label>
+          </label>}
           <AlertsMenu />
           <div className="profile-menu">
             <button className="profile-trigger" onClick={() => setProfileOpen((open) => !open)} aria-expanded={profileOpen}>

@@ -220,7 +220,8 @@ function MonthlyRows({ reports, canWrite, onRegenerate }: {
 
 export function ReportsPage() {
   const queryClient = useQueryClient()
-  const { isAdmin } = useAuth()
+  const { isAdmin, canWrite } = useAuth()
+  const canOperate = isAdmin || canWrite
   const { showToast } = useToast()
   const initialFilters = useMemo(() => defaultReportFilters(), [])
   const [draftFilters, setDraftFilters] = useState<ReportFilters>(initialFilters)
@@ -478,7 +479,7 @@ export function ReportsPage() {
             <h2 id="monthly-report-title" style={styles.sectionTitle}><CalendarDays size={16} />월간 보고서</h2>
             <p style={styles.subtext}>월별 운영 집계 스냅샷</p>
           </div>
-          {isAdmin && (
+          {canOperate && (
             <div style={styles.monthlyActions}>
               <label style={{ ...styles.field, minWidth: 142 }}>
                 <span style={styles.fieldLabel}>재생성 대상 월</span>
@@ -499,7 +500,7 @@ export function ReportsPage() {
         ) : (
           <>
             {monthlyQuery.isError && <div className="form-error" role="alert">월간 보고서 갱신에 실패해 기존 데이터를 표시합니다.</div>}
-            <MonthlyRows reports={monthlyReports} canWrite={isAdmin} onRegenerate={setPendingRegenerate} />
+            <MonthlyRows reports={monthlyReports} canWrite={canOperate} onRegenerate={setPendingRegenerate} />
           </>
         )}
       </section>

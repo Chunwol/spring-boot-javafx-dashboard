@@ -1,6 +1,7 @@
 package com.example.backend.remotecontrol;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -14,10 +15,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/remote-control/sessions")
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS')")
 public class RemoteControlController {
 
     private final RemoteControlSessionService sessionService;
@@ -29,11 +31,18 @@ public class RemoteControlController {
     @PostMapping
     public ResponseEntity<RemoteControlSessionView> create(
             @Valid @RequestBody RemoteControlSessionRequest request,
-            Authentication authentication) {
+            Authentication authentication,
+            HttpServletRequest servletRequest) {
         RemoteControlSessionView view = sessionService.createSession(
-                request.macAddress(), request.taskId(), authentication.getName());
+                request.macAddress(), request.taskId(), authentication.getName(),
+                servletRequest.getRemoteAddr(), servletRequest.getHeader("User-Agent"));
         HttpStatus status = "PENDING".equals(view.status()) ? HttpStatus.ACCEPTED : HttpStatus.CREATED;
         return ResponseEntity.status(status).body(view);
+    }
+
+    @GetMapping("/active")
+    public List<ActiveRemoteControlSessionView> active() {
+        return sessionService.listActiveSessions();
     }
 
     @GetMapping("/{sessionId}")

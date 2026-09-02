@@ -1,6 +1,7 @@
 package com.example.backend.security;
 
 import com.example.backend.service.auth.CustomUserDetailsService;
+import com.example.backend.service.auth.UserLoginSessionService;
 import com.example.backend.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import org.springframework.messaging.Message;
@@ -30,14 +31,17 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
     private final WebSocketSessionExpiryRegistry expiryRegistry;
+    private final UserLoginSessionService loginSessions;
 
     public WebSocketAuthChannelInterceptor(
             JwtUtil jwtUtil,
             CustomUserDetailsService userDetailsService,
-            WebSocketSessionExpiryRegistry expiryRegistry) {
+            WebSocketSessionExpiryRegistry expiryRegistry,
+            UserLoginSessionService loginSessions) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
         this.expiryRegistry = expiryRegistry;
+        this.loginSessions = loginSessions;
     }
 
     @Override
@@ -62,6 +66,7 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
             String token = authorization.substring(7);
             Claims claims = jwtUtil.validateAndGetClaims(token);
             Instant expiresAt = requireFutureExpiration(claims);
+            requireCurrentSession(claims);
             UserDetails user = userDetailsService.loadUserByUsername(claims.getSubject());
             accessor.setUser(new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
             Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
@@ -94,6 +99,7 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
         try {
             Claims claims = jwtUtil.validateAndGetClaims(token);
             requireFutureExpiration(claims);
+            requireCurrentSession(claims);
             if (!accessor.getUser().getName().equals(claims.getSubject())) {
                 throw new AccessDeniedException("WebSocket token subject mismatch");
             }
@@ -116,5 +122,12 @@ public class WebSocketAuthChannelInterceptor implements ChannelInterceptor {
             throw new AccessDeniedException("WebSocket bearer token expired");
         }
         return expiration.toInstant();
+    }
+
+    private void requireCurrentSession(Claims claims) {
+        String username = claims == null ? null : claims.getSubject();
+        if (!loginSessions.validateAndTouch(username, jwtUtil.getSessionId(claims))) {
+            throw new AccessDeniedException("WebSocket login session was replaced");
+        }
     }
 }

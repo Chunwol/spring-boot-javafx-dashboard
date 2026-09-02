@@ -28,10 +28,14 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -305,6 +309,7 @@ public class CommandLifecycleService {
             c.setStatus("QUEUED");
             c.setCreatedAt(LocalDateTime.now());
             c.setIsExecuted(false);
+            stampRequestOrigin(c);
             commands.add(c);
         }
 
@@ -856,6 +861,7 @@ public class CommandLifecycleService {
         c.setStatus("QUEUED");
         c.setCreatedAt(LocalDateTime.now());
         c.setIsExecuted(false);
+        stampRequestOrigin(c);
         CommandQueue saved = commandQueueRepository.save(c);
         notifyWaitingAgentsAfterCommit(List.of(leaderMac));
         return saved;
@@ -1017,6 +1023,8 @@ public class CommandLifecycleService {
         row.put("payloadJson", c.getPayloadJson());
         row.put("scriptUrl", c.getScriptUrl());
         row.put("createdAt", c.getCreatedAt());
+        row.put("requestedBy", c.getRequestedBy());
+        row.put("requestedIp", c.getRequestedIp());
         row.put("deliveredAt", c.getDeliveredAt());
         row.put("ackedAt", c.getAckedAt());
         row.put("completedAt", c.getCompletedAt());
@@ -1044,6 +1052,19 @@ public class CommandLifecycleService {
             }
         }
         return row;
+    }
+
+    private void stampRequestOrigin(CommandQueue command) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String actor = authentication != null && authentication.isAuthenticated()
+                ? authentication.getName() : "system";
+        command.setRequestedBy(actor == null || actor.isBlank() ? "system" : actor);
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            String ipAddress = attributes.getRequest().getRemoteAddr();
+            if (ipAddress != null && !ipAddress.isBlank()) {
+                command.setRequestedIp(ipAddress.length() <= 64 ? ipAddress : ipAddress.substring(0, 64));
+            }
+        }
     }
 
     // ── 유틸리티 ─────────────────────────────────────────────────────────────

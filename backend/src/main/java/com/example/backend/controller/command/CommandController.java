@@ -82,7 +82,7 @@ public class CommandController {
     }
 
     @PostMapping("/commands")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
     @Operation(
         summary = "PC 명령 발행",
         description = "관리자가 PC에 원격 명령(종료, 재부팅, WOL, 스크립트 등)을 발행합니다. " +
@@ -133,7 +133,7 @@ public class CommandController {
     }
 
     @PostMapping("/commands/to-ip")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
     @Operation(summary = "IP 기반 PC 명령 발행",
                description = "IP 주소로 PC를 조회하여 명령을 발행합니다.")
     @ApiResponse(responseCode = "202", description = "명령 발행 성공")
@@ -148,7 +148,7 @@ public class CommandController {
     }
 
     @GetMapping("/commands")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
     @Operation(summary = "명령 목록 조회",
                description = "진행 중이거나 완료된 명령 목록을 조회합니다. 페이지네이션을 지원합니다.")
     @ApiResponse(responseCode = "200", description = "명령 목록 조회 성공")
@@ -166,14 +166,14 @@ public class CommandController {
     }
 
     @PostMapping("/commands/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
     @Operation(summary = "명령 상태 일괄 조회", description = "대량 작업의 taskId를 한 요청으로 조회합니다.")
     public ResponseEntity<?> commandStatuses(@Valid @RequestBody CommandStatusBatchRequestDto request) {
         return ResponseEntity.ok(commandLifecycleService.findCommandsByIds(request.getTaskIds()));
     }
 
     @PostMapping("/commands/{taskId}/cancel")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAnyAuthority('PERM_CLASSROOMS','PERM_PCS','PERM_COMMANDS','PERM_CLASSROOM_SETTINGS')")
     @Operation(
         summary = "대기 명령 취소",
         description = "명령 종류와 관계없이 아직 에이전트에 전달되지 않은 QUEUED 명령을 취소합니다."

@@ -62,6 +62,15 @@ class JwtUtilTest {
     }
 
     @Test
+    void accessAndRefreshTokensCarryTheSameLoginSessionId() {
+        String accessToken = jwtUtil.generateToken("admin", "session-1");
+        String refreshToken = jwtUtil.generateRefreshToken("admin", "session-1");
+
+        assertThat(jwtUtil.getSessionId(jwtUtil.validateAndGetClaims(accessToken))).isEqualTo("session-1");
+        assertThat(jwtUtil.getSessionId(jwtUtil.validateRefreshAndGetClaims(refreshToken))).isEqualTo("session-1");
+    }
+
+    @Test
     void refreshTokenIsAcceptedOnlyByRefreshValidation() {
         String refreshToken = jwtUtil.generateRefreshToken("admin");
 

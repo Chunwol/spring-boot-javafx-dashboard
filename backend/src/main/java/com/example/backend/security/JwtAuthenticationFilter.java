@@ -1,6 +1,7 @@
 package com.example.backend.security;
 
 import com.example.backend.service.auth.CustomUserDetailsService;
+import com.example.backend.service.auth.UserLoginSessionService;
 import com.example.backend.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -45,10 +46,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
+    private final UserLoginSessionService loginSessions;
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil,
+                                   CustomUserDetailsService userDetailsService,
+                                   UserLoginSessionService loginSessions) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
+        this.loginSessions = loginSessions;
     }
 
     @Override
@@ -70,10 +75,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // ── Step 2: 토큰 서명·만료 검증 및 클레임(페이로드) 추출 ─────
             Claims claims = jwtUtil.validateAndGetClaims(token);
             String username = claims.getSubject();
+            String sessionId = jwtUtil.getSessionId(claims);
 
             // ── Step 3: SecurityContext에 인증 정보 등록 ─────────────────
             // 이미 인증된 경우(예: 세션 기반 인증) 중복 설정을 방지
-            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            if (username != null
+                    && loginSessions.validateAndTouch(username, sessionId)
+                    && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());

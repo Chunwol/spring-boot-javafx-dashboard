@@ -246,6 +246,31 @@ class RemoteControlSessionServiceTest {
     }
 
     @Test
+    void listsEachActiveViewerWithAccountAndSourceLocation() {
+        when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));
+
+        RemoteControlSessionView first = service.createSession(
+                MAC, 42L, "admin-a", "192.0.2.50", "Mozilla/5.0 Chrome/140 Windows");
+        RemoteControlSessionView second = service.createSession(
+                MAC, null, "admin-b", "192.0.2.51", "Mozilla/5.0 Edg/140 Windows");
+
+        assertThat(service.listActiveSessions())
+                .extracting(ActiveRemoteControlSessionView::username)
+                .containsExactlyInAnyOrder("admin-a", "admin-b");
+        assertThat(service.listActiveSessions())
+                .extracting(ActiveRemoteControlSessionView::sourceIp)
+                .containsExactlyInAnyOrder("192.0.2.50", "192.0.2.51");
+
+        service.closeOwnerSessions("admin-a");
+
+        assertThat(service.getSession(first.sessionId(), "admin-a").status()).isEqualTo("CLOSED");
+        assertThat(service.getSession(second.sessionId(), "admin-b").status()).isEqualTo("READY");
+        assertThat(service.listActiveSessions())
+                .extracting(ActiveRemoteControlSessionView::username)
+                .containsExactly("admin-b");
+    }
+
+    @Test
     void capsTheNumberOfViewersPerPcWithoutRestartingTheStream() {
         properties.setMaxViewersPerPc(2);
         when(commandRepository.findById(42L)).thenReturn(Optional.of(completedStartTask(42L, MAC, 5900)));

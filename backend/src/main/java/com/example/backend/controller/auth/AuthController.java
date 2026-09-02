@@ -51,7 +51,8 @@ public class AuthController {
     @ApiResponse(responseCode = "401", description = "인증 실패")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest loginRequest,
                                                 HttpServletRequest request) {
-        LoginResponse response = authService.login(loginRequest, request.getRemoteAddr());
+        LoginResponse response = authService.login(
+                loginRequest, request.getRemoteAddr(), request.getHeader(HttpHeaders.USER_AGENT));
         ResponseCookie cookie = loginRequest.isAutoLogin()
                 ? refreshCookie(authService.issueRefreshToken(response.getUsername()))
                 : clearRefreshCookie();
@@ -63,11 +64,13 @@ public class AuthController {
     @PostMapping("/refresh")
     @Operation(summary = "자동 로그인 갱신", description = "HttpOnly 자동 로그인 쿠키를 검증하고 새 접근 토큰을 발급합니다.")
     public ResponseEntity<LoginResponse> refresh(
-            @CookieValue(name = REFRESH_COOKIE_NAME, required = false) String refreshToken) {
+            @CookieValue(name = REFRESH_COOKIE_NAME, required = false) String refreshToken,
+            HttpServletRequest request) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw new com.example.backend.common.error.UnauthorizedException("자동 로그인 정보가 없습니다.");
         }
-        LoginResponse response = authService.refresh(refreshToken);
+        LoginResponse response = authService.refresh(
+                refreshToken, request.getRemoteAddr(), request.getHeader(HttpHeaders.USER_AGENT));
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE,
                         refreshCookie(authService.issueRefreshToken(response.getUsername())).toString())
@@ -76,7 +79,12 @@ public class AuthController {
 
     @PostMapping("/logout")
     @Operation(summary = "로그아웃", description = "브라우저의 자동 로그인 쿠키를 삭제합니다.")
-    public ResponseEntity<Void> logout() {
+    public ResponseEntity<Void> logout(
+            @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @CookieValue(name = REFRESH_COOKIE_NAME, required = false) String refreshToken) {
+        String accessToken = authorization != null && authorization.startsWith("Bearer ")
+                ? authorization.substring(7) : null;
+        authService.logout(accessToken, refreshToken);
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, clearRefreshCookie().toString())
                 .build();

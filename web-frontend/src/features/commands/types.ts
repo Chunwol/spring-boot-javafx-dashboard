@@ -35,6 +35,8 @@ export interface CommandView {
   payloadJson?: string | null
   scriptUrl?: string | null
   createdAt?: string | null
+  requestedBy?: string | null
+  requestedIp?: string | null
   deliveredAt?: string | null
   ackedAt?: string | null
   completedAt?: string | null

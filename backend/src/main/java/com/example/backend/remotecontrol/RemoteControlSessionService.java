@@ -97,6 +97,15 @@ public class RemoteControlSessionService {
     }
 
     public RemoteControlSessionView createSession(String requestedMac, Long completedTaskId, String owner) {
+        return createSession(requestedMac, completedTaskId, owner, null, null);
+    }
+
+    public RemoteControlSessionView createSession(
+            String requestedMac,
+            Long completedTaskId,
+            String owner,
+            String sourceIp,
+            String userAgent) {
         ensureEnabled();
         PcMaster pc = requireOnlinePc(requestedMac);
         String canonicalMac = canonicalMac(pc.getMacAddress());
@@ -123,6 +132,10 @@ public class RemoteControlSessionService {
                         viewerId,
                         pc.getMacAddress(),
                         canonicalMac,
+                        pc.getPcName(),
+                        pc.getIpAddress(),
+                        owner,
+                        sanitize(sourceIp, 64),
                         now,
                         now.plus(properties.getSessionTtl()),
                         now.plus(properties.getCommandTimeout()));
@@ -134,7 +147,8 @@ public class RemoteControlSessionService {
             }
 
             ViewerEntry viewer = new ViewerEntry(
-                    viewerId, owner, stream, now, now.plus(properties.getReadyTtl()));
+                    viewerId, owner, sanitize(sourceIp, 64), sanitize(userAgent, 500),
+                    stream, now, now.plus(properties.getReadyTtl()));
             stream.viewerIds.add(viewerId);
             stream.noViewerDeadline = null;
             sessions.put(viewerId, viewer);
@@ -143,7 +157,8 @@ public class RemoteControlSessionService {
         if (createdStream) {
             try {
                 if (completedTaskId == null) {
-                    stream.taskId = enqueue(pc.getMacAddress(), START, stream.streamId);
+                    stream.taskId = enqueue(
+                            pc.getMacAddress(), START, stream.streamId, stream.startedBy, stream.startedFromIp);
                 } else {
                     stream.taskId = completedTaskId;
                     applyValidatedResult(stream, requireCompletedStartTask(stream, completedTaskId, pc));
@@ -281,6 +296,31 @@ public class RemoteControlSessionService {
                 .map(sessionId -> requireOwnedSession(sessionId, owner))
                 .toList();
         ownedEntries.forEach(viewer -> closeViewer(viewer, ViewerState.CLOSED, "Closed by administrator"));
+    }
+
+    public void closeOwnerSessions(String owner) {
+        if (owner == null || owner.isBlank()) return;
+        sessions.values().stream()
+                .filter(viewer -> viewer.active && owner.equalsIgnoreCase(viewer.owner))
+                .toList()
+                .forEach(viewer -> closeViewer(viewer, ViewerState.CLOSED, "Login session replaced"));
+    }
+
+    public List<ActiveRemoteControlSessionView> listActiveSessions() {
+        return sessions.values().stream()
+                .filter(viewer -> viewer.active)
+                .map(viewer -> new ActiveRemoteControlSessionView(
+                        viewer.sessionId,
+                        viewer.owner,
+                        viewer.sourceIp,
+                        viewer.userAgent,
+                        viewer.stream.macAddress,
+                        viewer.stream.pcName,
+                        viewer.stream.targetIp,
+                        toView(viewer).status(),
+                        viewer.createdAt))
+                .sorted((left, right) -> right.startedAt().compareTo(left.startedAt()))
+                .toList();
     }
 
     public void relayClosed(UUID sessionId) {
@@ -547,7 +587,7 @@ public class RemoteControlSessionService {
                 .findFirst();
     }
 
-    private long enqueue(String macAddress, String type, UUID streamId) {
+    private long enqueue(String macAddress, String type, UUID streamId, String requestedBy, String requestedIp) {
         CommandRequestDto request = new CommandRequestDto();
         request.setScope("SINGLE");
         request.setMacAddress(macAddress);
@@ -558,7 +598,13 @@ public class RemoteControlSessionService {
         if (!(taskIds instanceof List<?> ids) || ids.size() != 1 || !(ids.getFirst() instanceof Number taskId)) {
             throw new ConflictException("Remote-control command could not be queued");
         }
-        return taskId.longValue();
+        long id = taskId.longValue();
+        commandQueueRepository.findById(id).ifPresent(command -> {
+            command.setRequestedBy(requestedBy == null || requestedBy.isBlank() ? "system" : requestedBy);
+            command.setRequestedIp(requestedIp);
+            commandQueueRepository.save(command);
+        });
+        return id;
     }
 
     private boolean closeViewer(ViewerEntry viewer, ViewerState state, String reason) {
@@ -642,7 +688,7 @@ public class RemoteControlSessionService {
         synchronized (stream) {
             if (stream.stopIssued) return;
             try {
-                enqueue(stream.macAddress, STOP, stream.streamId);
+                enqueue(stream.macAddress, STOP, stream.streamId, stream.startedBy, stream.startedFromIp);
                 stream.stopIssued = true;
             } catch (RuntimeException exception) {
                 log.warn("Failed to queue remote-control stop for stream {} (will retry): {}",
@@ -741,6 +787,13 @@ public class RemoteControlSessionService {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
+    private String sanitize(String value, int maxLength) {
+        if (value == null) return null;
+        String sanitized = value.replaceAll("[\\r\\n\\u0000]", " ").trim();
+        if (sanitized.isBlank()) return null;
+        return sanitized.length() <= maxLength ? sanitized : sanitized.substring(0, maxLength);
+    }
+
     private Instant min(Instant left, Instant right) {
         return left.isBefore(right) ? left : right;
     }
@@ -770,6 +823,10 @@ public class RemoteControlSessionService {
         private final UUID streamId;
         private final String macAddress;
         private final String canonicalMac;
+        private final String pcName;
+        private final String targetIp;
+        private final String startedBy;
+        private final String startedFromIp;
         private final Instant createdAt;
         private final Instant expiresAt;
         private final Instant commandDeadline;
@@ -786,10 +843,15 @@ public class RemoteControlSessionService {
         private boolean stopIssued;
 
         private StreamEntry(UUID streamId, String macAddress, String canonicalMac,
+                            String pcName, String targetIp, String startedBy, String startedFromIp,
                             Instant createdAt, Instant expiresAt, Instant commandDeadline) {
             this.streamId = streamId;
             this.macAddress = macAddress;
             this.canonicalMac = canonicalMac;
+            this.pcName = pcName;
+            this.targetIp = targetIp;
+            this.startedBy = startedBy;
+            this.startedFromIp = startedFromIp;
             this.createdAt = createdAt;
             this.expiresAt = expiresAt;
             this.commandDeadline = commandDeadline;
@@ -799,20 +861,25 @@ public class RemoteControlSessionService {
     private static final class ViewerEntry {
         private final UUID sessionId;
         private final String owner;
+        private final String sourceIp;
+        private final String userAgent;
         private final StreamEntry stream;
         private final Instant createdAt;
         private final Instant readyDeadline;
-        private boolean active = true;
+        private volatile boolean active = true;
         private ViewerState state = ViewerState.OPEN;
         private byte[] ticketHash;
         private Instant ticketExpiresAt;
         private String failureReason;
         private Instant closedAt;
 
-        private ViewerEntry(UUID sessionId, String owner, StreamEntry stream,
+        private ViewerEntry(UUID sessionId, String owner, String sourceIp, String userAgent,
+                            StreamEntry stream,
                             Instant createdAt, Instant readyDeadline) {
             this.sessionId = sessionId;
             this.owner = owner;
+            this.sourceIp = sourceIp;
+            this.userAgent = userAgent;
             this.stream = stream;
             this.createdAt = createdAt;
             this.readyDeadline = readyDeadline;
