@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Monitor, Power, PowerOff, RefreshCw, RotateCw, Search, Shield, UploadCloud, Wrench } from 'lucide-react'
+import { Eye, Monitor, Power, PowerOff, RefreshCw, RotateCw, Search, Shield, UploadCloud, Wrench } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { scmatePermission } from '../auth/permissions'
@@ -84,6 +84,7 @@ export function PcsPage() {
   const [page, setPage] = useState(0)
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null)
   const [operationTargets, setOperationTargets] = useState<PcStatus[]>([])
+  const [viewerTarget, setViewerTarget] = useState<PcStatus | null>(null)
   const [remoteTarget, setRemoteTarget] = useState<PcStatus | null>(null)
   const [scmateTargetMac, setScmateTargetMac] = useState<string | null>(null)
 
@@ -259,7 +260,7 @@ export function PcsPage() {
             <thead>
               <tr>
                 <th style={{ width: 44 }}><SelectAllCheckbox checked={selectState.checked} indeterminate={selectState.indeterminate} disabled={!selectState.selectableMacs.length} onChange={toggleFiltered} /></th>
-                <th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>역할</th><th>상태</th><th>SCMATE</th><th>에이전트 버전</th><th>전체 번들</th><th>마지막 연결</th><th style={{ minWidth: 142 }}>명령</th>
+                <th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>역할</th><th>상태</th><th>SCMATE</th><th>에이전트 버전</th><th>전체 번들</th><th>마지막 연결</th><th style={{ minWidth: 190 }}>화면·명령</th>
               </tr>
             </thead>
             <tbody>
@@ -288,7 +289,8 @@ export function PcsPage() {
                             <>
                               {canReboot && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => openCommand('REBOOT', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 재시작`} title="재시작"><RotateCw size={15} /></button>}
                               {canPcOperations && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setOperationTargets([pc])} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 작업`} title="PC 작업"><Wrench size={15} /></button>}
-                              {canRemote && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setRemoteTarget(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 원격제어`} title="원격제어"><Monitor size={15} /></button>}
+                              {canRemote && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setViewerTarget(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 화면 보기`} title="개별 화면 보기"><Eye size={15} /></button>}
+                              {canRemote && <button className="icon-button" style={{ width: 30, height: 30 }} onClick={() => setRemoteTarget(pc)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 원격 제어`} title="원격 제어"><Monitor size={15} /></button>}
                               {canShutdown && <button className="icon-button" style={{ width: 30, height: 30, color: 'var(--red)' }} onClick={() => openCommand('SHUTDOWN', [pc], false)} disabled={commandMutation.isPending} aria-label={`${pc.pcName} 종료`} title="종료"><PowerOff size={15} /></button>}
                             </>
                           ) : '-'}
@@ -327,6 +329,7 @@ export function PcsPage() {
         onConfirm={() => { if (pendingCommand && !commandMutation.isPending) commandMutation.mutate(pendingCommand) }}
       />
       {operationTargets.length > 0 && <PcOperationsDialog targets={operationTargets} onClose={() => setOperationTargets([])} />}
+      {viewerTarget && <RemoteControlDialog pc={viewerTarget} mode="view" onClose={() => setViewerTarget(null)} />}
       {remoteTarget && <RemoteControlDialog pc={remoteTarget} onClose={() => setRemoteTarget(null)} />}
       {scmateTarget && <ScmateControlDialog pc={scmateTarget} classroomPcs={scmateClassroomPcs} canAct={canScmate} canPerform={(action) => hasPermission(scmatePermission(action))} onClose={() => setScmateTargetMac(null)} />}
     </section>

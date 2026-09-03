@@ -181,6 +181,20 @@ describe('RemoteControlDialog', () => {
     expect(mocks.rfbCreated.mock.calls[0][0].viewOnly).toBe(true)
   })
 
+  it('opens PC management viewer mode as view-only without control actions', async () => {
+    render(<RemoteControlDialog pc={pc} mode="view" onClose={vi.fn()} />)
+
+    expect(await screen.findByText(/연결됨$/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '218-01 원격 화면' })).toBeInTheDocument()
+    expect(mocks.rfbCreated.mock.calls[0][0].viewOnly).toBe(true)
+    expect(mocks.rfbCreated.mock.calls[0][0].focusOnClick).toBe(false)
+    expect(screen.queryByRole('button', { name: '제어 허용' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '원격 클립보드 붙여넣기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '원격 PC로 파일 보내기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ctrl Alt Delete 전송' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '원격 화면 종료' })).toBeInTheDocument()
+  })
+
   it('closes a session whose create response arrives after the dialog is closed', async () => {
     const creation = deferred<typeof readySession>()
     const onClose = vi.fn()

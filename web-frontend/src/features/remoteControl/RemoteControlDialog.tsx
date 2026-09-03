@@ -18,6 +18,7 @@ import './remote-control.css'
 interface Props {
   pc: PcStatus
   onClose: () => void
+  mode?: 'control' | 'view'
 }
 
 interface RfbClient {
@@ -61,9 +62,11 @@ function failureMessage(error: unknown) {
   return '원격 제어 연결을 시작하지 못했습니다.'
 }
 
-export function RemoteControlDialog({ pc, onClose }: Props) {
+export function RemoteControlDialog({ pc, onClose, mode = 'control' }: Props) {
   const { token } = useAuth()
   const { showToast } = useToast()
+  const viewerOnly = mode === 'view'
+  const remoteLabel = viewerOnly ? '원격 화면' : '원격 제어'
   const rfbTargetRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -71,15 +74,15 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
   const sessionIdRef = useRef<string | null>(null)
   const cleanupPromiseRef = useRef<Promise<void> | null>(null)
   const closingRef = useRef(false)
-  const viewOnlyRef = useRef(false)
+  const viewOnlyRef = useRef(viewerOnly)
   const scaleViewportRef = useRef(true)
   const screenModeRef = useRef<RemoteScreenMode>('all')
   const pasteEventHandledRef = useRef(false)
   const forwardedKeyboardEventsRef = useRef(new WeakSet<KeyboardEvent>())
   const [attempt, setAttempt] = useState(0)
   const [state, setState] = useState<ViewerState>('starting')
-  const [statusText, setStatusText] = useState('에이전트에 원격 제어 시작을 요청하는 중입니다.')
-  const [viewOnly, setViewOnly] = useState(false)
+  const [statusText, setStatusText] = useState(`에이전트에 ${remoteLabel} 시작을 요청하는 중입니다.`)
+  const [viewOnly, setViewOnly] = useState(viewerOnly)
   const [scaleViewport, setScaleViewport] = useState(true)
   const [screenMode, setScreenMode] = useState<RemoteScreenMode>('all')
   const [displayLayout, setDisplayLayout] = useState<RemoteDisplayLayout>('single')
@@ -260,7 +263,7 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
     const controller = new AbortController()
     closingRef.current = false
     setState('starting')
-    setStatusText('에이전트에 원격 제어 시작을 요청하는 중입니다.')
+    setStatusText(`에이전트에 ${remoteLabel} 시작을 요청하는 중입니다.`)
 
     const connect = async () => {
       let oneTimePassword = ''
@@ -302,7 +305,7 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
         rfbRef.current = client
         client.scaleViewport = false
         client.resizeSession = false
-        client.focusOnClick = true
+        client.focusOnClick = !viewerOnly
         client.viewOnly = viewOnlyRef.current
         client.qualityLevel = 7
         client.compressionLevel = 3
@@ -344,7 +347,7 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
             }
             setState('failed')
             setStatusText(clean
-              ? '원격 제어 연결이 종료되었습니다.'
+              ? `${remoteLabel} 연결이 종료되었습니다.`
               : '대상 PC의 원격 화면 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.')
           }
         })
@@ -375,7 +378,7 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
       sessionIdRef.current = null
       if (sessionId && !closingRef.current) void closeRemoteControlSession(sessionId).catch(() => undefined)
     }
-  }, [applyViewportLayout, attempt, pc.macAddress])
+  }, [applyViewportLayout, attempt, pc.macAddress, remoteLabel, viewerOnly])
 
   const toggleViewOnly = () => {
     setViewOnly((current) => {
@@ -518,7 +521,7 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
       >
         <header className="remote-control-header">
           <div>
-            <h2 id="remote-control-title">{pc.pcName || pc.ipAddress} 원격 제어</h2>
+            <h2 id="remote-control-title">{pc.pcName || pc.ipAddress} {remoteLabel}</h2>
             <p>{pc.groupName || '미분류'} · {pc.ipAddress || '-'} · {statusText}{fileTransferText ? ` · ${fileTransferText}` : ''}</p>
           </div>
           <div className="remote-control-tools">
@@ -529,31 +532,37 @@ export function RemoteControlDialog({ pc, onClose }: Props) {
                 <button className={screenMode === 'second' ? 'active' : ''} onClick={() => setScreenMode('second')}>화면 2</button>
               </div>
             )}
-            <button className={`icon-button bordered ${viewOnly ? 'active' : ''}`} onClick={toggleViewOnly} aria-label={viewOnly ? '제어 허용' : '보기 전용'} title={viewOnly ? '제어 허용' : '보기 전용'}>
-              {viewOnly ? <EyeOff size={17} /> : <Eye size={17} />}
-            </button>
+            {!viewerOnly && (
+              <button className={`icon-button bordered ${viewOnly ? 'active' : ''}`} onClick={toggleViewOnly} aria-label={viewOnly ? '제어 허용' : '보기 전용'} title={viewOnly ? '제어 허용' : '보기 전용'}>
+                {viewOnly ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            )}
             <button className="icon-button bordered" onClick={() => void copyRemoteClipboard()} disabled={state !== 'connected' || !remoteClipboardText} aria-label="원격 클립보드 복사" title="원격 클립보드를 내 PC로 복사"><ClipboardCopy size={17} /></button>
-            <button className="icon-button bordered" onClick={() => void pasteBrowserClipboard()} disabled={state !== 'connected' || viewOnly} aria-label="원격 클립보드 붙여넣기" title="내 클립보드를 원격 PC에 붙여넣기"><ClipboardPaste size={17} /></button>
-            <button className="icon-button bordered" onClick={() => fileInputRef.current?.click()} disabled={state !== 'connected' || viewOnly || fileTransferBusy} aria-label="원격 PC로 파일 보내기" title="원격 PC 바탕화면으로 파일 보내기">
-              {fileTransferBusy ? <LoaderCircle size={17} className="spin-icon" /> : <FileUp size={17} />}
-            </button>
-            <input
-              ref={fileInputRef}
-              className="remote-file-input"
-              type="file"
-              multiple
-              tabIndex={-1}
-              onChange={(event) => {
-                void transferRemoteFiles(Array.from(event.target.files || []))
-                event.target.value = ''
-              }}
-            />
+            {!viewerOnly && (
+              <>
+                <button className="icon-button bordered" onClick={() => void pasteBrowserClipboard()} disabled={state !== 'connected' || viewOnly} aria-label="원격 클립보드 붙여넣기" title="내 클립보드를 원격 PC에 붙여넣기"><ClipboardPaste size={17} /></button>
+                <button className="icon-button bordered" onClick={() => fileInputRef.current?.click()} disabled={state !== 'connected' || viewOnly || fileTransferBusy} aria-label="원격 PC로 파일 보내기" title="원격 PC 바탕화면으로 파일 보내기">
+                  {fileTransferBusy ? <LoaderCircle size={17} className="spin-icon" /> : <FileUp size={17} />}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  className="remote-file-input"
+                  type="file"
+                  multiple
+                  tabIndex={-1}
+                  onChange={(event) => {
+                    void transferRemoteFiles(Array.from(event.target.files || []))
+                    event.target.value = ''
+                  }}
+                />
+              </>
+            )}
             <button className={`icon-button bordered ${scaleViewport ? 'active' : ''}`} onClick={() => setScaleViewport((current) => !current)} aria-label="화면 맞춤" title="화면 맞춤"><Expand size={17} /></button>
-            <button className="icon-button bordered" onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={state !== 'connected' || viewOnly} aria-label="Ctrl Alt Delete 전송" title="Ctrl+Alt+Delete"><Keyboard size={17} /></button>
+            {!viewerOnly && <button className="icon-button bordered" onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={state !== 'connected' || viewOnly} aria-label="Ctrl Alt Delete 전송" title="Ctrl+Alt+Delete"><Keyboard size={17} /></button>}
             <button className="icon-button bordered" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? '전체화면 종료' : '전체화면'} title={fullscreen ? '전체화면 종료' : '전체화면'}>
               {fullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
             </button>
-            <button className="icon-button bordered remote-close" onClick={closeViewer} aria-label="원격 제어 종료" title="원격 제어 종료"><X size={18} /></button>
+            <button className="icon-button bordered remote-close" onClick={closeViewer} aria-label={`${remoteLabel} 종료`} title={`${remoteLabel} 종료`}><X size={18} /></button>
           </div>
         </header>
         <div className="remote-control-viewport">
