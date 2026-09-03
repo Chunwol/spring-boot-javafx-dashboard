@@ -70,3 +70,7 @@ export function cancelCommand(taskId: number) {
     `/commands/${taskId}/cancel`,
   )
 }
+
+export function deleteCommandHistory(taskId: number) {
+  return api.delete<{ taskId: number; deleted: true }>(`/commands/${taskId}`)
+}

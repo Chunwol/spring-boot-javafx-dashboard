@@ -189,6 +189,19 @@ public class CommandController {
         return ResponseEntity.ok(commandLifecycleService.cancelQueuedCommand(taskId));
     }
 
+    @DeleteMapping("/commands/{taskId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(
+        summary = "완료된 명령 이력 삭제",
+        description = "관리자만 완료, 실패 또는 취소된 명령 이력을 삭제할 수 있습니다. 진행 중인 명령은 먼저 취소하거나 완료되어야 합니다."
+    )
+    @ApiResponse(responseCode = "200", description = "명령 이력 삭제 성공")
+    @ApiResponse(responseCode = "409", description = "진행 중이거나 다른 운영 기록에서 참조 중인 명령")
+    public ResponseEntity<Map<String, Object>> deleteCommandHistory(
+            @Parameter(description = "명령 ID") @PathVariable Long taskId) {
+        return ResponseEntity.ok(commandLifecycleService.deleteCommandHistory(taskId));
+    }
+
     // ── HTTP 유틸리티 ────────────────────────────────────────────────────────
 
     private String resolveAgentMac(HttpServletRequest request) {

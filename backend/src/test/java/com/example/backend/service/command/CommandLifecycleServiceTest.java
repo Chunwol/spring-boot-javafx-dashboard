@@ -20,6 +20,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -37,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -94,6 +96,55 @@ class CommandLifecycleServiceTest {
                 .hasMessageContaining("Only QUEUED commands");
         verify(commandQueueRepository, never()).cancelQueuedIfPending(
                 any(), any(LocalDateTime.class), any(String.class));
+    }
+
+    @Test
+    void deleteCommandHistory_deletesSettledCommandAndAuditsActor() {
+        CommandQueue command = new CommandQueue();
+        command.setTaskId(79L);
+        command.setStatus("COMPLETED");
+        when(commandQueueRepository.findById(79L)).thenReturn(java.util.Optional.of(command));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("admin-user", null, List.of()));
+        try {
+            Map<String, Object> result = commandLifecycleService.deleteCommandHistory(79L);
+
+            assertThat(result).containsEntry("taskId", 79L).containsEntry("deleted", true);
+            verify(commandQueueRepository).delete(command);
+            verify(commandQueueRepository).flush();
+            verify(auditService).log("admin-user", "CMD_HISTORY_DELETE", "COMMAND", "79");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void deleteCommandHistory_rejectsCommandWithPendingVerification() {
+        CommandQueue command = new CommandQueue();
+        command.setTaskId(80L);
+        command.setStatus("COMPLETED");
+        command.setVerificationStatus("PENDING_ONLINE");
+        when(commandQueueRepository.findById(80L)).thenReturn(java.util.Optional.of(command));
+
+        assertThatThrownBy(() -> commandLifecycleService.deleteCommandHistory(80L))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("후처리 중인 명령 이력");
+        verify(commandQueueRepository, never()).delete(any());
+    }
+
+    @Test
+    void deleteCommandHistory_reportsLinkedOperationInsteadOfDatabaseError() {
+        CommandQueue command = new CommandQueue();
+        command.setTaskId(81L);
+        command.setStatus("FAILED");
+        when(commandQueueRepository.findById(81L)).thenReturn(java.util.Optional.of(command));
+        doThrow(new DataIntegrityViolationException("foreign key"))
+                .when(commandQueueRepository).flush();
+
+        assertThatThrownBy(() -> commandLifecycleService.deleteCommandHistory(81L))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("스크립트 또는 배포 기록");
+        verify(auditService, never()).log(any(), eq("CMD_HISTORY_DELETE"), any(), any());
     }
 
     @Test

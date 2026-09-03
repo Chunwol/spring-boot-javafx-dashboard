@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
-import { cancelCommand, getCommand, getCommands, issueCommand } from './api'
+import { cancelCommand, deleteCommandHistory, getCommand, getCommands, issueCommand } from './api'
 import type { CommandView, IssueCommandRequest } from './types'
 
 vi.mock('../../api/client', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }))
 
 const mockedApi = vi.mocked(api)
@@ -66,5 +66,11 @@ describe('commands api', () => {
     mockedApi.post.mockResolvedValue({ taskId: 42, status: 'CANCELLED' })
     await cancelCommand(42)
     expect(mockedApi.post).toHaveBeenCalledWith('/commands/42/cancel')
+  })
+
+  it('deletes one completed command history entry', async () => {
+    mockedApi.delete.mockResolvedValue({ taskId: 42, deleted: true })
+    await deleteCommandHistory(42)
+    expect(mockedApi.delete).toHaveBeenCalledWith('/commands/42')
   })
 })

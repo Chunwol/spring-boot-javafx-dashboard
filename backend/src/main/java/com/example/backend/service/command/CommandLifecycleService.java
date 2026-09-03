@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -613,6 +614,33 @@ public class CommandLifecycleService {
     }
 
     /**
+     * 완료된 명령 이력을 영구 삭제한다. 실행 또는 후처리가 진행 중인 명령과
+     * 스크립트/배포 이력에서 참조 중인 명령은 운영 기록 보존을 위해 삭제하지 않는다.
+     */
+    @Transactional
+    public Map<String, Object> deleteCommandHistory(Long taskId) {
+        CommandQueue command = commandQueueRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("taskId not found: " + taskId));
+        String currentStatus = normalizeStatus(command.getStatus());
+        String verificationStatus = normalizeStatus(command.getVerificationStatus());
+        String scmateResetStatus = normalizeStatus(command.getScmateResetStatus());
+        if (!isFinalCommandStatus(currentStatus)
+                || verificationStatus.startsWith("PENDING")
+                || "PENDING".equals(scmateResetStatus)) {
+            throw new ConflictException("진행 중이거나 후처리 중인 명령 이력은 삭제할 수 없습니다: " + currentStatus);
+        }
+
+        try {
+            commandQueueRepository.delete(command);
+            commandQueueRepository.flush();
+        } catch (DataIntegrityViolationException ex) {
+            throw new ConflictException("스크립트 또는 배포 기록에서 사용 중인 명령 이력은 삭제할 수 없습니다.", ex);
+        }
+        auditService.log(currentActor(), "CMD_HISTORY_DELETE", "COMMAND", String.valueOf(taskId));
+        return Map.of("taskId", taskId, "deleted", true);
+    }
+
+    /**
      * 상태별 명령 목록을 페이지네이션으로 조회한다.
      */
     public Page<Map<String, Object>> listCommands(String status, int page, int size) {
@@ -1065,6 +1093,13 @@ public class CommandLifecycleService {
                 command.setRequestedIp(ipAddress.length() <= 64 ? ipAddress : ipAddress.substring(0, 64));
             }
         }
+    }
+
+    private String currentActor() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String actor = authentication != null && authentication.isAuthenticated()
+                ? authentication.getName() : "system";
+        return actor == null || actor.isBlank() ? "system" : actor;
     }
 
     // ── 유틸리티 ─────────────────────────────────────────────────────────────

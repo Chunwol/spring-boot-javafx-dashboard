@@ -13,6 +13,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
@@ -22,7 +23,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
 import { useToast } from '../components/ui/ToastProvider'
 import { useDialogFocus } from '../components/ui/useDialogFocus'
-import { cancelCommand, getCommand, getCommands, issueCommand } from '../features/commands/api'
+import { cancelCommand, deleteCommandHistory, getCommand, getCommands, issueCommand } from '../features/commands/api'
 import { routerWolFailureMessage } from '../features/commands/routerWolMessage'
 import { listActiveRemoteControlSessions } from '../features/remoteControl/api'
 import { clientEnvironmentLabel } from '../utils/clientInfo'
@@ -42,6 +43,7 @@ import {
   collectDownloadFilename,
   collectDownloadPath,
   canCancelCommand,
+  canDeleteCommandHistory,
   detailedCommandStatus,
   filterAndSortCommands,
   formatCommandDate,
@@ -80,16 +82,19 @@ function remoteViewerStatusLabel(status: string) {
   } as Record<string, string>)[status] || status
 }
 
-function CommandDetail({ command, loading, error, canDownload, canCancel, downloadBusy, cancelBusy, onDownload, onCancel, onClose }: {
+function CommandDetail({ command, loading, error, canDownload, canCancel, canDelete, downloadBusy, cancelBusy, deleteBusy, onDownload, onCancel, onDelete, onClose }: {
   command: CommandView | null
   loading: boolean
   error: string | null
   canDownload: boolean
   canCancel: boolean
+  canDelete: boolean
   downloadBusy: boolean
   cancelBusy: boolean
+  deleteBusy: boolean
   onDownload: (command: CommandView) => void
   onCancel: (command: CommandView) => void
+  onDelete: (command: CommandView) => void
   onClose: () => void
 }) {
   return (
@@ -147,6 +152,14 @@ function CommandDetail({ command, loading, error, canDownload, canCancel, downlo
                     <Ban size={16} />{cancelBusy ? '취소 처리 중' : '대기 명령 취소'}
                   </button>
                   <p>PC에 아직 전달되지 않은 명령만 안전하게 취소할 수 있습니다.</p>
+                </section>
+              )}
+              {canDelete && canDeleteCommandHistory(command) && (
+                <section className="command-output-section">
+                  <button className="button danger" onClick={() => onDelete(command)} disabled={deleteBusy}>
+                    <Trash2 size={16} />{deleteBusy ? '삭제 처리 중' : '명령 이력 삭제'}
+                  </button>
+                  <p>완료된 명령 기록을 영구 삭제합니다. 삭제 후에는 복구할 수 없습니다.</p>
                 </section>
               )}
               {command.scriptUrl && (
@@ -260,7 +273,7 @@ function enqueueMessage(result: CommandEnqueueResult) {
 
 export function CommandsPage() {
   const queryClient = useQueryClient()
-  const { hasPermission } = useAuth()
+  const { hasPermission, isAdmin } = useAuth()
   const allowed = hasPermission('COMMAND_VIEW')
   const commandTypes = useMemo(() => COMMAND_TYPES.filter((type) => hasPermission(commandPermission(type))), [hasPermission])
   const canOperate = commandTypes.length > 0
@@ -284,6 +297,7 @@ export function CommandsPage() {
   const [draftErrors, setDraftErrors] = useState<CommandDraftErrors>({})
   const [pendingIssue, setPendingIssue] = useState<IssueCommandRequest | null>(null)
   const [pendingCancelTaskId, setPendingCancelTaskId] = useState<number | null>(null)
+  const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<number | null>(null)
 
   const serverFilters = useMemo(() => ({
     statuses: COMMAND_STATUSES,
@@ -367,6 +381,25 @@ export function CommandsPage() {
     onError: (error) => {
       showToast(error instanceof Error ? error.message : '대기 명령을 취소하지 못했습니다.', 'error')
       setPendingCancelTaskId(null)
+    },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (deleteTaskId: number) => deleteCommandHistory(deleteTaskId),
+    onSuccess: (result) => {
+      showToast(`작업 #${result.taskId} 명령 이력을 삭제했습니다.`, 'success')
+      setPendingDeleteTaskId(null)
+      setSelectedTaskId(null)
+      queryClient.removeQueries({ queryKey: ['command', result.taskId], exact: true })
+      if (taskId === result.taskId) {
+        setTaskIdInput('')
+        setTaskId(undefined)
+        setTaskIdError('')
+      }
+      void queryClient.invalidateQueries({ queryKey: ['commands'] })
+    },
+    onError: (error) => {
+      showToast(error instanceof Error ? error.message : '명령 이력을 삭제하지 못했습니다.', 'error')
+      setPendingDeleteTaskId(null)
     },
   })
 
@@ -576,10 +609,13 @@ export function CommandsPage() {
           error={detailQuery.isError ? (detailQuery.error instanceof Error ? detailQuery.error.message : '명령 상세를 불러오지 못했습니다.') : null}
           canDownload={canDownload}
           canCancel={canCancel}
+          canDelete={isAdmin}
           downloadBusy={downloadMutation.isPending}
           cancelBusy={cancelMutation.isPending}
+          deleteBusy={deleteMutation.isPending}
           onDownload={(command) => downloadMutation.mutate(command)}
           onCancel={(command) => setPendingCancelTaskId(command.taskId)}
+          onDelete={(command) => setPendingDeleteTaskId(command.taskId)}
           onClose={() => setSelectedTaskId(null)}
         />
       )}
@@ -613,6 +649,16 @@ export function CommandsPage() {
         busy={cancelMutation.isPending}
         onCancel={() => { if (!cancelMutation.isPending) setPendingCancelTaskId(null) }}
         onConfirm={() => { if (pendingCancelTaskId !== null && !cancelMutation.isPending) cancelMutation.mutate(pendingCancelTaskId) }}
+      />
+      <ConfirmDialog
+        open={pendingDeleteTaskId !== null}
+        title="명령 이력 삭제"
+        description={pendingDeleteTaskId !== null ? `작업 #${pendingDeleteTaskId} 명령 이력을 영구 삭제합니다. 삭제 후에는 복구할 수 없습니다.` : ''}
+        confirmLabel="이력 삭제"
+        danger
+        busy={deleteMutation.isPending}
+        onCancel={() => { if (!deleteMutation.isPending) setPendingDeleteTaskId(null) }}
+        onConfirm={() => { if (pendingDeleteTaskId !== null && !deleteMutation.isPending) deleteMutation.mutate(pendingDeleteTaskId) }}
       />
     </section>
   )

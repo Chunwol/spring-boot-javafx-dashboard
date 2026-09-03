@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getCommand: vi.fn(),
   issueCommand: vi.fn(),
   cancelCommand: vi.fn(),
+  deleteCommandHistory: vi.fn(),
   listActiveRemoteControlSessions: vi.fn(),
   showToast: vi.fn(),
 }))
@@ -34,6 +35,7 @@ vi.mock('../features/commands/api', () => ({
   getCommand: mocks.getCommand,
   issueCommand: mocks.issueCommand,
   cancelCommand: mocks.cancelCommand,
+  deleteCommandHistory: mocks.deleteCommandHistory,
 }))
 
 vi.mock('../features/remoteControl/api', () => ({
@@ -84,6 +86,7 @@ describe('CommandsPage', () => {
     mocks.getCommand.mockReset().mockResolvedValue(command({ stdout: 'shutdown accepted', stderr: 'no error' }))
     mocks.issueCommand.mockReset().mockResolvedValue({ queued: 1, taskIds: [8] })
     mocks.cancelCommand.mockReset().mockResolvedValue({ taskId: 7, status: 'CANCELLED' })
+    mocks.deleteCommandHistory.mockReset().mockResolvedValue({ taskId: 7, deleted: true })
     mocks.listActiveRemoteControlSessions.mockReset().mockResolvedValue([])
     mocks.showToast.mockReset()
   })
@@ -194,5 +197,27 @@ describe('CommandsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: '명령 취소' }))
 
     expect(mocks.cancelCommand).toHaveBeenCalledWith(7)
+  })
+
+  it('allows only an admin to delete settled command history after confirmation', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByText('#7'))
+    await user.click(await screen.findByRole('button', { name: '명령 이력 삭제' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: '이력 삭제' }))
+
+    expect(mocks.deleteCommandHistory).toHaveBeenCalledWith(7)
+  })
+
+  it('does not expose command history deletion to an operator', async () => {
+    const user = userEvent.setup()
+    mocks.isAdmin = false
+    renderPage()
+
+    await user.click(await screen.findByText('#7'))
+    expect(await screen.findByText('shutdown accepted')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '명령 이력 삭제' })).not.toBeInTheDocument()
   })
 })

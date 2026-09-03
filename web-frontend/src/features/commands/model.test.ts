@@ -8,6 +8,7 @@ import {
   commandStatusLabel,
   commandStatusTone,
   commandTransferDisplay,
+  canDeleteCommandHistory,
   detailedCommandStatus,
   filterAndSortCommands,
   collectDownloadFilename,
@@ -124,6 +125,15 @@ describe('command model', () => {
       command({ taskId: 3, status: 'FAILED' }),
     ])
     expect(summary).toMatchObject({ acked: 1, completed: 1, failed: 1, verifying: 1, scmatePending: 1 })
+  })
+
+  it('allows history deletion only after command and follow-up work have settled', () => {
+    expect(canDeleteCommandHistory(command({ status: 'COMPLETED' }))).toBe(true)
+    expect(canDeleteCommandHistory(command({ status: 'FAILED' }))).toBe(true)
+    expect(canDeleteCommandHistory(command({ status: 'CANCELLED' }))).toBe(true)
+    expect(canDeleteCommandHistory(command({ status: 'ACKED' }))).toBe(false)
+    expect(canDeleteCommandHistory(command({ status: 'COMPLETED', verificationStatus: 'PENDING_ONLINE' }))).toBe(false)
+    expect(canDeleteCommandHistory(command({ status: 'COMPLETED', scmateResetStatus: 'PENDING' }))).toBe(false)
   })
 
   it('derives progress, detailed failures and transfer execution options', () => {

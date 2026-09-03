@@ -280,6 +280,13 @@ export function canCancelCommand(status: string | null | undefined) {
   return status?.trim().toUpperCase() === 'QUEUED'
 }
 
+export function canDeleteCommandHistory(command: Pick<CommandView, 'status' | 'verificationStatus' | 'scmateResetStatus'>) {
+  const verification = normalize(command.verificationStatus)
+  return isFinalCommandStatus(command.status)
+    && !verification.startsWith('PENDING')
+    && normalize(command.scmateResetStatus) !== 'PENDING'
+}
+
 export function collectDownloadPath(command: { commandType?: string | null; scriptUrl?: string | null; stdout?: string | null }) {
   if (command.commandType?.trim().toUpperCase() !== 'COLLECT_FILES') return null
   for (const value of [command.scriptUrl, command.stdout]) {

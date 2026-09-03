@@ -118,6 +118,7 @@ class ApiSmokeIntegrationTest {
         sendAck(agentToken, queuedTaskId);
         sendResult(agentToken, queuedTaskId, 0, "smoke-ok", "");
         assertCommandCompleted(bearerToken, queuedTaskId);
+        deleteCommandHistory(bearerToken, queuedTaskId);
 
         uploadAndDownloadScript(bearerToken, agentToken);
     }
@@ -514,6 +515,21 @@ class ApiSmokeIntegrationTest {
                 url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
         Assertions.assertEquals(200, response.getStatusCode().value(), "명령 상태 조회 실패");
         return parseMap(response.getBody());
+    }
+
+    private void deleteCommandHistory(String bearerToken, long taskId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(bearerToken);
+        ResponseEntity<String> response = restTemplate.exchange(
+                baseUrl() + "/commands/" + taskId,
+                HttpMethod.DELETE,
+                new HttpEntity<>(headers),
+                String.class);
+        Assertions.assertEquals(200, response.getStatusCode().value(), "명령 이력 삭제 실패");
+        Assertions.assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM command_queue WHERE task_id = ?",
+                Integer.class,
+                taskId));
     }
 
     private void assertCommandCompleted(String bearerToken, long taskId) throws Exception {
