@@ -97,6 +97,5 @@ if [ "$APP_IMAGE_AFTER" != "$NEW_IMAGE" ] || \
     exit 6
 fi
 
-curl -fsS http://127.0.0.1:8888/actuator/health
 printf '\njar_sha=%s\napp_before=%s\napp_after=%s\napp_health=%s\npostgres_unchanged=true\nredis_unchanged=true\nrollback_tag=%s\njar_backup=%s\ndb_backup=%s\n' \
     "$ACTUAL_SHA" "$APP_BEFORE" "$APP_AFTER" "$HEALTH" "$ROLLBACK_TAG" "$JAR_BACKUP" "$DB_BACKUP"
