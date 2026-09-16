@@ -31,6 +31,14 @@ public class UserResponseDto {
     }
 
     public static UserResponseDto from(User user, String role, List<String> permissions) {
+        return from(user, role, permissions, null);
+    }
+
+    public static UserResponseDto from(User user, String role, List<String> permissions,
+                                       LocalDateTime browserOnlineSince) {
+        boolean loggedIn = user.getActiveSessionId() != null
+                && (browserOnlineSince == null
+                || (user.getLastActivityAt() != null && !user.getLastActivityAt().isBefore(browserOnlineSince)));
         return UserResponseDto.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -40,7 +48,7 @@ public class UserResponseDto {
                 .permissions(permissions)
                 .active(user.isActive())
                 .failedLoginAttempts(user.getFailedLoginAttempts())
-                .loggedIn(user.getActiveSessionId() != null)
+                .loggedIn(loggedIn)
                 .loginIpAddress(user.getLoginIpAddress())
                 .loginUserAgent(user.getLoginUserAgent())
                 .loginAt(user.getLoginAt())

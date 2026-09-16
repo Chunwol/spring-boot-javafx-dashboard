@@ -15,11 +15,13 @@ import com.example.backend.service.auth.UserRoleResolver;
 import com.example.backend.service.auth.UserFeaturePermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -51,6 +53,9 @@ public class UserService {
     private final UserFeaturePermissionService featurePermissionService;
     private final WebSocketSessionExpiryRegistry webSocketSessions;
     private final RemoteControlSessionService remoteControlSessions;
+
+    @Value("${app.auth.browser-online-threshold-ms:120000}")
+    private long browserOnlineThresholdMs;
 
     public List<UserResponseDto> findAll() {
         return userRepository.findAll().stream()
@@ -167,7 +172,13 @@ public class UserService {
 
     private UserResponseDto toResponse(User user) {
         String role = userRoleResolver.resolveRole(user);
-        return UserResponseDto.from(user, role, featurePermissionService.resolveCodes(user, role));
+        LocalDateTime browserOnlineSince = LocalDateTime.now()
+                .minus(Duration.ofMillis(browserOnlineThresholdMs));
+        return UserResponseDto.from(
+                user,
+                role,
+                featurePermissionService.resolveCodes(user, role),
+                browserOnlineSince);
     }
 
     private String normalizePermissions(String role, List<String> values) {

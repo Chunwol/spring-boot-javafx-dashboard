@@ -76,6 +76,9 @@ scheduler:
   initial-delay: 5000
 
 app:
+  auth:
+    # 사용자 관리의 '로그인 중'은 이 시간 안에 실제 요청이 있었던 브라우저만 표시한다.
+    browser-online-threshold-ms: ${BROWSER_ONLINE_THRESHOLD_MS:120000}
   scmate:
     cli-username: ${SCMATE_CLI_USERNAME:}
     cli-password: ${SCMATE_CLI_PASSWORD:}
