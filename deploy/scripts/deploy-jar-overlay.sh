@@ -32,10 +32,11 @@ if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
     exit 2
 fi
 
-APP_BEFORE=$($DOCKER inspect -f '{{.Id}}' deploy_app_1)
-POSTGRES_BEFORE=$($DOCKER inspect -f '{{.Id}}' deploy_postgres_1)
-REDIS_BEFORE=$($DOCKER inspect -f '{{.Id}}' deploy_redis_1)
-OLD_IMAGE=$($DOCKER inspect -f '{{.Image}}' deploy_app_1)
+APP_BEFORE=$(compose ps -q app)
+POSTGRES_BEFORE=$(compose ps -q postgres)
+REDIS_BEFORE=$(compose ps -q redis)
+test -n "$APP_BEFORE" -a -n "$POSTGRES_BEFORE" -a -n "$REDIS_BEFORE"
+OLD_IMAGE=$($DOCKER inspect -f '{{.Image}}' "$APP_BEFORE")
 STAMP=$(date '+%Y%m%d-%H%M%S')
 ROLLBACK_TAG="classroom-dashboard:rollback-github-$STAMP"
 NEW_TAG="classroom-dashboard:github-$STAMP"
@@ -45,7 +46,7 @@ DB_BACKUP="data/backups/postgres/pre-github-$STAMP.dump"
 mkdir -p backups data/backups/postgres
 $DOCKER tag "$OLD_IMAGE" "$ROLLBACK_TAG"
 cp -p app.jar "$JAR_BACKUP"
-$DOCKER exec deploy_postgres_1 sh -c \
+$DOCKER exec "$POSTGRES_BEFORE" sh -c \
     'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
     > "$DB_BACKUP"
 test -s "$DB_BACKUP"
@@ -72,22 +73,23 @@ fi
 HEALTH='starting'
 ATTEMPT=0
 while [ "$ATTEMPT" -lt 60 ]; do
-    HEALTH=$($DOCKER inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' deploy_app_1 2>/dev/null || true)
+    APP_CURRENT=$(compose ps -q app)
+    HEALTH=$($DOCKER inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$APP_CURRENT" 2>/dev/null || true)
     [ "$HEALTH" = 'healthy' ] && break
     ATTEMPT=$((ATTEMPT + 1))
     sleep 2
 done
 
 if [ "$HEALTH" != 'healthy' ]; then
-    $DOCKER logs --tail 160 deploy_app_1 >&2 || true
+    compose logs --tail 160 app >&2 || true
     restore_previous
     exit 5
 fi
 
-APP_AFTER=$($DOCKER inspect -f '{{.Id}}' deploy_app_1)
-APP_IMAGE_AFTER=$($DOCKER inspect -f '{{.Image}}' deploy_app_1)
-POSTGRES_AFTER=$($DOCKER inspect -f '{{.Id}}' deploy_postgres_1)
-REDIS_AFTER=$($DOCKER inspect -f '{{.Id}}' deploy_redis_1)
+APP_AFTER=$(compose ps -q app)
+APP_IMAGE_AFTER=$($DOCKER inspect -f '{{.Image}}' "$APP_AFTER")
+POSTGRES_AFTER=$(compose ps -q postgres)
+REDIS_AFTER=$(compose ps -q redis)
 if [ "$APP_IMAGE_AFTER" != "$NEW_IMAGE" ] || \
    [ "$POSTGRES_BEFORE" != "$POSTGRES_AFTER" ] || \
    [ "$REDIS_BEFORE" != "$REDIS_AFTER" ]; then
