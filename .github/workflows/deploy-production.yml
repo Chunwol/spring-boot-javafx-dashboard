@@ -52,14 +52,36 @@ jobs:
         with:
           gradle-version: "9.4.1"
 
-      - name: Install SSH password helper
+      - name: Install deployment tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y sshpass
+          sudo apt-get install -y openvpn sshpass
 
       - name: Build backend with embedded web frontend
         run: |
           gradle :backend:clean :backend:bootJar -x test --no-daemon
+
+      - name: Connect to school OpenVPN
+        env:
+          OPENVPN_CONFIG_BASE64: ${{ secrets.OPENVPN_CONFIG_BASE64 }}
+          OPENVPN_USERNAME: ${{ secrets.OPENVPN_USERNAME }}
+          OPENVPN_PASSWORD: ${{ secrets.OPENVPN_PASSWORD }}
+        run: |
+          printf '%s' "$OPENVPN_CONFIG_BASE64" | base64 --decode > /tmp/classroom.ovpn
+          printf '%s\n%s\n' "$OPENVPN_USERNAME" "$OPENVPN_PASSWORD" > /tmp/classroom.auth
+          chmod 600 /tmp/classroom.ovpn /tmp/classroom.auth
+          sudo openvpn --config /tmp/classroom.ovpn \
+            --auth-user-pass /tmp/classroom.auth \
+            --daemon --writepid /tmp/classroom-openvpn.pid \
+            --log /tmp/classroom-openvpn.log
+          for attempt in $(seq 1 30); do
+            if grep -q 'Initialization Sequence Completed' /tmp/classroom-openvpn.log; then
+              exit 0
+            fi
+            sleep 2
+          done
+          sed -E 's/(AUTH|password|username).*/[redacted]/Ig' /tmp/classroom-openvpn.log >&2
+          exit 1
 
       - name: Verify NAS host key
         env:
@@ -101,3 +123,11 @@ jobs:
             echo "- Agent was not updated"
             echo "- PostgreSQL and Redis were preserved"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disconnect OpenVPN
+        if: always()
+        run: |
+          if [ -f /tmp/classroom-openvpn.pid ]; then
+            sudo kill "$(cat /tmp/classroom-openvpn.pid)" 2>/dev/null || true
+          fi
+          rm -f /tmp/classroom.auth /tmp/classroom.ovpn

@@ -4,8 +4,21 @@ set -eu
 EXPECTED_SHA="${1:?expected JAR SHA-256 is required}"
 UPLOAD='/tmp/classroom-dashboard-app.jar'
 DEPLOY_DIR='/volume1/컴퓨터공학부_실습실/docker/deploy'
-DOCKER='/usr/local/bin/docker'
-COMPOSE='/usr/local/bin/docker-compose'
+DOCKER=$(command -v docker || true)
+if [ -z "$DOCKER" ] && [ -x /usr/local/bin/docker ]; then
+    DOCKER='/usr/local/bin/docker'
+fi
+test -n "$DOCKER"
+
+compose() {
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose "$@"
+    elif [ -x /usr/local/bin/docker-compose ]; then
+        /usr/local/bin/docker-compose "$@"
+    else
+        "$DOCKER" compose "$@"
+    fi
+}
 
 cd "$DEPLOY_DIR"
 test -f "$UPLOAD"
@@ -37,7 +50,7 @@ mv -f "$UPLOAD" app.jar
 restore_previous() {
     cp -pf "$JAR_BACKUP" app.jar || true
     $DOCKER tag "$ROLLBACK_TAG" classroom-dashboard:latest || true
-    $COMPOSE up -d --no-deps --force-recreate app || true
+    compose up -d --no-deps --force-recreate app || true
 }
 
 if ! $DOCKER build --build-arg "BASE_IMAGE=$ROLLBACK_TAG" -t "$NEW_TAG" -f Dockerfile.jar-overlay .; then
@@ -47,7 +60,7 @@ fi
 
 NEW_IMAGE=$($DOCKER image inspect -f '{{.Id}}' "$NEW_TAG")
 $DOCKER tag "$NEW_TAG" classroom-dashboard:latest
-if ! $COMPOSE up -d --no-deps --force-recreate app; then
+if ! compose up -d --no-deps --force-recreate app; then
     restore_previous
     exit 4
 fi
