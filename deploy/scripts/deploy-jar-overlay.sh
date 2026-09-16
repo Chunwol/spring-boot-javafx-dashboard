@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Synology DSM currently exposes Docker Engine API 1.41. Newer runner images
+# ship a client that otherwise attempts to use a newer, incompatible API.
+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.41}"
+
 EXPECTED_SHA="${1:?expected JAR SHA-256 is required}"
 UPLOAD='/tmp/classroom-dashboard-app.jar'
 DEPLOY_DIR='/volume1/컴퓨터공학부_실습실/docker/deploy'
