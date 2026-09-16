@@ -12,6 +12,7 @@ import {
   remoteControlWebSocketUrl,
 } from './api'
 import { queueRemoteDesktopFiles, waitForRemoteFileTransfers } from './fileTransfer'
+import { needsUnicodeKeyPaste, sendUnicodeKeyPaste } from './clipboard'
 import { calculateRemoteViewport, type RemoteDisplayLayout, type RemoteScreenMode } from './viewport'
 import './remote-control.css'
 
@@ -135,6 +136,13 @@ export function RemoteControlDialog({ pc, onClose, mode = 'control' }: Props) {
   const sendRemotePaste = useCallback((text: string) => {
     const client = rfbRef.current
     if (!client || client.viewOnly || !text) return
+    if (needsUnicodeKeyPaste(text)) {
+      // Legacy VNC clipboard messages only support ISO-8859-1. noVNC replaces
+      // every Korean character with '?' when UltraVNC does not advertise its
+      // extended UTF-8 clipboard capability, so type Unicode keysyms instead.
+      sendUnicodeKeyPaste(client, text)
+      return
+    }
     client.clipboardPasteFrom(text)
     window.setTimeout(() => {
       if (rfbRef.current !== client || client.viewOnly) return

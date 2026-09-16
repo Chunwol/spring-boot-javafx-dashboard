@@ -1,0 +1,102 @@
+name: deploy-production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "common/**"
+      - "web-frontend/**"
+      - "build.gradle*"
+      - "settings.gradle*"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "deploy/Dockerfile.jar-overlay"
+      - "deploy/scripts/deploy-jar-overlay.sh"
+      - ".github/workflows/deploy-production.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: production-dashboard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web-frontend/package-lock.json
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install SSH password helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Build backend with embedded web frontend
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :backend:clean :backend:bootJar -x test --no-daemon
+
+      - name: Verify NAS host key
+        env:
+          NAS_HOST: ${{ secrets.NAS_SSH_HOST }}
+          NAS_HOST_FINGERPRINT: ${{ secrets.NAS_SSH_HOST_FINGERPRINT }}
+        run: |
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keyscan -T 15 -t ed25519 "$NAS_HOST" > "$HOME/.ssh/known_hosts.candidate"
+          actual=$(ssh-keygen -lf "$HOME/.ssh/known_hosts.candidate" -E sha256 | awk 'NR == 1 { print $2 }')
+          test "$actual" = "$NAS_HOST_FINGERPRINT"
+          mv "$HOME/.ssh/known_hosts.candidate" "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload and deploy application
+        env:
+          NAS_HOST: ${{ secrets.NAS_SSH_HOST }}
+          NAS_USER: ${{ secrets.NAS_SSH_USER }}
+          SSHPASS: ${{ secrets.NAS_SSH_PASSWORD }}
+        run: |
+          sha=$(sha256sum backend/build/libs/backend-0.0.1-SNAPSHOT.jar | awk '{print $1}')
+          sshpass -e scp -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            backend/build/libs/backend-0.0.1-SNAPSHOT.jar \
+            "$NAS_USER@$NAS_HOST:/tmp/classroom-dashboard-app.jar"
+          sshpass -e scp -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            deploy/scripts/deploy-jar-overlay.sh \
+            "$NAS_USER@$NAS_HOST:/tmp/deploy-jar-overlay.sh"
+          printf '%s\n' "$SSHPASS" | sshpass -e ssh \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$NAS_USER@$NAS_HOST" \
+            "sudo -S sh /tmp/deploy-jar-overlay.sh '$sha'"
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          {
+            echo "### Production deployment complete"
+            echo "- Backend and embedded web frontend deployed together"
+            echo "- Agent was not updated"
+            echo "- PostgreSQL and Redis were preserved"
+          } >> "$GITHUB_STEP_SUMMARY"
