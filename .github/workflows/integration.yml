@@ -23,11 +23,12 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
 
       - name: Run Backend Integration/API Smoke
         run: |
-          chmod +x ./gradlew
-          ./gradlew :backend:integrationTest --no-daemon
+          gradle :backend:integrationTest --no-daemon
 
       - name: Upload Integration Reports
         if: always()
