@@ -302,6 +302,29 @@ class ScmateControllerTest {
     }
 
     @Test
+    void protectionDisableRequiresStableOperatorModeAndUsesVendorCommand() throws Exception {
+        Path commandPath = Files.createFile(tempDir.resolve("ShdCmd.exe"));
+        AtomicReference<List<String>> arguments = new AtomicReference<>();
+        ScmateController.Status operator = new ScmateController.Status(
+                ScmateController.Mode.OPERATOR, false, 3, 0,
+                ScmateController.Schedule.MANUAL,
+                ScmateController.RecoveryPoint.UNKNOWN,
+                ScmateController.AvailabilityReason.ACTIVE);
+
+        ScmateController.Result result = ScmateController.disableProtection(
+                commandPath, operator, "operator", "test-password", new ObjectMapper(),
+                (command, timeout) -> {
+                    arguments.set(List.copyOf(command));
+                    return ScmateController.RestoreExecution.completed(0);
+                });
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(arguments.get()).containsExactly(
+                commandPath.toString(), "/protect", "disable",
+                "/u", "operator", "/p", "test-password");
+    }
+
+    @Test
     void modeRequestResultIncludesVerifiedObservedState() throws Exception {
         ScmateController.Status before = new ScmateController.Status(
                 ScmateController.Mode.PROTECTED, false, 0, 0);

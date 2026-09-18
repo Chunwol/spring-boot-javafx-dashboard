@@ -254,6 +254,21 @@ public final class ScmateController {
                 return enableProtection(COMMAND_PATH, before, username, password, mapper,
                         ScmateController::runDirectCommand);
             }
+            if (action == Action.DISABLE_PROTECTION) {
+                if (before.availabilityReason() != AvailabilityReason.ACTIVE
+                        || before.mode() != Mode.OPERATOR || before.transitionPending()) {
+                    return Result.failure("SCMATE_UNSAFE_STATE",
+                            "Protection disable requires stable operator mode.");
+                }
+                Result authFailure = authenticate(library, username, password);
+                if (authFailure != null) return authFailure;
+                closeNativeApi(library, close, opened);
+                opened = false;
+                close = null;
+                library = null;
+                return disableProtection(COMMAND_PATH, before, username, password, mapper,
+                        ScmateController::runDirectCommand);
+            }
             if (!action.isReadOnly()
                     && before.availabilityReason() == AvailabilityReason.LICENSE_EXPIRED) {
                 return Result.failure("SCMATE_LICENSE_EXPIRED", "SCMATE recovery license has expired.");
@@ -301,7 +316,7 @@ public final class ScmateController {
                             (path, user, secret, timeout) ->
                                     runRestoreCommand(path, user, secret, recoveryPoint, timeout));
                 }
-                case STATUS, INSTALL_RECOVERY_MODULE, ENABLE_PROTECTION,
+                case STATUS, INSTALL_RECOVERY_MODULE, ENABLE_PROTECTION, DISABLE_PROTECTION,
                         REQUEST_OPERATOR, REQUEST_PROTECTED ->
                         throw new IllegalStateException(
                         "SCMATE action dispatch reached an invalid state.");
@@ -893,6 +908,45 @@ public final class ScmateController {
                                                        String password) {
         return authenticatedCommand(commandPath,
                 List.of("/protect", "enable"), username, password);
+    }
+
+    static List<String> buildDisableProtectionCommand(Path commandPath,
+                                                       String username,
+                                                       String password) {
+        return authenticatedCommand(commandPath,
+                List.of("/protect", "disable"), username, password);
+    }
+
+    static Result disableProtection(Path commandPath,
+                                    Status before,
+                                    String username,
+                                    String password,
+                                    ObjectMapper mapper,
+                                    DirectCommandRunner runner) {
+        if (before.availabilityReason() != AvailabilityReason.ACTIVE
+                || before.mode() != Mode.OPERATOR || before.transitionPending()) {
+            return Result.failure("SCMATE_UNSAFE_STATE",
+                    "Protection disable requires stable operator mode.");
+        }
+        if (!Files.isRegularFile(commandPath)) {
+            return Result.failure("SCMATE_NOT_INSTALLED", "SCMATE mode command is not installed.");
+        }
+        List<String> command = buildDisableProtectionCommand(commandPath, username, password);
+        RestoreExecution execution;
+        try {
+            execution = runner.run(command, MODE_COMMAND_TIMEOUT);
+        } finally {
+            Collections.fill(command, "");
+        }
+        if (execution.timedOut()) return Result.failure("SCMATE_DISABLE_TIMEOUT", "SCMATE protection disable command timed out.");
+        if (!execution.started()) return Result.failure("SCMATE_DISABLE_START_FAILED", "SCMATE protection disable command could not be started.");
+        if (execution.exitCode() != 0) return Result.failure("SCMATE_DISABLE_FAILED", "SCMATE protection disable command failed with exit code " + execution.exitCode() + ".");
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("action", Action.DISABLE_PROTECTION.name());
+        output.put("before", before.toMap());
+        output.put("protectionDisableRequested", true);
+        output.put("rebootRequested", false);
+        return Result.success(writeJson(mapper, output));
     }
 
     static Result enableProtection(Path commandPath,
@@ -1582,6 +1636,7 @@ public final class ScmateController {
         REFRESH_STATUS_DETAIL,
         DIAGNOSTIC_STATUS_DETAIL,
         ENABLE_PROTECTION,
+        DISABLE_PROTECTION,
         REQUEST_OPERATOR,
         REQUEST_PROTECTED,
         UPDATE_BASELINE,
