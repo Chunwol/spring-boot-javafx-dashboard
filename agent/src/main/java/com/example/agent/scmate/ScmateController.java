@@ -101,21 +101,22 @@ public final class ScmateController {
         }
         RecoveryPoint selectedPoint = recoveryPoint;
         return retryUntilReady(action,
-                () -> executeOnce(action, selectedPoint, username, password, mapper),
+                () -> executeOnce(action, payload, selectedPoint, username, password, mapper),
                 READY_TIMEOUT, READY_RETRY_INTERVAL, Thread::sleep);
     }
 
     private static Result executeOnce(Action action,
+                                      JsonNode payload,
                                       RecoveryPoint recoveryPoint,
                                       String username,
                                       String password,
                                       ObjectMapper mapper) {
         if (!requiresNativeApiLock(action)) {
-            return executeLocked(action, recoveryPoint, username, password, mapper);
+            return executeLocked(action, payload, recoveryPoint, username, password, mapper);
         }
         API_LOCK.lock();
         try {
-            return executeLocked(action, recoveryPoint, username, password, mapper);
+            return executeLocked(action, payload, recoveryPoint, username, password, mapper);
         } finally {
             API_LOCK.unlock();
         }
@@ -159,6 +160,7 @@ public final class ScmateController {
     }
 
     private static Result executeLocked(Action action,
+                                        JsonNode payload,
                                         RecoveryPoint recoveryPoint,
                                         String username,
                                         String password,
@@ -284,6 +286,10 @@ public final class ScmateController {
             }
 
             switch (action) {
+                case LIST_EXCEPTION_FOLDERS, ADD_EXCEPTION_FOLDER, REMOVE_EXCEPTION_FOLDER -> {
+                    return executeExceptionFolderAction(COMMAND_PATH, action, payload,
+                            before, username, password, mapper, ScmateController::runCapturedCommand);
+                }
                 case REFRESH_STATUS_DETAIL -> {
                     Status after = readEffectiveStatus(library);
                     return detailedResult(COMMAND_PATH, action, before, after, client, username, password, mapper,
@@ -915,6 +921,93 @@ public final class ScmateController {
                                                        String password) {
         return authenticatedCommand(commandPath,
                 List.of("/protect", "disable"), username, password);
+    }
+
+    static List<String> buildExceptionFolderCommand(Path commandPath,
+                                                     Action action,
+                                                     String folderPath,
+                                                     String username,
+                                                     String password) {
+        List<String> arguments = new ArrayList<>();
+        arguments.add("/SyncFile");
+        if (action == Action.ADD_EXCEPTION_FOLDER) {
+            arguments.add("/add");
+            arguments.add(folderPath);
+        } else if (action == Action.REMOVE_EXCEPTION_FOLDER) {
+            arguments.add("/del");
+            arguments.add(folderPath);
+        } else if (action != Action.LIST_EXCEPTION_FOLDERS) {
+            throw new IllegalArgumentException("Unsupported exception folder action.");
+        }
+        return authenticatedCommand(commandPath, arguments, username, password);
+    }
+
+    static String validateExceptionFolderPath(JsonNode payload) {
+        String value = payload == null ? "" : payload.path("path").asText("").trim();
+        if (value.isEmpty()) throw new IllegalArgumentException("path is required.");
+        if (value.length() > 240 || value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0
+                || value.indexOf('\u0000') >= 0 || value.indexOf('"') >= 0) {
+            throw new IllegalArgumentException("path is not a safe Windows folder path.");
+        }
+        if (!Pattern.matches("(?i)^[a-z]:\\\\[^*?<>|]*$", value)) {
+            throw new IllegalArgumentException("path must be an absolute local Windows folder path.");
+        }
+        while (value.length() > 3 && (value.endsWith("\\") || value.endsWith("/"))) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value;
+    }
+
+    static Result executeExceptionFolderAction(Path commandPath,
+                                               Action action,
+                                               JsonNode payload,
+                                               Status status,
+                                               String username,
+                                               String password,
+                                               ObjectMapper mapper,
+                                               DetailCommandRunner runner) {
+        if (!Files.isRegularFile(commandPath)) {
+            return Result.failure("SCMATE_NOT_INSTALLED", "SCMATE command is not installed.");
+        }
+        if (status.availabilityReason() != AvailabilityReason.ACTIVE || status.transitionPending()) {
+            return Result.failure("SCMATE_UNSAFE_STATE",
+                    "Exception folders require an active, stable SCMATE state.");
+        }
+        String folderPath = null;
+        if (action != Action.LIST_EXCEPTION_FOLDERS) {
+            try {
+                folderPath = validateExceptionFolderPath(payload);
+            } catch (IllegalArgumentException invalid) {
+                return Result.failure("SCMATE_INVALID_EXCEPTION_PATH", invalid.getMessage());
+            }
+        }
+        List<String> command = buildExceptionFolderCommand(
+                commandPath, action, folderPath, username, password);
+        CommandExecution execution;
+        try {
+            execution = runner.run(command, DETAIL_COMMAND_TIMEOUT);
+        } finally {
+            Collections.fill(command, "");
+        }
+        if (execution.timedOut()) {
+            return Result.failure("SCMATE_EXCEPTION_FOLDER_TIMEOUT",
+                    "SCMATE exception folder command timed out.");
+        }
+        if (!execution.started()) {
+            return Result.failure("SCMATE_EXCEPTION_FOLDER_START_FAILED",
+                    "SCMATE exception folder command could not be started.");
+        }
+        if (execution.exitCode() != 0) {
+            return Result.failure("SCMATE_EXCEPTION_FOLDER_FAILED",
+                    "SCMATE exception folder command failed with exit code "
+                            + execution.exitCode() + ".");
+        }
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("action", action.name());
+        output.put("path", folderPath);
+        output.put("vendorOutput", sanitizeOutput(
+                decodeWindowsOutput(execution.output()), username, password).trim());
+        return Result.success(writeJson(mapper, output));
     }
 
     static Result disableProtection(Path commandPath,
@@ -1635,6 +1728,9 @@ public final class ScmateController {
         STATUS,
         REFRESH_STATUS_DETAIL,
         DIAGNOSTIC_STATUS_DETAIL,
+        LIST_EXCEPTION_FOLDERS,
+        ADD_EXCEPTION_FOLDER,
+        REMOVE_EXCEPTION_FOLDER,
         ENABLE_PROTECTION,
         DISABLE_PROTECTION,
         REQUEST_OPERATOR,
@@ -1654,7 +1750,7 @@ public final class ScmateController {
 
         boolean isReadOnly() {
             return this == STATUS || this == REFRESH_STATUS_DETAIL
-                    || this == DIAGNOSTIC_STATUS_DETAIL;
+                    || this == DIAGNOSTIC_STATUS_DETAIL || this == LIST_EXCEPTION_FOLDERS;
         }
     }
 

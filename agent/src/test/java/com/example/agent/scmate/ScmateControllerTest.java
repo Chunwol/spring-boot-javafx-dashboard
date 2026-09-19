@@ -1033,4 +1033,39 @@ class ScmateControllerTest {
         assertThat(attempts).hasValue(2);
         assertThat(sleeps).hasValue(1);
     }
+
+    @Test
+    void exceptionFolderCommandsPreserveTheExistingList() {
+        Path commandPath = tempDir.resolve("ShdCmd.exe");
+
+        assertThat(ScmateController.buildExceptionFolderCommand(
+                commandPath, ScmateController.Action.LIST_EXCEPTION_FOLDERS,
+                null, "operator", "secret"))
+                .containsExactly(commandPath.toString(), "/SyncFile", "/u", "operator", "/p", "secret");
+        assertThat(ScmateController.buildExceptionFolderCommand(
+                commandPath, ScmateController.Action.ADD_EXCEPTION_FOLDER,
+                "C:\\Users\\USER\\Desktop\\딥러닝", "operator", "secret"))
+                .containsExactly(commandPath.toString(), "/SyncFile", "/add",
+                        "C:\\Users\\USER\\Desktop\\딥러닝", "/u", "operator", "/p", "secret");
+        assertThat(ScmateController.buildExceptionFolderCommand(
+                commandPath, ScmateController.Action.REMOVE_EXCEPTION_FOLDER,
+                "C:\\Users\\USER\\Desktop\\딥러닝", "operator", "secret"))
+                .containsExactly(commandPath.toString(), "/SyncFile", "/del",
+                        "C:\\Users\\USER\\Desktop\\딥러닝", "/u", "operator", "/p", "secret");
+    }
+
+    @Test
+    void exceptionFolderPathRequiresASafeAbsoluteLocalPath() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        assertThat(ScmateController.validateExceptionFolderPath(
+                mapper.readTree("{\"path\":\"C:\\\\Users\\\\USER\\\\Desktop\\\\딥러닝\\\\\"}")))
+                .isEqualTo("C:\\Users\\USER\\Desktop\\딥러닝");
+        assertThatThrownBy(() -> ScmateController.validateExceptionFolderPath(
+                mapper.readTree("{\"path\":\"..\\\\Desktop\"}")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ScmateController.validateExceptionFolderPath(
+                mapper.readTree("{\"path\":\"C:\\\\bad*path\"}")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

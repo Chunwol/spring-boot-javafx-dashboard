@@ -76,7 +76,8 @@ export function PcsPage() {
   const canPcOperations = hasPermission('COMMAND_ISSUE') && hasPermission('FILE_UPLOAD_DISTRIBUTE')
   const canAgentUpdate = hasPermission('AGENT_UPDATE') && hasPermission('FILE_DISTRIBUTION_VIEW')
   const canScmate = ['SCMATE_STATUS_VIEW', 'SCMATE_OPERATOR_MODE', 'SCMATE_BASELINE_UPDATE',
-    'SCMATE_PROTECTED_MODE', 'SCMATE_SYSTEM_RESTORE', 'SCMATE_RECOVERY_MODULE_INSTALL']
+    'SCMATE_PROTECTED_MODE', 'SCMATE_SYSTEM_RESTORE', 'SCMATE_RECOVERY_MODULE_INSTALL',
+    'SCMATE_EXCEPTION_FOLDER_MANAGE']
     .some((permission) => hasPermission(permission as Parameters<typeof hasPermission>[0]))
   const { showToast } = useToast()
   const [filters, setFilters] = useState<PcFilters>({ search: '', groupId: 'all', state: 'all', role: 'all', scmate: 'all' })

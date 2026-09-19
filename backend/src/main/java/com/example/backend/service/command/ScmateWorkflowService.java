@@ -59,6 +59,12 @@ public class ScmateWorkflowService {
 
     @Transactional
     public synchronized Map<String, Object> perform(String macAddress, String rawAction, String rawRecoveryPoint) {
+        return perform(macAddress, rawAction, rawRecoveryPoint, null);
+    }
+
+    @Transactional
+    public synchronized Map<String, Object> perform(String macAddress, String rawAction,
+                                                     String rawRecoveryPoint, String rawPath) {
         PcMaster pc = pcMasterRepository.findById(macAddress)
                 .orElseThrow(() -> new ResourceNotFoundException("PC를 찾을 수 없습니다: " + macAddress));
         String action = rawAction.trim().toUpperCase(Locale.ROOT);
@@ -76,6 +82,18 @@ public class ScmateWorkflowService {
         }
         if ("TEACHER".equalsIgnoreCase(pc.getRole())) {
             throw new ConflictException("학생 PC에서만 SCMATE 작업을 직접 실행할 수 있습니다.");
+        }
+        if ("LIST_EXCEPTION_FOLDERS".equals(action)
+                || "ADD_EXCEPTION_FOLDER".equals(action)
+                || "REMOVE_EXCEPTION_FOLDER".equals(action)) {
+            requireScmateAvailable(pc);
+            requireAgentVersion(pc, 1, 1, 70, "SCMATE 예외 폴더 관리");
+            requireCredential();
+            String path = normalizeExceptionPath(action, rawPath);
+            pc.setScmateError(null);
+            CommandQueue command = queue(pc, "SCMATE_CONTROL",
+                    exceptionFolderPayload(action, recoveryPoint, path));
+            return saveNotifyAndRespond(pc, command, action, recoveryPoint);
         }
         if ("INSTALL_RECOVERY_MODULE".equals(action)) {
             return installRecoveryModule(pc, action, recoveryPoint);
@@ -357,6 +375,30 @@ public class ScmateWorkflowService {
         } catch (Exception e) {
             throw new IllegalStateException("SCMATE 명령 생성에 실패했습니다.", e);
         }
+    }
+
+    private String exceptionFolderPayload(String action, String recoveryPoint, String path) {
+        try {
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("action", action);
+            value.put("recoveryPoint", recoveryPoint);
+            if (path != null) value.put("path", path);
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("SCMATE 예외 폴더 명령 생성에 실패했습니다.", e);
+        }
+    }
+
+    private String normalizeExceptionPath(String action, String rawPath) {
+        if ("LIST_EXCEPTION_FOLDERS".equals(action)) return null;
+        String path = rawPath == null ? "" : rawPath.trim();
+        if (!path.matches("(?i)^[a-z]:\\\\[^\\r\\n\\u0000\"*?<>|]{1,237}$")) {
+            throw new ConflictException("절대 Windows 폴더 경로를 입력해 주세요.");
+        }
+        while (path.length() > 3 && (path.endsWith("\\") || path.endsWith("/"))) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
     }
 
     private String rebootPayload(PcMaster pc, String action, String recoveryPoint) {

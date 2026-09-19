@@ -287,6 +287,12 @@ public class PcStatusService {
             return List.copyOf(actions);
         }
 
+        if (AgentVersionUtil.isAtLeast(pc.getAgentVersion(), 1, 1, 70)) {
+            actions.add("LIST_EXCEPTION_FOLDERS");
+            actions.add("ADD_EXCEPTION_FOLDER");
+            actions.add("REMOVE_EXCEPTION_FOLDER");
+        }
+
         if (detailedScmateSupported) {
             actions.add("REQUEST_OPERATOR");
             actions.add("REQUEST_PROTECTED");

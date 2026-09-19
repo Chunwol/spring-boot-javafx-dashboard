@@ -32,7 +32,7 @@ public class ScmateController {
     public ResponseEntity<Map<String, Object>> perform(@Valid @RequestBody ScmateActionRequestDto request) {
         featurePermissionGuard.requireScmateAction(request.action());
         return ResponseEntity.accepted().body(
-                scmateWorkflowService.perform(request.macAddress(), request.action(), request.recoveryPoint()));
+                performRequest(request));
     }
 
     @PostMapping("/actions/bulk")
@@ -47,8 +47,7 @@ public class ScmateController {
         int accepted = 0;
         for (ScmateActionRequestDto request : requests) {
             try {
-                Map<String, Object> row = new LinkedHashMap<>(scmateWorkflowService.perform(
-                        request.macAddress(), request.action(), request.recoveryPoint()));
+                Map<String, Object> row = new LinkedHashMap<>(performRequest(request));
                 row.put("accepted", true);
                 results.add(row);
                 accepted++;
@@ -69,5 +68,14 @@ public class ScmateController {
         response.put("failed", requests.size() - accepted);
         response.put("results", results);
         return ResponseEntity.accepted().body(response);
+    }
+
+    private Map<String, Object> performRequest(ScmateActionRequestDto request) {
+        if (request.path() == null) {
+            return scmateWorkflowService.perform(
+                    request.macAddress(), request.action(), request.recoveryPoint());
+        }
+        return scmateWorkflowService.perform(
+                request.macAddress(), request.action(), request.recoveryPoint(), request.path());
     }
 }

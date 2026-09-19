@@ -92,6 +92,7 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, canPerform, onCl
   const { showToast } = useToast()
   const [pendingAction, setPendingAction] = useState<ScmateAction | null>(null)
   const [recoveryPoint, setRecoveryPoint] = useState<ScmateRecoveryPoint>('BASELINE')
+  const [exceptionPath, setExceptionPath] = useState('')
   const [bulkErrors, setBulkErrors] = useState<ScmateActionFailure[]>([])
   const classroomMode = Boolean(classroomPcs)
   const classroomPreviews = useMemo(
@@ -105,13 +106,21 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, canPerform, onCl
     [classroomMode, classroomPreviews, pc],
   )
   const refreshAllowed = allowedActions.includes('REFRESH_STATUS_DETAIL')
-  const actionButtons = allowedActions.filter((action) => action !== 'REFRESH_STATUS_DETAIL' && (!canPerform || canPerform(action)))
+  const exceptionActions = allowedActions.filter((action) =>
+    ['LIST_EXCEPTION_FOLDERS', 'ADD_EXCEPTION_FOLDER', 'REMOVE_EXCEPTION_FOLDER'].includes(action)
+      && (!canPerform || canPerform(action)))
+  const actionButtons = allowedActions.filter((action) =>
+    action !== 'REFRESH_STATUS_DETAIL'
+      && !['LIST_EXCEPTION_FOLDERS', 'ADD_EXCEPTION_FOLDER', 'REMOVE_EXCEPTION_FOLDER'].includes(action)
+      && (!canPerform || canPerform(action)))
   const canRefresh = canAct && (!canPerform || canPerform('REFRESH_STATUS_DETAIL'))
   const showsRecoveryPoint = actionButtons.some(usesRecoveryPoint)
 
   const actionMutation = useMutation({
-    mutationFn: async ({ action, point }: { action: ScmateAction; point: ScmateRecoveryPoint }) => {
-      if (!classroomMode) return sendScmateAction(pc.macAddress, action, point)
+    mutationFn: async ({ action, point, path }: { action: ScmateAction; point: ScmateRecoveryPoint; path?: string }) => {
+      if (!classroomMode) return path === undefined
+        ? sendScmateAction(pc.macAddress, action, point)
+        : sendScmateAction(pc.macAddress, action, point, path)
       const targets = classroomPreviews.get(action)?.targets || []
       return sendScmateActions(targets, action, point)
     },
@@ -149,7 +158,14 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, canPerform, onCl
       setPendingAction(null)
       return
     }
-    actionMutation.mutate({ action: pendingAction, point: recoveryPoint })
+    const needsPath = pendingAction === 'ADD_EXCEPTION_FOLDER' || pendingAction === 'REMOVE_EXCEPTION_FOLDER'
+    const path = exceptionPath.trim()
+    if (needsPath && !/^[a-z]:\\[^\r\n"*?<>|]+$/i.test(path)) {
+      showToast('C:\\로 시작하는 절대 폴더 경로를 입력해 주세요.', 'error')
+      setPendingAction(null)
+      return
+    }
+    actionMutation.mutate({ action: pendingAction, point: recoveryPoint, path: needsPath ? path : undefined })
   }
 
   const state = scmateState(pc)
@@ -216,6 +232,34 @@ export function ScmateControlDialog({ pc, classroomPcs, canAct, canPerform, onCl
                 ))}
               </div>
             </fieldset>
+          )}
+
+          {!classroomMode && canAct && exceptionActions.length > 0 && (
+            <section className="scmate-exception-folders" aria-label="SCMATE 예외 폴더 관리">
+              <h3>복구 예외 폴더</h3>
+              <p>기존 목록을 유지한 채 경로 하나만 추가하거나 삭제합니다. 재부팅과 복구시점 저장은 자동 실행하지 않습니다.</p>
+              <input
+                value={exceptionPath}
+                onChange={(event) => setExceptionPath(event.target.value)}
+                placeholder="C:\\Users\\USER\\Desktop\\폴더명"
+                disabled={actionMutation.isPending}
+                aria-label="예외 폴더 절대 경로"
+              />
+              <div className="scmate-actions">
+                {exceptionActions.map((action) => (
+                  <button
+                    key={action}
+                    type="button"
+                    className="button secondary"
+                    disabled={actionMutation.isPending || (action !== 'LIST_EXCEPTION_FOLDERS' && !exceptionPath.trim())}
+                    onClick={() => setPendingAction(action)}
+                  >
+                    {action === 'LIST_EXCEPTION_FOLDERS' ? <RefreshCw size={16} /> : <Shield size={16} />}
+                    <span>{SCMATE_ACTION_LABELS[action]}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
 
           {canAct && actionButtons.length > 0 && (

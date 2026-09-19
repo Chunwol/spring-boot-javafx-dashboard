@@ -17,6 +17,9 @@ export const SCMATE_ACTIONS = [
   'RESTORE_BASELINE',
   'INSTALL_RECOVERY_MODULE',
   'REFRESH_STATUS_DETAIL',
+  'LIST_EXCEPTION_FOLDERS',
+  'ADD_EXCEPTION_FOLDER',
+  'REMOVE_EXCEPTION_FOLDER',
 ] as const
 export type ScmateAction = (typeof SCMATE_ACTIONS)[number]
 export type ScmateTone = 'protected' | 'operator' | 'transition' | 'unavailable' | 'inactive' | 'license' | 'unknown' | 'error' | 'server'
@@ -38,6 +41,9 @@ export const SCMATE_ACTION_LABELS: Record<ScmateAction, string> = {
   RESTORE_BASELINE: '시스템 복구',
   INSTALL_RECOVERY_MODULE: '복구모듈 설치',
   REFRESH_STATUS_DETAIL: '상세 상태 새로고침',
+  LIST_EXCEPTION_FOLDERS: '예외 폴더 조회',
+  ADD_EXCEPTION_FOLDER: '예외 폴더 추가',
+  REMOVE_EXCEPTION_FOLDER: '예외 폴더 삭제',
 }
 
 export interface PcFilters {

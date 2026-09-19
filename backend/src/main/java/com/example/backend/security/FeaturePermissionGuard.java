@@ -37,6 +37,7 @@ public class FeaturePermissionGuard {
         require(FeaturePermission.SCMATE_PROTECTED_MODE);
         require(FeaturePermission.SCMATE_SYSTEM_RESTORE);
         require(FeaturePermission.SCMATE_RECOVERY_MODULE_INSTALL);
+        require(FeaturePermission.SCMATE_EXCEPTION_FOLDER_MANAGE);
     }
 
     public void requireScmateAction(String action) {
@@ -47,6 +48,8 @@ public class FeaturePermissionGuard {
             case "REQUEST_PROTECTED", "REBOOT_TO_PROTECTED", "ENABLE_PROTECTION" -> FeaturePermission.SCMATE_PROTECTED_MODE;
             case "RESTORE_BASELINE" -> FeaturePermission.SCMATE_SYSTEM_RESTORE;
             case "INSTALL_RECOVERY_MODULE" -> FeaturePermission.SCMATE_RECOVERY_MODULE_INSTALL;
+            case "LIST_EXCEPTION_FOLDERS", "ADD_EXCEPTION_FOLDER", "REMOVE_EXCEPTION_FOLDER" ->
+                    FeaturePermission.SCMATE_EXCEPTION_FOLDER_MANAGE;
             default -> throw new AccessDeniedException("지원하지 않는 세부 권한 작업입니다.");
         };
         require(permission);

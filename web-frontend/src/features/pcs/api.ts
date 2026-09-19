@@ -14,8 +14,8 @@ export function getPcs() {
   return api.get<PcStatus[]>('/dashboard/pcs')
 }
 
-export function sendScmateAction(macAddress: string, action: ScmateAction, recoveryPoint: ScmateRecoveryPoint = 'BASELINE') {
-  return api.post<{ message?: string } | undefined>('/scmate/actions', { macAddress, action, recoveryPoint })
+export function sendScmateAction(macAddress: string, action: ScmateAction, recoveryPoint: ScmateRecoveryPoint = 'BASELINE', path?: string) {
+  return api.post<{ message?: string; taskId?: number } | undefined>('/scmate/actions', { macAddress, action, recoveryPoint, path })
 }
 
 export interface ScmateActionFailure {
