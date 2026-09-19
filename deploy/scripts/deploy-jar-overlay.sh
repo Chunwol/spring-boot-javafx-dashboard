@@ -26,6 +26,33 @@ compose() {
 
 cd "$DEPLOY_DIR"
 test -f "$UPLOAD"
+
+update_env_value() {
+    key="$1"
+    value="$2"
+    tmp=".env.github.$$"
+    awk -v key="$key" -v value="$value" '
+        BEGIN { replaced = 0 }
+        index($0, key "=") == 1 {
+            print key "=" value
+            replaced = 1
+            next
+        }
+        { print }
+        END {
+            if (!replaced) print key "=" value
+        }
+    ' .env > "$tmp"
+    chmod --reference=.env "$tmp"
+    mv "$tmp" .env
+}
+
+if [ -n "${DEFAULT_ADMIN_USERNAME:-}" ] && [ -n "${DEFAULT_ADMIN_PASSWORD:-}" ]; then
+    update_env_value DEFAULT_ADMIN_USERNAME "$DEFAULT_ADMIN_USERNAME"
+    update_env_value DEFAULT_ADMIN_PASSWORD "$DEFAULT_ADMIN_PASSWORD"
+    update_env_value DEFAULT_ADMIN_SYNC_ON_STARTUP true
+fi
+
 ACTUAL_SHA=$(sha256sum "$UPLOAD" | awk '{print $1}')
 if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
     printf 'JAR hash mismatch: expected=%s actual=%s\n' "$EXPECTED_SHA" "$ACTUAL_SHA" >&2

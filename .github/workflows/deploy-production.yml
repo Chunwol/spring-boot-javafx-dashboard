@@ -83,6 +83,9 @@ jobs:
           path: deployment-artifact
 
       - name: Deploy application locally on NAS
+        env:
+          DEFAULT_ADMIN_USERNAME: ${{ secrets.DEFAULT_ADMIN_USERNAME }}
+          DEFAULT_ADMIN_PASSWORD: ${{ secrets.DEFAULT_ADMIN_PASSWORD }}
         run: |
           sha=$(cat deployment-artifact/app.jar.sha256)
           cp deployment-artifact/app.jar /tmp/classroom-dashboard-app.jar
