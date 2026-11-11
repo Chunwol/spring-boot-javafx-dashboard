@@ -5,6 +5,7 @@ import {
   LayoutGrid,
   List,
   Download,
+  FileText,
   Maximize,
   Monitor,
   PanelsTopLeft,
@@ -285,7 +286,11 @@ function RoomDetail({ room, pcs, canRemote, canPowerOn, canShutdown, onClose, on
           {sorted.map((pc) => (
             <div className="drawer-pc-row" key={pc.macAddress || `${pc.pcName}-${pc.ipAddress}`}>
               <span className={`pc-state-mark ${isBrokenPc(pc) ? 'broken' : isOnlinePc(pc) ? 'online' : 'offline'}`} />
-              <div><strong title={`${pc.role?.toUpperCase() === 'TEACHER' ? '교수 PC' : `${seatLabel(pc)}번`} · ${pc.pcName}`}>{pc.role?.toUpperCase() === 'TEACHER' ? '교수 PC' : `${seatLabel(pc)}번`} · {pc.pcName}</strong><small title={`${pc.ipAddress || '-'} · ${pc.agentVersion || '버전 정보 없음'}`}>{pc.ipAddress || '-'} · {pc.agentVersion || '버전 정보 없음'}</small></div>
+              <div>
+                <strong title={`${pc.role?.toUpperCase() === 'TEACHER' ? '교수 PC' : `${seatLabel(pc)}번`} · ${pc.pcName}`}>{pc.role?.toUpperCase() === 'TEACHER' ? '교수 PC' : `${seatLabel(pc)}번`} · {pc.pcName}</strong>
+                <small title={`${pc.ipAddress || '-'} · ${pc.agentVersion || '버전 정보 없음'}`}>{pc.ipAddress || '-'} · {pc.agentVersion || '버전 정보 없음'}</small>
+                {pc.deviceNote && <span className="drawer-device-note" title={pc.deviceNote}><FileText size={12} aria-hidden="true" /><span>{pc.deviceNote}</span></span>}
+              </div>
               <span className="pc-state-text">{isBrokenPc(pc) ? '고장' : isOnlinePc(pc) ? '온라인' : '오프라인'}</span>
             </div>
           ))}
