@@ -241,4 +241,17 @@ public class DashboardController {
             @RequestBody Map<String, String> payload) {
         return ResponseEntity.ok(pcStatusService.updateBrokenPcNote(macAddress, payload.get("note")));
     }
+
+    @PutMapping("/pcs/{macAddress}/note")
+    @Operation(summary = "장치 메모 수정", description = "PC 상태와 무관한 운영 메모를 저장하거나 삭제합니다.")
+    @ApiResponse(responseCode = "200", description = "장치 메모 수정 성공")
+    @ApiResponse(responseCode = "400", description = "메모 길이 초과 등 요청 데이터 오류")
+    @ApiResponse(responseCode = "404", description = "해당 MAC의 PC를 찾을 수 없음")
+    public ResponseEntity<PcStatusDto> updateDeviceNote(
+            @Parameter(description = "PC MAC 주소") @PathVariable String macAddress,
+            @RequestBody DeviceNoteRequest payload) {
+        return ResponseEntity.ok(pcStatusService.updateDeviceNote(macAddress, payload.note()));
+    }
+
+    public record DeviceNoteRequest(String note) {}
 }

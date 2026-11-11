@@ -97,6 +97,9 @@ public class FeaturePermissionAuthorizationFilter extends OncePerRequestFilter {
             if ("DELETE".equals(method)) return any(FeaturePermission.BROKEN_PC_CLEAR);
             return any(FeaturePermission.BROKEN_PC_REGISTER_EDIT);
         }
+        if ("PUT".equals(method) && path.matches("/api/v1/dashboard/pcs/[^/]+/note")) {
+            return any(FeaturePermission.BROKEN_PC_REGISTER_EDIT);
+        }
         if (path.startsWith("/api/v1/dashboard/traffic")
                 || path.startsWith("/api/v1/dashboard/config/traffic-thresholds")
                 || path.matches("/api/v1/dashboard/classrooms/[^/]+/traffic/pcs.*")
