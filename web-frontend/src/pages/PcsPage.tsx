@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, Monitor, Power, PowerOff, RefreshCw, RotateCw, Search, Shield, UploadCloud, Wrench } from 'lucide-react'
+import { Eye, FileText, Monitor, Pencil, Power, PowerOff, RefreshCw, RotateCw, Search, Shield, UploadCloud, Wrench } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { scmatePermission } from '../auth/permissions'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState, PageError, PageLoading } from '../components/ui/PageState'
 import { useToast } from '../components/ui/ToastProvider'
-import { getPcs, sendPcCommands } from '../features/pcs/api'
+import { getPcs, sendPcCommands, updateDeviceNote } from '../features/pcs/api'
+import { DeviceNoteDialog } from '../features/pcs/DeviceNoteDialog'
 import { PcOperationsDialog } from '../features/pcs/PcOperationsDialog'
 import { ScmateControlDialog, ScmateStatusBadge } from '../features/pcs/ScmateControlDialog'
 import { RemoteControlDialog } from '../features/remoteControl/RemoteControlDialog'
@@ -75,6 +76,7 @@ export function PcsPage() {
   const canRemote = hasPermission('REMOTE_SCREEN_VIEW')
   const canPcOperations = hasPermission('COMMAND_ISSUE') && hasPermission('FILE_UPLOAD_DISTRIBUTE')
   const canAgentUpdate = hasPermission('AGENT_UPDATE') && hasPermission('FILE_DISTRIBUTION_VIEW')
+  const canEditDeviceNote = hasPermission('BROKEN_PC_REGISTER_EDIT')
   const canScmate = ['SCMATE_STATUS_VIEW', 'SCMATE_OPERATOR_MODE', 'SCMATE_BASELINE_UPDATE',
     'SCMATE_PROTECTED_MODE', 'SCMATE_SYSTEM_RESTORE', 'SCMATE_RECOVERY_MODULE_INSTALL',
     'SCMATE_EXCEPTION_FOLDER_MANAGE']
@@ -88,6 +90,7 @@ export function PcsPage() {
   const [viewerTarget, setViewerTarget] = useState<PcStatus | null>(null)
   const [remoteTarget, setRemoteTarget] = useState<PcStatus | null>(null)
   const [scmateTargetMac, setScmateTargetMac] = useState<string | null>(null)
+  const [deviceNoteTargetMac, setDeviceNoteTargetMac] = useState<string | null>(null)
 
   const pcsQuery = useQuery({
     queryKey: ['pcs'],
@@ -97,6 +100,7 @@ export function PcsPage() {
   })
   const pcs = pcsQuery.data || []
   const scmateTarget = scmateTargetMac ? pcs.find((pc) => pc.macAddress === scmateTargetMac) || null : null
+  const deviceNoteTarget = deviceNoteTargetMac ? pcs.find((pc) => pc.macAddress === deviceNoteTargetMac) || null : null
   const scmateClassroomPcs = scmateTarget && pcRole(scmateTarget) === 'teacher' && scmateTarget.groupId != null
     ? pcs.filter((pc) => pc.groupId === scmateTarget.groupId)
     : undefined
@@ -159,6 +163,16 @@ export function PcsPage() {
       window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['pcs'] }), 1_000)
     },
     onError: (error) => showToast(error instanceof Error ? error.message : '명령을 전송하지 못했습니다.', 'error'),
+  })
+
+  const deviceNoteMutation = useMutation({
+    mutationFn: ({ pc, note }: { pc: PcStatus; note: string | null }) => updateDeviceNote(pc.macAddress, note),
+    onSuccess: (_updated, variables) => {
+      showToast(`${variables.pc.pcName || variables.pc.macAddress} 장치 메모를 ${variables.note ? '저장했습니다.' : '삭제했습니다.'}`)
+      setDeviceNoteTargetMac(null)
+      void queryClient.invalidateQueries({ queryKey: ['pcs'] })
+    },
+    onError: (error) => showToast(error instanceof Error ? error.message : '장치 메모를 저장하지 못했습니다.', 'error'),
   })
 
   const openCommand = (type: PcPowerCommand, candidates: PcStatus[], bulk: boolean) => {
@@ -261,7 +275,7 @@ export function PcsPage() {
             <thead>
               <tr>
                 <th style={{ width: 44 }}><SelectAllCheckbox checked={selectState.checked} indeterminate={selectState.indeterminate} disabled={!selectState.selectableMacs.length} onChange={toggleFiltered} /></th>
-                <th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>역할</th><th>상태</th><th>SCMATE</th><th>에이전트 버전</th><th>전체 번들</th><th>마지막 연결</th><th style={{ minWidth: 190 }}>화면·명령</th>
+                <th>강의실</th><th>PC 이름</th><th>IP 주소</th><th>MAC 주소</th><th>역할</th><th>상태</th><th>SCMATE</th><th>에이전트 버전</th><th>전체 번들</th><th>마지막 연결</th><th style={{ minWidth: 220 }}>장치 메모</th><th style={{ minWidth: 190 }}>화면·명령</th>
               </tr>
             </thead>
             <tbody>
@@ -281,6 +295,13 @@ export function PcsPage() {
                     <td>{pc.agentVersion || '-'}</td>
                     <td>{pc.bundleVersion || '-'}</td>
                     <td>{formatLastSeen(pc.lastSeen)}</td>
+                    <td>
+                      <div className={`device-note-cell${pc.deviceNote ? ' has-note' : ''}`}>
+                        <FileText size={15} aria-hidden="true" />
+                        <span title={pc.deviceNote || undefined}>{pc.deviceNote || '메모 없음'}</span>
+                        {canEditDeviceNote && <button type="button" className="icon-button device-note-edit" onClick={() => setDeviceNoteTargetMac(pc.macAddress)} aria-label={`${pc.pcName} 장치 메모 편집`} title="장치 메모 편집"><Pencil size={14} /></button>}
+                      </div>
+                    </td>
                     <td>
                       {selectable ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
@@ -333,6 +354,7 @@ export function PcsPage() {
       {viewerTarget && <RemoteControlDialog pc={viewerTarget} mode="view" onClose={() => setViewerTarget(null)} />}
       {remoteTarget && <RemoteControlDialog pc={remoteTarget} onClose={() => setRemoteTarget(null)} />}
       {scmateTarget && <ScmateControlDialog pc={scmateTarget} classroomPcs={scmateClassroomPcs} canAct={canScmate} canPerform={(action) => hasPermission(scmatePermission(action))} onClose={() => setScmateTargetMac(null)} />}
+      {deviceNoteTarget && <DeviceNoteDialog pc={deviceNoteTarget} busy={deviceNoteMutation.isPending} onClose={() => setDeviceNoteTargetMac(null)} onSave={(note) => deviceNoteMutation.mutate({ pc: deviceNoteTarget, note })} />}
     </section>
   )
 }
