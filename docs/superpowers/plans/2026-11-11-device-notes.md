@@ -311,4 +311,3 @@ Create a dated KnowledgeHub session note and update the `교실 PC 관리` brief
 2. Confirm editing only in `PC 관리`, with read-only display in the classroom drawer.
 3. Confirm the 500-character limit and exact `218-35` note.
 4. Confirm production rollout uses the reviewed merge and guarded GitHub Actions path, not an ad-hoc NAS edit.
-
