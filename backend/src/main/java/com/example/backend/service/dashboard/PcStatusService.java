@@ -32,6 +32,7 @@ public class PcStatusService {
 
     private static final Logger logger = LoggerFactory.getLogger(PcStatusService.class);
     private static final String BROKEN_PLACEHOLDER_PREFIX = "BROKEN-IP::";
+    private static final int DEVICE_NOTE_MAX_LENGTH = 500;
 
     private final PcMasterRepository pcMasterRepository;
     private final ClassroomResolutionService classroomResolutionService;
@@ -137,6 +138,21 @@ public class PcStatusService {
     }
 
     /**
+     * Update the operational memo without changing PC health or command eligibility.
+     */
+    public PcStatusDto updateDeviceNote(String macAddress, String note) {
+        PcMaster pc = pcMasterRepository.findById(macAddress).orElseThrow(() ->
+                new IllegalArgumentException("PC가 존재하지 않습니다: " + macAddress));
+        String normalized = note == null || note.isBlank() ? null : note.trim();
+        if (normalized != null && normalized.length() > DEVICE_NOTE_MAX_LENGTH) {
+            throw new IllegalArgumentException("장치 메모는 500자 이하여야 합니다.");
+        }
+        pc.setDeviceNote(normalized);
+        pcMasterRepository.save(pc);
+        return toPcStatusDto(pc);
+    }
+
+    /**
      * Create a placeholder PC entry for broken IP addresses
      */
     private PcMaster createBrokenPlaceholderPc(
@@ -232,6 +248,7 @@ public class PcStatusService {
         dto.setBundleVersion(pc.getBundleVersion());
         dto.setSystemBootTimeEpochSeconds(pc.getSystemBootTimeEpochSeconds());
         dto.setBrokenNote(pc.getBrokenNote());
+        dto.setDeviceNote(pc.getDeviceNote());
         dto.setLastSeen(pc.getLastSeen());
         dto.setScmateAvailable(pc.getScmateAvailable());
         dto.setScmateAvailabilityReason(pc.getScmateAvailabilityReason());

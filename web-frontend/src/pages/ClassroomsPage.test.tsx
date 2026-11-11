@@ -124,4 +124,32 @@ describe('ClassroomsPage', () => {
     await waitFor(() => expect(mocks.sendPcCommands).toHaveBeenCalledWith([teacher], 'PCON'))
     expect(mocks.sendRoomCommand).not.toHaveBeenCalled()
   })
+
+  it('shows a device note without changing the PC online state', async () => {
+    const user = userEvent.setup()
+    mocks.getClassroomDashboard.mockResolvedValue({
+      fetchedAt: '2026-11-11T19:00:00+09:00',
+      rooms: [{ groupId: 218, groupName: '218호', onlinePcs: 1, totalPcs: 1, teacherPcStatus: 'OFFLINE', runningCommandCount: 0 }],
+      pcs: [{
+        groupId: 218,
+        macAddress: 'AA:BB:CC:DD:EE:FF',
+        pcName: '218-35',
+        ipAddress: '192.168.218.35',
+        online: true,
+        status: 'ONLINE',
+        role: 'STUDENT',
+        deviceNote: '사용 가능·점검 필요 — HP BIOS 90E 경고',
+      }],
+    })
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '218호 상세 보기' }))
+    const drawer = screen.getByRole('dialog', { name: '218호 상세' })
+    const pcRow = within(drawer).getByText(/35번 · 218-35/).closest('.drawer-pc-row')
+
+    expect(pcRow).not.toBeNull()
+    expect(within(pcRow as HTMLElement).getByText('사용 가능·점검 필요 — HP BIOS 90E 경고')).toBeInTheDocument()
+    expect(within(pcRow as HTMLElement).getByText('온라인')).toBeInTheDocument()
+    expect(within(pcRow as HTMLElement).queryByText('고장')).not.toBeInTheDocument()
+  })
 })

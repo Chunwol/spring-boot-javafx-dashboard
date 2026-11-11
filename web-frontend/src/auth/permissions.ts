@@ -100,9 +100,9 @@ export const FEATURE_PERMISSION_GROUPS: ReadonlyArray<FeaturePermissionGroup> = 
     { value: 'AGENT_DELETE', label: '에이전트 삭제', description: '등록 정보와 토큰을 삭제합니다.' },
     { value: 'AGENT_CONFIG_DOWNLOAD', label: '설정 파일 다운로드', description: '에이전트 config.json을 내려받습니다.' },
   ] },
-  { key: 'broken', label: '고장 PC', options: [
+  { key: 'broken', label: '고장 PC·장치 메모', options: [
     { value: 'BROKEN_PC_VIEW', label: '고장 PC 조회', description: '고장·미사용 PC 목록을 봅니다.' },
-    { value: 'BROKEN_PC_REGISTER_EDIT', label: '고장 등록·사유 수정', description: '고장 PC를 등록하고 사유를 수정합니다.' },
+    { value: 'BROKEN_PC_REGISTER_EDIT', label: '고장 등록·장치 메모 수정', description: '고장 PC를 등록하고, 사용 가능한 PC를 포함한 장치 메모를 수정합니다.' },
     { value: 'BROKEN_PC_CLEAR', label: '고장 상태 해제', description: '고장 또는 미사용 상태를 해제합니다.' },
   ] },
   { key: 'network', label: '네트워크', options: [

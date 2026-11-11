@@ -14,6 +14,10 @@ export function getPcs() {
   return api.get<PcStatus[]>('/dashboard/pcs')
 }
 
+export function updateDeviceNote(macAddress: string, note: string | null) {
+  return api.put<PcStatus>(`/dashboard/pcs/${encodeURIComponent(macAddress)}/note`, { note })
+}
+
 export function sendScmateAction(macAddress: string, action: ScmateAction, recoveryPoint: ScmateRecoveryPoint = 'BASELINE', path?: string) {
   return api.post<{ message?: string; taskId?: number } | undefined>('/scmate/actions', { macAddress, action, recoveryPoint, path })
 }

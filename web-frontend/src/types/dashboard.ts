@@ -25,6 +25,7 @@ export interface PcStatus {
   agentVersion?: string | null
   bundleVersion?: string | null
   brokenNote?: string | null
+  deviceNote?: string | null
   scmateAvailable?: boolean | null
   scmateMode?: 'PROTECTED' | 'OPERATOR' | 'UNKNOWN' | null
   scmateTransitionPending?: boolean | null

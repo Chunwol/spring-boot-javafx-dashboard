@@ -75,6 +75,33 @@ class FeaturePermissionAuthorizationFilterTest {
         verify(chain).doFilter(request, response);
     }
 
+    @Test
+    void deviceNoteEditorCanUpdateADeviceNote() throws Exception {
+        authenticate("PERM_BROKEN_PC_REGISTER_EDIT");
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "PUT", "/api/v1/dashboard/pcs/AA-BB-CC-DD-EE-FF/note");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
+    void pcViewerCannotUpdateADeviceNote() throws Exception {
+        authenticate("PERM_PC_VIEW");
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "PUT", "/api/v1/dashboard/pcs/AA-BB-CC-DD-EE-FF/note");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        verify(chain, never()).doFilter(request, response);
+    }
+
     private void authenticate(String authority) {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 "operator", null, List.of(new SimpleGrantedAuthority(authority))));
