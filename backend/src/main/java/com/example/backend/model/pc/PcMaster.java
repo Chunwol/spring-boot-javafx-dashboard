@@ -70,6 +70,11 @@ public class PcMaster {
     @Column(name = "broken_note")
     private String brokenNote;
 
+    /** 장비 상태와 무관하게 운영자가 남기는 장치 메모 */
+    @Schema(description = "장치 메모")
+    @Column(name = "device_note", length = 500)
+    private String deviceNote;
+
     /** 에이전트 버전 */
     @Schema(description = "설치된 에이전트 버전")
     @Column(name = "agent_version", length = 40)

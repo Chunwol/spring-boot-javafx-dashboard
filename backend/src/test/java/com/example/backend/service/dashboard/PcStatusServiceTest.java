@@ -20,6 +20,7 @@ import com.example.backend.common.exception.ConflictException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,6 +30,55 @@ class PcStatusServiceTest {
     @Mock ClassroomResolutionService classroomResolutionService;
     @Mock ClassroomGroupRepository classroomGroupRepository;
     @InjectMocks PcStatusService pcStatusService;
+
+    @Test
+    void updateDeviceNote_trimsAndMapsNoteWithoutChangingOperationalState() {
+        String macAddress = "AA:BB:CC:DD:EE:FF";
+        PcMaster pc = new PcMaster();
+        pc.setMacAddress(macAddress);
+        pc.setStatus("ONLINE");
+        pc.setBrokenNote(null);
+        when(pcMasterRepository.findById(macAddress)).thenReturn(Optional.of(pc));
+
+        var updated = pcStatusService.updateDeviceNote(macAddress, "  사용 가능·점검 필요  ");
+
+        assertThat(pc.getDeviceNote()).isEqualTo("사용 가능·점검 필요");
+        assertThat(pc.getStatus()).isEqualTo("ONLINE");
+        assertThat(pc.getBrokenNote()).isNull();
+        assertThat(updated.getDeviceNote()).isEqualTo("사용 가능·점검 필요");
+        verify(pcMasterRepository).save(pc);
+    }
+
+    @Test
+    void updateDeviceNote_blankInputClearsNote() {
+        String macAddress = "AA:BB:CC:DD:EE:FF";
+        PcMaster pc = new PcMaster();
+        pc.setMacAddress(macAddress);
+        pc.setDeviceNote("기존 메모");
+        when(pcMasterRepository.findById(macAddress)).thenReturn(Optional.of(pc));
+
+        var updated = pcStatusService.updateDeviceNote(macAddress, "   ");
+
+        assertThat(pc.getDeviceNote()).isNull();
+        assertThat(updated.getDeviceNote()).isNull();
+        verify(pcMasterRepository).save(pc);
+    }
+
+    @Test
+    void updateDeviceNote_rejectsMoreThanFiveHundredCharactersBeforeMutation() {
+        String macAddress = "AA:BB:CC:DD:EE:FF";
+        PcMaster pc = new PcMaster();
+        pc.setMacAddress(macAddress);
+        pc.setDeviceNote("기존 메모");
+        when(pcMasterRepository.findById(macAddress)).thenReturn(Optional.of(pc));
+
+        assertThatThrownBy(() -> pcStatusService.updateDeviceNote(macAddress, "가".repeat(501)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("500자");
+
+        assertThat(pc.getDeviceNote()).isEqualTo("기존 메모");
+        verify(pcMasterRepository, never()).save(pc);
+    }
 
     @Test
     void markPcAsBroken_withSeatNumber_createsPlaceholderAtThatSeat() {

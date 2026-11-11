@@ -48,6 +48,9 @@ public class PcStatusDto {
     @Schema(description = "고장 사유", example = "메인보드 불량")
     private String brokenNote;
 
+    @Schema(description = "장비 상태와 무관한 운영 메모", example = "사용 가능·점검 필요")
+    private String deviceNote;
+
     private Boolean scmateAvailable;
     private String scmateAvailabilityReason;
     private String scmateMode;
